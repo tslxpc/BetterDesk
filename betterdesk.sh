@@ -152,6 +152,7 @@ MAGENTA='\033[0;35m'
 WHITE='\033[1;37m'
 NC='\033[0m' # No Color
 BOLD='\033[1m'
+DIM='\033[2m'
 
 # Logging
 LOG_FILE="/tmp/betterdesk_$(date +%Y%m%d_%H%M%S).log"
@@ -221,7 +222,7 @@ wait_for_service_stop() {
             return 0
         fi
         sleep 1
-        ((elapsed++))
+        elapsed=$((elapsed + 1))
     done
     
     print_warning "Service $service_name did not stop within ${timeout}s"
@@ -294,7 +295,7 @@ verify_service_health() {
                 return 0
             fi
             sleep 1
-            ((elapsed++))
+            elapsed=$((elapsed + 1))
         done
         
         print_error "Service $service_name is running but not listening on port $expected_port"
@@ -1158,8 +1159,14 @@ choose_database_type() {
     echo ""
     echo -e "${WHITE}${BOLD}Select Database Type:${NC}"
     echo ""
-    echo -e "  ${GREEN}1.${NC} SQLite (default, lightweight, no setup required)"
-    echo -e "  ${GREEN}2.${NC} PostgreSQL (recommended for production, better performance)"
+    echo -e "  ${GREEN}1.${NC} SQLite (default)"
+    echo -e "     ${DIM}Single-file database, zero setup. Good for ≤100 devices.${NC}"
+    echo -e "     ${DIM}Data stored in /opt/rustdesk/db_v2.sqlite3${NC}"
+    echo ""
+    echo -e "  ${GREEN}2.${NC} PostgreSQL (production)"
+    echo -e "     ${DIM}Full SQL database with connection pooling. Recommended for${NC}"
+    echo -e "     ${DIM}multi-server setups, >100 devices, or high availability.${NC}"
+    echo -e "     ${DIM}Requires PostgreSQL 14+ (installed automatically if missing).${NC}"
     echo ""
     
     read -p "Choose database type [1]: " db_choice
@@ -1624,11 +1631,13 @@ setup_services() {
     local ssl_dir="$RUSTDESK_PATH/ssl"
     local tls_is_selfsigned=false
     if [ -f "$ssl_dir/betterdesk.crt" ] && [ -f "$ssl_dir/betterdesk.key" ]; then
-        # Check if certificate is self-signed (issuer == subject)
+        # Check if certificate is self-signed (issuer == subject after stripping prefix)
         local cert_issuer cert_subject
-        cert_issuer=$(openssl x509 -in "$ssl_dir/betterdesk.crt" -noout -issuer 2>/dev/null || echo "")
-        cert_subject=$(openssl x509 -in "$ssl_dir/betterdesk.crt" -noout -subject 2>/dev/null || echo "")
-        if [ "$cert_issuer" = "$cert_subject" ] || echo "$cert_subject" | grep -q "O=BetterDesk"; then
+        cert_issuer=$(openssl x509 -in "$ssl_dir/betterdesk.crt" -noout -issuer 2>/dev/null | sed 's/^issuer[= ]*//' || echo "")
+        cert_subject=$(openssl x509 -in "$ssl_dir/betterdesk.crt" -noout -subject 2>/dev/null | sed 's/^subject[= ]*//' || echo "")
+        if [ -n "$cert_issuer" ] && [ "$cert_issuer" = "$cert_subject" ]; then
+            tls_is_selfsigned=true
+        elif echo "$cert_subject" | grep -qi "BetterDesk"; then
             tls_is_selfsigned=true
         fi
         
@@ -1887,8 +1896,33 @@ do_install() {
     
     start_services
     
+    # Post-install verification: confirm services are actually running
+    local install_ok=true
+    sleep 2
+    
+    local go_state
+    go_state=$(systemctl show betterdesk-server --property=ActiveState --value 2>/dev/null || echo "unknown")
+    if [ "$go_state" != "active" ]; then
+        print_error "betterdesk-server is $go_state (expected: active)"
+        print_info "Debug: journalctl -u betterdesk-server -n 30 --no-pager"
+        install_ok=false
+    fi
+    
+    local console_state
+    console_state=$(systemctl show betterdesk-console --property=ActiveState --value 2>/dev/null || echo "unknown")
+    if [ "$console_state" != "active" ]; then
+        print_warning "betterdesk-console is $console_state (expected: active)"
+        print_info "Debug: journalctl -u betterdesk-console -n 30 --no-pager"
+        install_ok=false
+    fi
+    
     echo ""
-    print_success "Installation completed successfully!"
+    if [ "$install_ok" = true ]; then
+        print_success "Installation completed successfully!"
+    else
+        print_warning "Installation finished but some services are not running."
+        print_info "Run option 8 (Diagnostics) to investigate."
+    fi
     echo ""
     
     local server_ip
@@ -2191,7 +2225,7 @@ do_validate() {
         echo -e "${GREEN}✓${NC}"
     else
         echo -e "${RED}✗ Not found${NC}"
-        ((errors++))
+        errors=$((errors + 1))
     fi
     
     echo -n "  Console directory ($CONSOLE_PATH): "
@@ -2199,7 +2233,7 @@ do_validate() {
         echo -e "${GREEN}✓${NC}"
     else
         echo -e "${RED}✗ Not found${NC}"
-        ((errors++))
+        errors=$((errors + 1))
     fi
     
     # Check Go server binary
@@ -2208,10 +2242,10 @@ do_validate() {
         echo -e "${GREEN}✓ Single binary (signal + relay + API)${NC}"
     elif [ -x "$RUSTDESK_PATH/hbbs" ] && [ -x "$RUSTDESK_PATH/hbbr" ]; then
         echo -e "${YELLOW}! Legacy Rust binaries (consider upgrading to Go)${NC}"
-        ((warnings++))
+        warnings=$((warnings + 1))
     else
         echo -e "${RED}✗ Not found or missing permissions${NC}"
-        ((errors++))
+        errors=$((errors + 1))
     fi
     
     # Check database
@@ -2233,18 +2267,18 @@ do_validate() {
                 echo -e "${GREEN}✓${NC}"
             else
                 echo -e "${YELLOW}! Empty or not found (will be created on first start)${NC}"
-                ((warnings++))
+                warnings=$((warnings + 1))
             fi
             echo -n "    - Table users: "
             if PGCONNECT_TIMEOUT=3 psql "$pg_uri" -c "SELECT 1 FROM users LIMIT 1" &>/dev/null 2>&1; then
                 echo -e "${GREEN}✓${NC}"
             else
                 echo -e "${YELLOW}! Empty or not found (will be created on first start)${NC}"
-                ((warnings++))
+                warnings=$((warnings + 1))
             fi
         else
             echo -e "${RED}✗ PostgreSQL connection failed${NC}"
-            ((errors++))
+            errors=$((errors + 1))
         fi
     elif [ -f "$DB_PATH" ]; then
         echo -e "${GREEN}✓ SQLite${NC}"
@@ -2255,10 +2289,10 @@ do_validate() {
             echo -e "${GREEN}✓${NC}"
         elif sqlite3 "$DB_PATH" "SELECT 1 FROM peer LIMIT 1" 2>/dev/null; then
             echo -e "${YELLOW}! Legacy schema (peer)${NC}"
-            ((warnings++))
+            warnings=$((warnings + 1))
         else
             echo -e "${YELLOW}! Empty or not found (will be created on first start)${NC}"
-            ((warnings++))
+            warnings=$((warnings + 1))
         fi
         
         echo -n "    - Table users: "
@@ -2266,16 +2300,16 @@ do_validate() {
             echo -e "${GREEN}✓${NC}"
         else
             echo -e "${YELLOW}! Empty or not found (will be created on first start)${NC}"
-            ((warnings++))
+            warnings=$((warnings + 1))
         fi
     else
         # Check if Go server is running — it creates the DB on start
         if systemctl is-active --quiet betterdesk-server 2>/dev/null; then
             echo -e "${YELLOW}! SQLite file not yet created (server running, will create on first connection)${NC}"
-            ((warnings++))
+            warnings=$((warnings + 1))
         else
             echo -e "${RED}✗ Not found (will be created when server starts)${NC}"
-            ((errors++))
+            errors=$((errors + 1))
         fi
     fi
     
@@ -2285,7 +2319,7 @@ do_validate() {
         echo -e "${GREEN}✓${NC}"
     else
         echo -e "${YELLOW}! Will be generated on first start${NC}"
-        ((warnings++))
+        warnings=$((warnings + 1))
     fi
     
     # Check services
@@ -2299,10 +2333,10 @@ do_validate() {
         echo -e "${GREEN}● Active (signal + relay + API)${NC}"
     elif systemctl is-enabled --quiet betterdesk-server 2>/dev/null; then
         echo -e "${YELLOW}○ Enabled but inactive${NC}"
-        ((warnings++))
+        warnings=$((warnings + 1))
     elif systemctl list-unit-files betterdesk-server.service &>/dev/null 2>&1; then
         echo -e "${RED}○ Disabled${NC}"
-        ((errors++))
+        errors=$((errors + 1))
     else
         # Check legacy Rust services
         echo -e "${CYAN}Not installed${NC}"
@@ -2313,10 +2347,10 @@ do_validate() {
                 echo -e "${GREEN}● Active${NC}"
             elif systemctl is-enabled --quiet "$service" 2>/dev/null; then
                 echo -e "${YELLOW}○ Enabled but inactive${NC}"
-                ((warnings++))
+                warnings=$((warnings + 1))
             else
                 echo -e "${RED}○ Disabled${NC}"
-                ((errors++))
+                errors=$((errors + 1))
             fi
         done
     fi
@@ -2328,10 +2362,10 @@ do_validate() {
         echo -e "${GREEN}● Active (legacy name)${NC}"
     elif systemctl is-enabled --quiet betterdesk-console 2>/dev/null; then
         echo -e "${YELLOW}○ Enabled but inactive${NC}"
-        ((warnings++))
+        warnings=$((warnings + 1))
     else
         echo -e "${RED}○ Disabled${NC}"
-        ((errors++))
+        errors=$((errors + 1))
     fi
     
     # Check ports
@@ -2346,7 +2380,7 @@ do_validate() {
             echo -e "${GREEN}● Listening${NC}${pname:+ ($pname)}"
         else
             echo -e "${YELLOW}○ Free${NC}"
-            ((warnings++))
+            warnings=$((warnings + 1))
         fi
     done
     
@@ -2656,14 +2690,14 @@ configure_firewall_rules() {
         print_info "Configuring UFW firewall rules..."
         
         for port in $required_ports; do
-            ((total++))
+            total=$((total + 1))
             if ! ufw status 2>/dev/null | grep -qE "^${port}[/ ]"; then
                 if [ "$port" = "21116" ]; then
-                    ufw allow 21116/tcp comment "BetterDesk ID Server TCP" 2>/dev/null && ((created++))
-                    ufw allow 21116/udp comment "BetterDesk ID Server UDP" 2>/dev/null && ((created++))
-                    ((total++))
+                    ufw allow 21116/tcp comment "BetterDesk ID Server TCP" 2>/dev/null && created=$((created + 1))
+                    ufw allow 21116/udp comment "BetterDesk ID Server UDP" 2>/dev/null && created=$((created + 1))
+                    total=$((total + 1))
                 else
-                    ufw allow "${port}/tcp" comment "BetterDesk port ${port}" 2>/dev/null && ((created++))
+                    ufw allow "${port}/tcp" comment "BetterDesk port ${port}" 2>/dev/null && created=$((created + 1))
                 fi
             fi
         done
@@ -2674,15 +2708,15 @@ configure_firewall_rules() {
         print_info "Configuring firewalld rules..."
         
         for port in $required_ports; do
-            ((total++))
+            total=$((total + 1))
             local open_ports=$(firewall-cmd --list-ports 2>/dev/null)
             if ! echo "$open_ports" | grep -qE "${port}/tcp"; then
                 if [ "$port" = "21116" ]; then
-                    firewall-cmd --permanent --add-port=21116/tcp 2>/dev/null && ((created++))
-                    firewall-cmd --permanent --add-port=21116/udp 2>/dev/null && ((created++))
-                    ((total++))
+                    firewall-cmd --permanent --add-port=21116/tcp 2>/dev/null && created=$((created + 1))
+                    firewall-cmd --permanent --add-port=21116/udp 2>/dev/null && created=$((created + 1))
+                    total=$((total + 1))
                 else
-                    firewall-cmd --permanent --add-port="${port}/tcp" 2>/dev/null && ((created++))
+                    firewall-cmd --permanent --add-port="${port}/tcp" 2>/dev/null && created=$((created + 1))
                 fi
             fi
         done
@@ -2693,14 +2727,14 @@ configure_firewall_rules() {
         print_info "Configuring iptables rules..."
         
         for port in $required_ports; do
-            ((total++))
+            total=$((total + 1))
             if ! iptables -L INPUT -n 2>/dev/null | grep -qE "dpt:${port}\b"; then
                 if [ "$port" = "21116" ]; then
-                    iptables -A INPUT -p tcp --dport 21116 -j ACCEPT 2>/dev/null && ((created++))
-                    iptables -A INPUT -p udp --dport 21116 -j ACCEPT 2>/dev/null && ((created++))
-                    ((total++))
+                    iptables -A INPUT -p tcp --dport 21116 -j ACCEPT 2>/dev/null && created=$((created + 1))
+                    iptables -A INPUT -p udp --dport 21116 -j ACCEPT 2>/dev/null && created=$((created + 1))
+                    total=$((total + 1))
                 else
-                    iptables -A INPUT -p tcp --dport "$port" -j ACCEPT 2>/dev/null && ((created++))
+                    iptables -A INPUT -p tcp --dport "$port" -j ACCEPT 2>/dev/null && created=$((created + 1))
                 fi
             fi
         done
@@ -2818,7 +2852,7 @@ do_diagnostics() {
                 echo -e "${GREEN}OK - $process_name${NC}"
             elif [ -n "$process_name" ]; then
                 echo -e "${RED}CONFLICT - used by $process_name${NC}"
-                ((port_issues++))
+                port_issues=$((port_issues + 1))
             else
                 echo -e "${GREEN}LISTENING${NC}"
             fi
@@ -2854,7 +2888,7 @@ do_diagnostics() {
                 echo -e "${GREEN}ALLOWED${NC}"
             else
                 echo -e "${RED}NO RULE${NC}"
-                ((missing_rules++))
+                missing_rules=$((missing_rules + 1))
             fi
         done
         
@@ -2870,7 +2904,7 @@ do_diagnostics() {
                 echo -e "${GREEN}ALLOWED${NC}"
             else
                 echo -e "${RED}NO RULE${NC}"
-                ((missing_rules++))
+                missing_rules=$((missing_rules + 1))
             fi
         done
         
@@ -2885,7 +2919,7 @@ do_diagnostics() {
                 echo -e "${GREEN}ALLOWED${NC}"
             else
                 echo -e "${RED}NO RULE / CHECK MANUALLY${NC}"
-                ((missing_rules++))
+                missing_rules=$((missing_rules + 1))
             fi
         done
     else

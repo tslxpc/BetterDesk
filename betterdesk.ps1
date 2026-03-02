@@ -827,8 +827,16 @@ function Choose-DatabaseType {
     Write-Host ""
     Write-Host "Select Database Type:" -ForegroundColor White
     Write-Host ""
-    Write-Host "  1. SQLite (default, lightweight, no setup required)" -ForegroundColor Green
-    Write-Host "  2. PostgreSQL (recommended for production, better performance)" -ForegroundColor Green
+    Write-Host "  1. SQLite (default)" -ForegroundColor Green
+    Write-Host "     Single-file database, zero setup. Good for " -ForegroundColor DarkGray -NoNewline
+    Write-Host ([char]0x2264) -NoNewline -ForegroundColor DarkGray
+    Write-Host "100 devices." -ForegroundColor DarkGray
+    Write-Host "     Data stored in $RUSTDESK_PATH\db_v2.sqlite3" -ForegroundColor DarkGray
+    Write-Host ""
+    Write-Host "  2. PostgreSQL (production)" -ForegroundColor Green
+    Write-Host "     Full SQL database with connection pooling. Recommended for" -ForegroundColor DarkGray
+    Write-Host "     multi-server setups, >100 devices, or high availability." -ForegroundColor DarkGray
+    Write-Host "     Requires PostgreSQL 14+ (installed automatically if missing)." -ForegroundColor DarkGray
     Write-Host ""
     
     $dbChoice = Read-Host "Choose database type [1]"

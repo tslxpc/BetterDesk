@@ -970,7 +970,7 @@ do_validate() {
         echo -e "${GREEN}✓ Running${NC}"
     else
         echo -e "${RED}✗ Not running${NC}"
-        ((errors++))
+        errors=$((errors + 1))
     fi
     
     echo -n "  Docker Compose: "
@@ -978,7 +978,7 @@ do_validate() {
         echo -e "${GREEN}✓ Available${NC}"
     else
         echo -e "${RED}✗ Not found${NC}"
-        ((errors++))
+        errors=$((errors + 1))
     fi
     
     # Check images
@@ -992,7 +992,7 @@ do_validate() {
             echo -e "${GREEN}✓ Built${NC}"
         else
             echo -e "${RED}✗ Not found${NC}"
-            ((errors++))
+            errors=$((errors + 1))
         fi
     done
     
@@ -1008,7 +1008,7 @@ do_validate() {
         echo -e "${GREEN}● Running${NC}"
     else
         echo -e "${RED}○ Stopped${NC}"
-        ((errors++))
+        errors=$((errors + 1))
     fi
     
     echo -n "  Console: "
@@ -1016,7 +1016,7 @@ do_validate() {
         echo -e "${GREEN}● Running${NC}"
     else
         echo -e "${RED}○ Stopped${NC}"
-        ((errors++))
+        errors=$((errors + 1))
     fi
     
     # Check data
@@ -1029,7 +1029,7 @@ do_validate() {
         echo -e "${GREEN}✓ Exists${NC}"
     else
         echo -e "${RED}✗ Not found${NC}"
-        ((errors++))
+        errors=$((errors + 1))
     fi
     
     echo -n "  Database: "
@@ -1037,7 +1037,7 @@ do_validate() {
         echo -e "${GREEN}✓ Exists${NC}"
     else
         echo -e "${YELLOW}! Will be created on first start${NC}"
-        ((warnings++))
+        warnings=$((warnings + 1))
     fi
     
     # Check ports
@@ -1051,7 +1051,7 @@ do_validate() {
             echo -e "${GREEN}● Listening${NC}"
         else
             echo -e "${YELLOW}○ Free${NC}"
-            ((warnings++))
+            warnings=$((warnings + 1))
         fi
     done
     
@@ -1267,14 +1267,14 @@ configure_firewall_rules() {
         print_info "Configuring UFW firewall rules..."
 
         for port in $required_ports; do
-            ((total++))
+            total=$((total + 1))
             if ! ufw status 2>/dev/null | grep -qE "^${port}[/ ]"; then
                 if [ "$port" = "21116" ]; then
-                    ufw allow 21116/tcp comment "BetterDesk ID Server TCP" 2>/dev/null && ((created++))
-                    ufw allow 21116/udp comment "BetterDesk ID Server UDP" 2>/dev/null && ((created++))
-                    ((total++))
+                    ufw allow 21116/tcp comment "BetterDesk ID Server TCP" 2>/dev/null && created=$((created + 1))
+                    ufw allow 21116/udp comment "BetterDesk ID Server UDP" 2>/dev/null && created=$((created + 1))
+                    total=$((total + 1))
                 else
-                    ufw allow "${port}/tcp" comment "BetterDesk port ${port}" 2>/dev/null && ((created++))
+                    ufw allow "${port}/tcp" comment "BetterDesk port ${port}" 2>/dev/null && created=$((created + 1))
                 fi
             fi
         done
@@ -1285,15 +1285,15 @@ configure_firewall_rules() {
         print_info "Configuring firewalld rules..."
 
         for port in $required_ports; do
-            ((total++))
+            total=$((total + 1))
             local open_ports=$(firewall-cmd --list-ports 2>/dev/null)
             if ! echo "$open_ports" | grep -qE "${port}/tcp"; then
                 if [ "$port" = "21116" ]; then
-                    firewall-cmd --permanent --add-port=21116/tcp 2>/dev/null && ((created++))
-                    firewall-cmd --permanent --add-port=21116/udp 2>/dev/null && ((created++))
-                    ((total++))
+                    firewall-cmd --permanent --add-port=21116/tcp 2>/dev/null && created=$((created + 1))
+                    firewall-cmd --permanent --add-port=21116/udp 2>/dev/null && created=$((created + 1))
+                    total=$((total + 1))
                 else
-                    firewall-cmd --permanent --add-port="${port}/tcp" 2>/dev/null && ((created++))
+                    firewall-cmd --permanent --add-port="${port}/tcp" 2>/dev/null && created=$((created + 1))
                 fi
             fi
         done
@@ -1304,14 +1304,14 @@ configure_firewall_rules() {
         print_info "Configuring iptables rules..."
 
         for port in $required_ports; do
-            ((total++))
+            total=$((total + 1))
             if ! iptables -L INPUT -n 2>/dev/null | grep -qE "dpt:${port}\b"; then
                 if [ "$port" = "21116" ]; then
-                    iptables -A INPUT -p tcp --dport 21116 -j ACCEPT 2>/dev/null && ((created++))
-                    iptables -A INPUT -p udp --dport 21116 -j ACCEPT 2>/dev/null && ((created++))
-                    ((total++))
+                    iptables -A INPUT -p tcp --dport 21116 -j ACCEPT 2>/dev/null && created=$((created + 1))
+                    iptables -A INPUT -p udp --dport 21116 -j ACCEPT 2>/dev/null && created=$((created + 1))
+                    total=$((total + 1))
                 else
-                    iptables -A INPUT -p tcp --dport "$port" -j ACCEPT 2>/dev/null && ((created++))
+                    iptables -A INPUT -p tcp --dport "$port" -j ACCEPT 2>/dev/null && created=$((created + 1))
                 fi
             fi
         done
@@ -1424,7 +1424,7 @@ do_diagnostics() {
                 echo -e "${GREEN}OK${NC}"
             else
                 echo -e "${RED}CONFLICT - used by $process_name${NC}"
-                ((port_issues++))
+                port_issues=$((port_issues + 1))
             fi
         else
             echo -e "${YELLOW}NOT LISTENING${NC}"
@@ -1458,7 +1458,7 @@ do_diagnostics() {
                 echo -e "${GREEN}ALLOWED${NC}"
             else
                 echo -e "${RED}NO RULE${NC}"
-                ((missing_rules++))
+                missing_rules=$((missing_rules + 1))
             fi
         done
 
@@ -1474,7 +1474,7 @@ do_diagnostics() {
                 echo -e "${GREEN}ALLOWED${NC}"
             else
                 echo -e "${RED}NO RULE${NC}"
-                ((missing_rules++))
+                missing_rules=$((missing_rules + 1))
             fi
         done
 
@@ -1489,7 +1489,7 @@ do_diagnostics() {
                 echo -e "${GREEN}ALLOWED${NC}"
             else
                 echo -e "${RED}NO RULE / CHECK MANUALLY${NC}"
-                ((missing_rules++))
+                missing_rules=$((missing_rules + 1))
             fi
         done
     else
