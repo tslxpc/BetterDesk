@@ -23,9 +23,9 @@ router.get('/users', requireAuth, requireAdmin, (req, res) => {
 /**
  * GET /api/users - Get all users (admin only)
  */
-router.get('/api/users', requireAuth, requireAdmin, (req, res) => {
+router.get('/api/users', requireAuth, requireAdmin, async (req, res) => {
     try {
-        const users = db.getAllUsers();
+        const users = await db.getAllUsers();
         
         // Remove sensitive data
         const safeUsers = users.map(u => ({
@@ -76,7 +76,7 @@ router.post('/api/users', requireAuth, requireAdmin, passwordChangeLimiter, asyn
         }
         
         // Check username uniqueness
-        const existingUser = db.getUserByUsername(username);
+        const existingUser = await db.getUserByUsername(username);
         if (existingUser) {
             return res.status(400).json({
                 success: false,
@@ -102,10 +102,10 @@ router.post('/api/users', requireAuth, requireAdmin, passwordChangeLimiter, asyn
         const passwordHash = await authService.hashPassword(password);
         
         // Create user
-        const result = db.createUser(username, passwordHash, userRole);
+        const result = await db.createUser(username, passwordHash, userRole);
         
         // Log action
-        db.logAction(req.session.userId, 'user_created', `Created user: ${username} (${userRole})`, req.ip);
+        await db.logAction(req.session.userId, 'user_created', `Created user: ${username} (${userRole})`, req.ip);
         
         res.json({
             success: true,
@@ -135,7 +135,7 @@ router.patch('/api/users/:id', requireAuth, requireAdmin, async (req, res) => {
         }
         const { role, password } = req.body;
         
-        const user = db.getUserById(userId);
+        const user = await db.getUserById(userId);
         if (!user) {
             return res.status(404).json({
                 success: false,
@@ -160,7 +160,7 @@ router.patch('/api/users/:id', requireAuth, requireAdmin, async (req, res) => {
                     error: req.t('users.invalid_role')
                 });
             }
-            db.updateUserRole(userId, role);
+            await db.updateUserRole(userId, role);
         }
         
         // Update password if provided
@@ -175,11 +175,11 @@ router.patch('/api/users/:id', requireAuth, requireAdmin, async (req, res) => {
             }
             
             const passwordHash = await authService.hashPassword(password);
-            db.updateUserPassword(userId, passwordHash);
+            await db.updateUserPassword(userId, passwordHash);
         }
         
         // Log action
-        db.logAction(req.session.userId, 'user_updated', `Updated user: ${user.username}`, req.ip);
+        await db.logAction(req.session.userId, 'user_updated', `Updated user: ${user.username}`, req.ip);
         
         res.json({ success: true });
     } catch (err) {
@@ -194,14 +194,14 @@ router.patch('/api/users/:id', requireAuth, requireAdmin, async (req, res) => {
 /**
  * DELETE /api/users/:id - Delete user (admin only)
  */
-router.delete('/api/users/:id', requireAuth, requireAdmin, (req, res) => {
+router.delete('/api/users/:id', requireAuth, requireAdmin, async (req, res) => {
     try {
         const userId = parseInt(req.params.id, 10);
         if (isNaN(userId) || userId <= 0) {
             return res.status(400).json({ success: false, error: 'Invalid user ID' });
         }
         
-        const user = db.getUserById(userId);
+        const user = await db.getUserById(userId);
         if (!user) {
             return res.status(404).json({
                 success: false,
@@ -218,7 +218,7 @@ router.delete('/api/users/:id', requireAuth, requireAdmin, (req, res) => {
         }
         
         // Ensure at least one admin remains
-        const adminCount = db.countAdmins();
+        const adminCount = await db.countAdmins();
         if (user.role === 'admin' && adminCount <= 1) {
             return res.status(400).json({
                 success: false,
@@ -226,10 +226,10 @@ router.delete('/api/users/:id', requireAuth, requireAdmin, (req, res) => {
             });
         }
         
-        db.deleteUser(userId);
+        await db.deleteUser(userId);
         
         // Log action
-        db.logAction(req.session.userId, 'user_deleted', `Deleted user: ${user.username}`, req.ip);
+        await db.logAction(req.session.userId, 'user_deleted', `Deleted user: ${user.username}`, req.ip);
         
         res.json({ success: true });
     } catch (err) {
@@ -252,7 +252,7 @@ router.post('/api/users/:id/reset-password', requireAuth, requireAdmin, password
         }
         const { newPassword } = req.body;
         
-        const user = db.getUserById(userId);
+        const user = await db.getUserById(userId);
         if (!user) {
             return res.status(404).json({
                 success: false,
@@ -277,10 +277,10 @@ router.post('/api/users/:id/reset-password', requireAuth, requireAdmin, password
         }
         
         const passwordHash = await authService.hashPassword(newPassword);
-        db.updateUserPassword(userId, passwordHash);
+        await db.updateUserPassword(userId, passwordHash);
         
         // Log action
-        db.logAction(req.session.userId, 'password_reset', `Reset password for user: ${user.username}`, req.ip);
+        await db.logAction(req.session.userId, 'password_reset', `Reset password for user: ${user.username}`, req.ip);
         
         res.json({ success: true });
     } catch (err) {

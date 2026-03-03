@@ -76,7 +76,7 @@ router.get('/api/devices/:id', requireAuth, async (req, res) => {
 
         // Enrich with sysinfo data (from peer_sysinfo table)
         try {
-            const sysinfo = db.getPeerSysinfo(req.params.id);
+            const sysinfo = await db.getPeerSysinfo(req.params.id);
             if (sysinfo) {
                 device.sysinfo = sysinfo;
             }
@@ -86,7 +86,7 @@ router.get('/api/devices/:id', requireAuth, async (req, res) => {
 
         // Enrich with latest heartbeat metrics
         try {
-            const latestMetric = db.getLatestPeerMetric(req.params.id);
+            const latestMetric = await db.getLatestPeerMetric(req.params.id);
             if (latestMetric) {
                 device.metrics = {
                     cpu_usage: latestMetric.cpu_usage,
@@ -101,7 +101,7 @@ router.get('/api/devices/:id', requireAuth, async (req, res) => {
 
         // Enrich with recent metrics history (last 20 data-points for charts)
         try {
-            const metricsHistory = db.getPeerMetrics(req.params.id, 20);
+            const metricsHistory = await db.getPeerMetrics(req.params.id, 20);
             if (metricsHistory && metricsHistory.length > 0) {
                 device.metrics_history = metricsHistory.map(m => ({
                     cpu: m.cpu_usage,
@@ -116,7 +116,7 @@ router.get('/api/devices/:id', requireAuth, async (req, res) => {
 
         // Enrich with device group memberships
         try {
-            const groups = db.getDeviceGroupsForPeer(req.params.id);
+            const groups = await db.getDeviceGroupsForPeer(req.params.id);
             if (groups && groups.length > 0) {
                 device.groups = groups;
             }
@@ -157,7 +157,7 @@ router.patch('/api/devices/:id', requireAuth, requireRole('operator'), async (re
         const result = await serverBackend.updateDevice(id, { user, note });
         
         // Log action
-        db.logAction(req.session.userId, 'device_updated', `Device ${id} updated`, req.ip);
+        await db.logAction(req.session.userId, 'device_updated', `Device ${id} updated`, req.ip);
         
         res.json({
             success: true,
@@ -190,7 +190,7 @@ router.delete('/api/devices/:id', requireAuth, requireRole('operator'), async (r
         await serverBackend.deleteDevice(id);
         
         // Log action
-        db.logAction(req.session.userId, 'device_deleted', `Device ${id} deleted`, req.ip);
+        await db.logAction(req.session.userId, 'device_deleted', `Device ${id} deleted`, req.ip);
         
         res.json({ success: true });
     } catch (err) {
@@ -221,7 +221,7 @@ router.post('/api/devices/:id/ban', requireAuth, requireRole('operator'), async 
         await serverBackend.setBanStatus(id, true, reason || '');
         
         // Log action
-        db.logAction(req.session.userId, 'device_banned', `Device ${id} banned: ${reason}`, req.ip);
+        await db.logAction(req.session.userId, 'device_banned', `Device ${id} banned: ${reason}`, req.ip);
         
         res.json({ success: true });
     } catch (err) {
@@ -251,7 +251,7 @@ router.post('/api/devices/:id/unban', requireAuth, requireRole('operator'), asyn
         await serverBackend.setBanStatus(id, false);
         
         // Log action
-        db.logAction(req.session.userId, 'device_unbanned', `Device ${id} unbanned`, req.ip);
+        await db.logAction(req.session.userId, 'device_unbanned', `Device ${id} unbanned`, req.ip);
         
         res.json({ success: true });
     } catch (err) {
@@ -306,7 +306,7 @@ router.post('/api/devices/:id/change-id', requireAuth, requireRole('operator'), 
         }
         
         // Log action
-        db.logAction(req.session.userId, 'device_id_changed', `Device ID changed from ${oldId} to ${newId}`, req.ip);
+        await db.logAction(req.session.userId, 'device_id_changed', `Device ID changed from ${oldId} to ${newId}`, req.ip);
         
         res.json({ success: true });
     } catch (err) {
@@ -366,7 +366,7 @@ router.put('/api/devices/:id/tags', requireAuth, requireRole('operator'), async 
         // Note: in rustdesk mode, tags are not supported (no-op)
 
         // Log action
-        db.logAction(req.session.userId, 'device_tags_updated', `Device ${id} tags set to [${cleaned.join(', ')}]`, req.ip);
+        await db.logAction(req.session.userId, 'device_tags_updated', `Device ${id} tags set to [${cleaned.join(', ')}]`, req.ip);
 
         res.json({
             success: true,
@@ -403,7 +403,7 @@ router.post('/api/devices/bulk-delete', requireAuth, requireRole('operator'), as
         }
         
         // Log action
-        db.logAction(req.session.userId, 'devices_bulk_deleted', `${deleted} devices deleted`, req.ip);
+        await db.logAction(req.session.userId, 'devices_bulk_deleted', `${deleted} devices deleted`, req.ip);
         
         res.json({
             success: true,

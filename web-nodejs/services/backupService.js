@@ -32,15 +32,15 @@ async function createBackup() {
     const timestamp = new Date().toISOString();
 
     // --- Console local data ---
-    const settings = db.getAllSettings();
+    const settings = await db.getAllSettings();
     const branding = brandingService.getBranding();
     const users = authDb.prepare(
         'SELECT id, username, password_hash, role, created_at, last_login, totp_enabled FROM users'
     ).all();
-    const folders = db.getAllFolders();
-    const userGroups = db.getAllUserGroups();
-    const deviceGroups = db.getAllDeviceGroups();
-    const strategies = db.getAllStrategies();
+    const folders = await db.getAllFolders();
+    const userGroups = await db.getAllUserGroups();
+    const deviceGroups = await db.getAllDeviceGroups();
+    const strategies = await db.getAllStrategies();
 
     // Address books (per-user)
     const addressBooks = authDb.prepare(
@@ -139,7 +139,7 @@ function validateBackup(data) {
  * @param {boolean} options.restoreAddressBooks - Restore address books (default true)
  * @returns {{ restored: string[], skipped: string[], warnings: string[] }}
  */
-function restoreBackup(data, options = {}) {
+async function restoreBackup(data, options = {}) {
     const {
         restoreSettings = true,
         restoreBranding = true,
@@ -157,7 +157,7 @@ function restoreBackup(data, options = {}) {
         try {
             const settings = data.console.settings;
             for (const [key, value] of Object.entries(settings)) {
-                db.setSetting(key, value);
+                await db.setSetting(key, value);
             }
             result.restored.push('settings');
         } catch (err) {
@@ -209,17 +209,14 @@ function restoreBackup(data, options = {}) {
     // --- Folders ---
     if (restoreFolders && Array.isArray(data.console.folders)) {
         try {
-            const mainDb = db.getDb();
-            const tx = mainDb.transaction(() => {
-                // Merge: insert folders that don't exist
-                const existing = new Set(db.getAllFolders().map(f => f.name));
-                for (const f of data.console.folders) {
-                    if (!existing.has(f.name)) {
-                        db.createFolder(f.name, f.color || '#6366f1', f.icon || 'folder');
-                    }
+            // Merge: insert folders that don't exist
+            const existingFolders = await db.getAllFolders();
+            const existing = new Set(existingFolders.map(f => f.name));
+            for (const f of data.console.folders) {
+                if (!existing.has(f.name)) {
+                    await db.createFolder(f.name, f.color || '#6366f1', f.icon || 'folder');
                 }
-            });
-            tx();
+            }
             result.restored.push('folders');
         } catch (err) {
             result.warnings.push(`Folders restore failed: ${err.message}`);
@@ -231,7 +228,7 @@ function restoreBackup(data, options = {}) {
     // --- User Groups + Device Groups + Strategies ---
     if (restoreGroups) {
         try {
-            restoreGroupsData(data.console, result);
+            await restoreGroupsData(data.console, result);
             result.restored.push('groups');
         } catch (err) {
             result.warnings.push(`Groups restore failed: ${err.message}`);
@@ -245,7 +242,7 @@ function restoreBackup(data, options = {}) {
         try {
             for (const ab of data.console.addressBooks) {
                 if (ab.user_id && ab.ab_type) {
-                    db.saveAddressBook(ab.user_id, ab.ab_type, ab.data || '{}');
+                    await db.saveAddressBook(ab.user_id, ab.ab_type, ab.data || '{}');
                 }
             }
             result.restored.push('addressBooks');
@@ -262,16 +259,16 @@ function restoreBackup(data, options = {}) {
 /**
  * Restore user groups, device groups and strategies (merge, don't duplicate).
  */
-function restoreGroupsData(consoleData, result) {
+async function restoreGroupsData(consoleData, result) {
     const authDb = db.getAuthDb();
 
     // User groups
     if (Array.isArray(consoleData.userGroups)) {
-        const existing = new Set(db.getAllUserGroups().map(g => g.guid));
+        const existing = new Set((await db.getAllUserGroups()).map(g => g.guid));
         for (const g of consoleData.userGroups) {
             if (g.guid && !existing.has(g.guid)) {
                 try {
-                    db.createUserGroup({ guid: g.guid, name: g.name, note: g.note || '' });
+                    await db.createUserGroup({ guid: g.guid, name: g.name, note: g.note || '' });
                 } catch { /* duplicate guid — skip */ }
             }
         }
@@ -279,11 +276,11 @@ function restoreGroupsData(consoleData, result) {
 
     // Device groups
     if (Array.isArray(consoleData.deviceGroups)) {
-        const existing = new Set(db.getAllDeviceGroups().map(g => g.guid));
+        const existing = new Set((await db.getAllDeviceGroups()).map(g => g.guid));
         for (const g of consoleData.deviceGroups) {
             if (g.guid && !existing.has(g.guid)) {
                 try {
-                    db.createDeviceGroup({ guid: g.guid, name: g.name, note: g.note || '' });
+                    await db.createDeviceGroup({ guid: g.guid, name: g.name, note: g.note || '' });
                 } catch { /* duplicate guid — skip */ }
             }
         }
@@ -291,11 +288,11 @@ function restoreGroupsData(consoleData, result) {
 
     // Strategies
     if (Array.isArray(consoleData.strategies)) {
-        const existing = new Set(db.getAllStrategies().map(s => s.guid));
+        const existing = new Set((await db.getAllStrategies()).map(s => s.guid));
         for (const s of consoleData.strategies) {
             if (s.guid && !existing.has(s.guid)) {
                 try {
-                    db.createStrategy({
+                    await db.createStrategy({
                         guid: s.guid,
                         name: s.name,
                         user_group_guid: s.user_group_guid || '',
@@ -313,7 +310,7 @@ function restoreGroupsData(consoleData, result) {
  * Get size estimate for a backup (useful for UI info).
  * @returns {{ tables: Object<string, number>, totalRows: number }}
  */
-function getBackupStats() {
+async function getBackupStats() {
     const authDb = db.getAuthDb();
 
     return {

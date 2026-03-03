@@ -39,15 +39,15 @@ function extractBearerToken(req) {
 /**
  * Lightweight device auth — bearer token OR X-Device-Id header.
  */
-function identifyDevice(req, res, next) {
+async function identifyDevice(req, res, next) {
     const token = extractBearerToken(req);
     if (token) {
         try {
-            const tokenRow = db.getAccessToken(token);
+            const tokenRow = await db.getAccessToken(token);
             if (tokenRow) {
                 req.deviceId = tokenRow.client_id || null;
                 req.deviceToken = tokenRow;
-                db.touchAccessToken(token);
+                await db.touchAccessToken(token);
                 return next();
             }
         } catch (_) { /* ignored */ }
@@ -146,10 +146,10 @@ router.get('/', requireAdmin, async (req, res) => {
         const summaries = await adapter.getAllActivitySummaries({ from, to });
 
         // Enrich with peer info
-        const enriched = summaries.map(s => {
+        const enriched = await Promise.all(summaries.map(async s => {
             let hostname = s.device_id;
             try {
-                const peer = db.getPeerById(s.device_id);
+                const peer = await db.getPeerById(s.device_id);
                 if (peer) {
                     const info = peer.info ? JSON.parse(peer.info) : {};
                     hostname = peer.note || info.hostname || s.device_id;
@@ -166,7 +166,7 @@ router.get('/', requireAdmin, async (req, res) => {
                 reported_at: s.reported_at,
                 received_at: s.received_at,
             };
-        });
+        }));
 
         res.json({ summaries: enriched, total: enriched.length });
     } catch (err) {
@@ -197,7 +197,7 @@ router.get('/:id', requireAdmin, async (req, res) => {
         // Peer info
         let hostname = deviceId;
         try {
-            const peer = db.getPeerById(deviceId);
+            const peer = await db.getPeerById(deviceId);
             if (peer) {
                 const info = peer.info ? JSON.parse(peer.info) : {};
                 hostname = peer.note || info.hostname || deviceId;

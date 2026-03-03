@@ -57,15 +57,15 @@ async function requireDeviceAuth(req, res, next) {
         return res.status(401).json({ error: 'Missing authorization token' });
     }
     try {
-        const tokenRow = db.getAccessToken(token);
+        const tokenRow = await db.getAccessToken(token);
         if (!tokenRow) {
             return res.status(401).json({ error: 'Invalid or expired token' });
         }
         // Attach user + token info to request
-        const user = db.getUserById(tokenRow.user_id);
+        const user = await db.getUserById(tokenRow.user_id);
         req.deviceToken = tokenRow;
         req.deviceUser = user || null;
-        db.touchAccessToken(token);
+        await db.touchAccessToken(token);
         next();
     } catch (err) {
         console.error('[BD-API] Auth error:', err.message);
@@ -77,15 +77,15 @@ async function requireDeviceAuth(req, res, next) {
  * Lightweight auth — token OR device_id header (for unauthenticated heartbeat).
  * Sets req.deviceId from token's client_id or from X-Device-Id header.
  */
-function identifyDevice(req, res, next) {
+async function identifyDevice(req, res, next) {
     const token = extractBearerToken(req);
     if (token) {
         try {
-            const tokenRow = db.getAccessToken(token);
+            const tokenRow = await db.getAccessToken(token);
             if (tokenRow) {
                 req.deviceId = tokenRow.client_id || null;
                 req.deviceToken = tokenRow;
-                db.touchAccessToken(token);
+                await db.touchAccessToken(token);
                 return next();
             }
         } catch (_) {}
@@ -103,7 +103,7 @@ function identifyDevice(req, res, next) {
 //  POST /api/bd/register — Register or update a desktop device
 // ---------------------------------------------------------------------------
 
-router.post('/register', identifyDevice, (req, res) => {
+router.post('/register', identifyDevice, async (req, res) => {
     try {
         const ip = getClientIp(req);
         const { device_id, uuid, hostname, platform, version, public_key } = req.body;
@@ -122,7 +122,7 @@ router.post('/register', identifyDevice, (req, res) => {
         });
 
         // Upsert peer in DB
-        db.upsertPeer(id, uuid || '', public_key || null, info, ip);
+        await db.upsertPeer(id, uuid || '', public_key || null, info, ip);
 
         // Update online status
         const mainDb = db.getDb();
@@ -190,7 +190,7 @@ router.post('/heartbeat', identifyDevice, (req, res) => {
 //  POST /api/bd/connect — Request relay session to a target device
 // ---------------------------------------------------------------------------
 
-router.post('/connect', requireDeviceAuth, (req, res) => {
+router.post('/connect', requireDeviceAuth, async (req, res) => {
     try {
         const { target_id, initiator_id, public_key } = req.body;
 
@@ -204,7 +204,7 @@ router.post('/connect', requireDeviceAuth, (req, res) => {
         }
 
         // Check if target exists
-        const target = db.getDeviceById(target_id);
+        const target = await db.getDeviceById(target_id);
         if (!target) {
             return res.status(404).json({ error: 'Target device not found' });
         }
@@ -274,13 +274,13 @@ router.delete('/session/:id', identifyDevice, (req, res) => {
 //  GET /api/bd/peers — List online peers
 // ---------------------------------------------------------------------------
 
-router.get('/peers', requireDeviceAuth, (req, res) => {
+router.get('/peers', requireDeviceAuth, async (req, res) => {
     try {
         const onlineIds = bdRelay.getOnlineDeviceIds();
         const peers = [];
 
         for (const id of onlineIds) {
-            const device = db.getDeviceById(id);
+            const device = await db.getDeviceById(id);
             if (device && !device.is_banned && !device.is_deleted) {
                 peers.push({
                     id: device.id,
@@ -302,9 +302,9 @@ router.get('/peers', requireDeviceAuth, (req, res) => {
 //  GET /api/bd/peer/:id — Get single peer info
 // ---------------------------------------------------------------------------
 
-router.get('/peer/:id', identifyDevice, (req, res) => {
+router.get('/peer/:id', identifyDevice, async (req, res) => {
     try {
-        const device = db.getDeviceById(req.params.id);
+        const device = await db.getDeviceById(req.params.id);
         if (!device) {
             return res.status(404).json({ error: 'Device not found' });
         }

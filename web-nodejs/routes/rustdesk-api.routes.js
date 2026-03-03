@@ -152,7 +152,7 @@ router.get('/api/login-options', (req, res) => {
  * Stores metrics data and updates peer online status.
  * Device must exist in peer table (prevents phantom entries).
  */
-router.post('/api/heartbeat', (req, res) => {
+router.post('/api/heartbeat', async (req, res) => {
     const body = req.body || {};
 
     // Extract and validate device ID
@@ -162,7 +162,7 @@ router.post('/api/heartbeat', (req, res) => {
     }
 
     // Verify the device exists in the peer table (prevents spoofing phantom devices)
-    const existingDevice = db.getDevice(deviceId);
+    const existingDevice = await db.getDevice(deviceId);
     if (!existingDevice) {
         return res.json({ modified_at: new Date().toISOString() });
     }
@@ -178,15 +178,15 @@ router.post('/api/heartbeat', (req, res) => {
     const diskUsage = typeof body.disk === 'number' ? Math.min(100, Math.max(0, body.disk)) : 0;
 
     try {
-        db.insertPeerMetric(deviceId, cpuUsage, memoryUsage, diskUsage);
-        db.updatePeerOnlineStatus(deviceId);
+        await db.insertPeerMetric(deviceId, cpuUsage, memoryUsage, diskUsage);
+        await db.updatePeerOnlineStatus(deviceId);
     } catch (err) {
         console.warn('[API:HEARTBEAT] Failed to store metrics:', err.message);
     }
 
     // Check if we need sysinfo update (missing or stale > 1 hour)
     try {
-        const sysinfo = db.getPeerSysinfo(deviceId);
+        const sysinfo = await db.getPeerSysinfo(deviceId);
         if (!sysinfo) {
             // No sysinfo - request client to send it (JSON with "sysinfo" key)
             console.log(`[API:HEARTBEAT] Requesting sysinfo from ${deviceId} (missing)`);
@@ -218,7 +218,7 @@ router.post('/api/heartbeat', (req, res) => {
  *   - "ID_NOT_FOUND" → client retries immediately
  *   - Anything else → client waits 120s before retry
  */
-router.post('/api/sysinfo', (req, res) => {
+router.post('/api/sysinfo', async (req, res) => {
     const body = req.body || {};
 
     // Extract and validate device ID
@@ -229,7 +229,7 @@ router.post('/api/sysinfo', (req, res) => {
     }
 
     // Verify the device exists in the peer table (prevents overwriting unknown devices)
-    const existingDevice = db.getDevice(deviceId);
+    const existingDevice = await db.getDevice(deviceId);
     if (!existingDevice) {
         console.log(`[API:SYSINFO] Device not found: ${deviceId} (must register first)`);
         return res.type('text/plain').send('ID_NOT_FOUND');
@@ -301,7 +301,7 @@ router.post('/api/sysinfo', (req, res) => {
         if (encodingJson.length > maxJsonLen) sysinfo.encoding = sysinfo.encoding.slice(0, 5);
         if (featuresJson.length > maxJsonLen) sysinfo.features = {};
 
-        db.upsertPeerSysinfo(deviceId, sysinfo);
+        await db.upsertPeerSysinfo(deviceId, sysinfo);
         console.log(`[API:SYSINFO] ✓ PRO activated for ${deviceId}: ${sysinfo.hostname} (${sysinfo.platform}) CPU: ${sysinfo.cpu_name} RAM: ${sysinfo.memory_gb}GB`);
 
         // Return plain text "SYSINFO_UPDATED" to activate PRO mode in client
@@ -319,7 +319,7 @@ router.post('/api/sysinfo', (req, res) => {
  * Returns hash of current sysinfo; if client's hash matches, skip upload.
  * Empty response or any error triggers full sysinfo upload.
  */
-router.post('/api/sysinfo_ver', (req, res) => {
+router.post('/api/sysinfo_ver', async (req, res) => {
     const body = req.body || {};
     const deviceId = sanitizeStr(body.id || body.uuid || '', MAX_ID_LEN);
     
@@ -328,7 +328,7 @@ router.post('/api/sysinfo_ver', (req, res) => {
     }
 
     try {
-        const sysinfo = db.getPeerSysinfo(deviceId);
+        const sysinfo = await db.getPeerSysinfo(deviceId);
         if (sysinfo && sysinfo.raw_json) {
             // Generate hash of stored sysinfo for comparison (SHA256 truncated)
             const hash = require('crypto').createHash('sha256')
@@ -350,7 +350,7 @@ router.post('/api/sysinfo_ver', (req, res) => {
  * Address book — return stored address book for the authenticated user.
  * RustDesk expects: { data: "<json-string-with-tags-and-peers>", licensed_devices: 0 }
  */
-router.get('/api/ab', (req, res) => {
+router.get('/api/ab', async (req, res) => {
     const token = extractBearerToken(req);
     if (!token) {
         return res.status(401).json({ error: 'Authorization required' });
@@ -359,7 +359,7 @@ router.get('/api/ab', (req, res) => {
     if (!user) {
         return res.status(401).json({ error: 'Invalid or expired token' });
     }
-    const data = db.getAddressBook(user.id, 'legacy');
+    const data = await db.getAddressBook(user.id, 'legacy');
     return res.json({ data: data, licensed_devices: 0 });
 });
 
@@ -368,7 +368,7 @@ router.get('/api/ab', (req, res) => {
  * Address book update — save the address book data from the client.
  * RustDesk sends: { data: "<json-string>" }
  */
-router.post('/api/ab', (req, res) => {
+router.post('/api/ab', async (req, res) => {
     const token = extractBearerToken(req);
     if (!token) {
         return res.status(401).json({ error: 'Authorization required' });
@@ -380,7 +380,7 @@ router.post('/api/ab', (req, res) => {
     const { data } = req.body || {};
     if (data !== undefined) {
         const dataStr = typeof data === 'string' ? data : JSON.stringify(data);
-        db.saveAddressBook(user.id, dataStr, 'legacy');
+        await db.saveAddressBook(user.id, dataStr, 'legacy');
         console.log(`[API:AB] Saved legacy address book for user ${user.username} (${dataStr.length} bytes)`);
     }
     return res.json({});
@@ -390,7 +390,7 @@ router.post('/api/ab', (req, res) => {
  * GET /api/ab/personal
  * Personal address book — return stored personal AB.
  */
-router.get('/api/ab/personal', (req, res) => {
+router.get('/api/ab/personal', async (req, res) => {
     const token = extractBearerToken(req);
     if (!token) {
         return res.status(401).json({ error: 'Authorization required' });
@@ -399,7 +399,7 @@ router.get('/api/ab/personal', (req, res) => {
     if (!user) {
         return res.status(401).json({ error: 'Invalid or expired token' });
     }
-    const data = db.getAddressBook(user.id, 'personal');
+    const data = await db.getAddressBook(user.id, 'personal');
     return res.json({ data: data });
 });
 
@@ -407,16 +407,16 @@ router.get('/api/ab/personal', (req, res) => {
  * GET /api/audit
  * Audit log — returns combined audit summary from all audit sources.
  */
-router.get('/api/audit', (req, res) => {
+router.get('/api/audit', async (req, res) => {
     const user = authenticateRequest(req);
     if (!user) {
         return res.status(401).json({ error: 'Authorization required' });
     }
     // Return combined recent audit events
     try {
-        const conns = db.getAuditConnections({ limit: 50 });
-        const files = db.getAuditFiles({ limit: 50 });
-        const alarms = db.getAuditAlarms({ limit: 50 });
+        const conns = await db.getAuditConnections({ limit: 50 });
+        const files = await db.getAuditFiles({ limit: 50 });
+        const alarms = await db.getAuditAlarms({ limit: 50 });
         return res.json({
             data: {
                 connections: conns,
@@ -434,7 +434,7 @@ router.get('/api/audit', (req, res) => {
  * POST /api/ab/personal
  * Personal address book update — save personal AB data.
  */
-router.post('/api/ab/personal', (req, res) => {
+router.post('/api/ab/personal', async (req, res) => {
     const token = extractBearerToken(req);
     if (!token) {
         return res.status(401).json({ error: 'Authorization required' });
@@ -446,7 +446,7 @@ router.post('/api/ab/personal', (req, res) => {
     const { data } = req.body || {};
     if (data !== undefined) {
         const dataStr = typeof data === 'string' ? data : JSON.stringify(data);
-        db.saveAddressBook(user.id, dataStr, 'personal');
+        await db.saveAddressBook(user.id, dataStr, 'personal');
         console.log(`[API:AB] Saved personal address book for user ${user.username} (${dataStr.length} bytes)`);
     }
     return res.json({});
@@ -456,7 +456,7 @@ router.post('/api/ab/personal', (req, res) => {
  * GET /api/ab/tags
  * Address book tags — return tags from legacy address book.
  */
-router.get('/api/ab/tags', (req, res) => {
+router.get('/api/ab/tags', async (req, res) => {
     const token = extractBearerToken(req);
     if (!token) {
         return res.status(401).json({ error: 'Authorization required' });
@@ -465,7 +465,7 @@ router.get('/api/ab/tags', (req, res) => {
     if (!user) {
         return res.status(401).json({ error: 'Invalid or expired token' });
     }
-    const tags = db.getAddressBookTags(user.id);
+    const tags = await db.getAddressBookTags(user.id);
     return res.json({ data: tags });
 });
 
@@ -500,7 +500,7 @@ router.get('/api/users', (req, res) => {
  * List peers/devices with sysinfo, metrics, and online status.
  * Returns RustDesk-compatible peer data merged with sysinfo.
  */
-router.get('/api/peers', (req, res) => {
+router.get('/api/peers', async (req, res) => {
     const user = authenticateRequest(req);
     if (!user) {
         return res.status(401).json({ error: 'Authorization required' });
@@ -508,13 +508,13 @@ router.get('/api/peers', (req, res) => {
 
     try {
         // Get all devices from peer table
-        const devices = db.getAllDevices({
+        const devices = await db.getAllDevices({
             search: req.query.search || '',
             status: req.query.status || ''
         });
 
         // Build sysinfo lookup map
-        const allSysinfo = db.getAllPeerSysinfo();
+        const allSysinfo = await db.getAllPeerSysinfo();
         const sysinfoMap = {};
         for (const si of allSysinfo) {
             sysinfoMap[si.peer_id] = si;
@@ -564,9 +564,9 @@ router.get('/api/peers', (req, res) => {
  * GET /api/device-group/accessible
  * Returns accessible device groups for the current user.
  */
-router.get('/api/device-group/accessible', requireAuth, (req, res) => {
+router.get('/api/device-group/accessible', requireAuth, async (req, res) => {
     try {
-        const groups = db.getAllDeviceGroups();
+        const groups = await db.getAllDeviceGroups();
         return res.json({
             data: groups.map(g => ({
                 guid: g.guid,
@@ -587,9 +587,9 @@ router.get('/api/device-group/accessible', requireAuth, (req, res) => {
  * GET /api/device-group
  * List all device groups.
  */
-router.get('/api/device-group', requireAuth, (req, res) => {
+router.get('/api/device-group', requireAuth, async (req, res) => {
     try {
-        const groups = db.getAllDeviceGroups();
+        const groups = await db.getAllDeviceGroups();
         return res.json({
             data: groups.map(g => ({
                 guid: g.guid,
@@ -610,7 +610,7 @@ router.get('/api/device-group', requireAuth, (req, res) => {
  * POST /api/device-group
  * Create or update a device group (admin only).
  */
-router.post('/api/device-group', requireAuth, requireAdmin, (req, res) => {
+router.post('/api/device-group', requireAuth, requireAdmin, async (req, res) => {
     try {
         const { guid, name, note, team_id } = req.body || {};
         if (!name || typeof name !== 'string' || name.trim().length === 0) {
@@ -619,7 +619,7 @@ router.post('/api/device-group', requireAuth, requireAdmin, (req, res) => {
 
         if (guid) {
             // Update existing
-            const updated = db.updateDeviceGroup(guid, {
+            const updated = await db.updateDeviceGroup(guid, {
                 name: sanitizeStr(name, MAX_HOSTNAME_LEN),
                 note: sanitizeStr(note || '', MAX_STRING_LEN),
                 team_id: sanitizeStr(team_id || '', 64)
@@ -630,7 +630,7 @@ router.post('/api/device-group', requireAuth, requireAdmin, (req, res) => {
             return res.json(updated);
         } else {
             // Create new
-            const created = db.createDeviceGroup({
+            const created = await db.createDeviceGroup({
                 name: sanitizeStr(name, MAX_HOSTNAME_LEN),
                 note: sanitizeStr(note || '', MAX_STRING_LEN),
                 team_id: sanitizeStr(team_id || '', 64)
@@ -647,9 +647,9 @@ router.post('/api/device-group', requireAuth, requireAdmin, (req, res) => {
  * GET /api/user/group
  * Get current user group info.
  */
-router.get('/api/user/group', requireAuth, (req, res) => {
+router.get('/api/user/group', requireAuth, async (req, res) => {
     try {
-        const groups = db.getAllUserGroups();
+        const groups = await db.getAllUserGroups();
         if (groups.length === 0) {
             return res.json({ data: { name: 'Default', guid: 'default' } });
         }
@@ -730,7 +730,7 @@ router.post('/api/login', async (req, res) => {
         // Check brute-force protection
         const bruteCheck = authService.checkBruteForce(username, ip);
         if (bruteCheck.blocked) {
-            db.logAction(null, 'api_login_blocked', `User: ${username}, IP: ${ip}, Reason: ${bruteCheck.reason}`, ip);
+            await db.logAction(null, 'api_login_blocked', `User: ${username}, IP: ${ip}, Reason: ${bruteCheck.reason}`, ip);
             return res.status(429).json({
                 error: bruteCheck.reason,
                 retry_after: bruteCheck.retryAfter
@@ -740,10 +740,10 @@ router.post('/api/login', async (req, res) => {
         // Check if the connecting device is banned (clientId = device ID)
         const sanitizedClientId = sanitizeStr(clientId || '', MAX_ID_LEN);
         if (sanitizedClientId && isValidDeviceId(sanitizedClientId)) {
-            const device = db.getDevice(sanitizedClientId);
+            const device = await db.getDevice(sanitizedClientId);
             if (device && device.banned) {
                 console.log(`[API:LOGIN] Rejected login from banned device: ${sanitizedClientId}`);
-                db.logAction(null, 'api_login_banned_device', `Device: ${sanitizedClientId}, User: ${username}`, ip);
+                await db.logAction(null, 'api_login_banned_device', `Device: ${sanitizedClientId}, User: ${username}`, ip);
                 return res.status(403).json({ error: 'Device is banned' });
             }
         }
@@ -753,7 +753,7 @@ router.post('/api/login', async (req, res) => {
 
         if (!user) {
             authService.recordAttempt(username, ip, false);
-            db.logAction(null, 'api_login_failed', `User: ${username}`, ip);
+            await db.logAction(null, 'api_login_failed', `User: ${username}`, ip);
 
             // Generic error — don't reveal whether user exists
             return res.status(401).json({ error: 'Invalid credentials' });
@@ -781,7 +781,7 @@ router.post('/api/login', async (req, res) => {
             // Cleanup old TFA sessions (>5 min)
             cleanupTfaSessions(req.app.locals._tfaSessions);
 
-            db.logAction(user.id, 'api_login_tfa_required', `Client: ${clientId || 'unknown'}`, ip);
+            await db.logAction(user.id, 'api_login_tfa_required', `Client: ${clientId || 'unknown'}`, ip);
 
             return res.json({
                 type: 'tfa_check',
@@ -793,8 +793,8 @@ router.post('/api/login', async (req, res) => {
         // No 2FA — issue token directly
         authService.recordAttempt(username, ip, true);
         const token = authService.generateAccessToken(user.id, clientId, clientUuid, ip);
-        db.updateLastLogin(user.id);
-        db.logAction(user.id, 'api_login_success', `Client: ${clientId || 'unknown'}`, ip);
+        await db.updateLastLogin(user.id);
+        await db.logAction(user.id, 'api_login_success', `Client: ${clientId || 'unknown'}`, ip);
 
         return res.json({
             type: 'access_token',
@@ -835,7 +835,7 @@ async function handleTfaVerification(req, res, ip, totpCode) {
 
         if (!verified) {
             authService.recordAttempt(session.username, ip, false);
-            db.logAction(session.userId, 'api_tfa_failed', `Client: ${session.clientId || 'unknown'}`, ip);
+            await db.logAction(session.userId, 'api_tfa_failed', `Client: ${session.clientId || 'unknown'}`, ip);
             return res.status(401).json({ error: 'Invalid verification code' });
         }
 
@@ -849,8 +849,8 @@ async function handleTfaVerification(req, res, ip, totpCode) {
             clientUuid || session.clientUuid,
             ip
         );
-        db.updateLastLogin(session.userId);
-        db.logAction(session.userId, 'api_login_success', `Client: ${clientId || session.clientId || 'unknown'} (2FA: totp)`, ip);
+        await db.updateLastLogin(session.userId);
+        await db.logAction(session.userId, 'api_login_success', `Client: ${clientId || session.clientId || 'unknown'} (2FA: totp)`, ip);
 
         return res.json({
             type: 'access_token',
@@ -872,7 +872,7 @@ async function handleTfaVerification(req, res, ip, totpCode) {
  * Revoke the Bearer token.
  * RustDesk client sends { id, uuid } in body.
  */
-router.post('/api/logout', (req, res) => {
+router.post('/api/logout', async (req, res) => {
     const ip = getClientIp(req);
 
     try {
@@ -884,7 +884,7 @@ router.post('/api/logout', (req, res) => {
             const user = authService.validateAccessToken(token);
             if (user) {
                 authService.revokeClientTokens(user.id, clientId, clientUuid);
-                db.logAction(user.id, 'api_logout', `Client: ${clientId || 'unknown'}`, ip);
+                await db.logAction(user.id, 'api_logout', `Client: ${clientId || 'unknown'}`, ip);
             }
         }
 
@@ -999,7 +999,7 @@ router.get('/api/server-key/fingerprint', (req, res) => {
  * Report a connection event from RustDesk client.
  * Body: { host_id, host_uuid, peer_id, peer_name, action, conn_type, session_id, ip }
  */
-router.post('/api/audit/conn', (req, res) => {
+router.post('/api/audit/conn', async (req, res) => {
     try {
         const body = req.body || {};
 
@@ -1014,7 +1014,7 @@ router.post('/api/audit/conn', (req, res) => {
             return res.status(400).json({ error: 'Invalid conn_type' });
         }
 
-        db.insertAuditConnection({
+        await db.insertAuditConnection({
             host_id: sanitizeStr(body.host_id, MAX_ID_LEN),
             host_uuid: sanitizeStr(body.host_uuid || '', MAX_ID_LEN),
             peer_id: sanitizeStr(body.peer_id || '', MAX_ID_LEN),
@@ -1037,7 +1037,7 @@ router.post('/api/audit/conn', (req, res) => {
  * Query connection audit events.
  * Query params: host_id, peer_id, action, limit, offset
  */
-router.get('/api/audit/conn', requireAuth, (req, res) => {
+router.get('/api/audit/conn', requireAuth, async (req, res) => {
     try {
         const filters = {
             host_id: req.query.host_id || '',
@@ -1047,8 +1047,8 @@ router.get('/api/audit/conn', requireAuth, (req, res) => {
             offset: Math.max(0, parseInt(req.query.offset, 10) || 0)
         };
 
-        const data = db.getAuditConnections(filters);
-        const total = db.countAuditConnections(filters);
+        const data = await db.getAuditConnections(filters);
+        const total = await db.countAuditConnections(filters);
 
         return res.json({ data, total });
     } catch (err) {
@@ -1062,7 +1062,7 @@ router.get('/api/audit/conn', requireAuth, (req, res) => {
  * Report a file transfer event.
  * Body: { host_id, host_uuid, peer_id, direction, path, is_file, num_files, files, ip, peer_name }
  */
-router.post('/api/audit/file', (req, res) => {
+router.post('/api/audit/file', async (req, res) => {
     try {
         const body = req.body || {};
 
@@ -1070,7 +1070,7 @@ router.post('/api/audit/file', (req, res) => {
             return res.status(400).json({ error: 'host_id is required' });
         }
 
-        db.insertAuditFile({
+        await db.insertAuditFile({
             host_id: sanitizeStr(body.host_id, MAX_ID_LEN),
             host_uuid: sanitizeStr(body.host_uuid || '', MAX_ID_LEN),
             peer_id: sanitizeStr(body.peer_id || '', MAX_ID_LEN),
@@ -1097,7 +1097,7 @@ router.post('/api/audit/file', (req, res) => {
  * GET /api/audit/file
  * Query file transfer audit events.
  */
-router.get('/api/audit/file', requireAuth, (req, res) => {
+router.get('/api/audit/file', requireAuth, async (req, res) => {
     try {
         const filters = {
             host_id: req.query.host_id || '',
@@ -1106,8 +1106,8 @@ router.get('/api/audit/file', requireAuth, (req, res) => {
             offset: Math.max(0, parseInt(req.query.offset, 10) || 0)
         };
 
-        const data = db.getAuditFiles(filters);
-        const total = db.countAuditFiles(filters);
+        const data = await db.getAuditFiles(filters);
+        const total = await db.countAuditFiles(filters);
 
         return res.json({ data, total });
     } catch (err) {
@@ -1121,7 +1121,7 @@ router.get('/api/audit/file', requireAuth, (req, res) => {
  * Report a security alarm event.
  * Body: { alarm_type, alarm_name, host_id, peer_id, ip, details }
  */
-router.post('/api/audit/alarm', (req, res) => {
+router.post('/api/audit/alarm', async (req, res) => {
     try {
         const body = req.body || {};
 
@@ -1130,7 +1130,7 @@ router.post('/api/audit/alarm', (req, res) => {
             return res.status(400).json({ error: 'Invalid alarm_type (0-6)' });
         }
 
-        db.insertAuditAlarm({
+        await db.insertAuditAlarm({
             alarm_type: alarmType,
             alarm_name: sanitizeStr(body.alarm_name || '', MAX_STRING_LEN),
             host_id: sanitizeStr(body.host_id || '', MAX_ID_LEN),
@@ -1150,7 +1150,7 @@ router.post('/api/audit/alarm', (req, res) => {
  * GET /api/audit/alarm
  * Query security alarm events.
  */
-router.get('/api/audit/alarm', requireAuth, (req, res) => {
+router.get('/api/audit/alarm', requireAuth, async (req, res) => {
     try {
         const filters = {
             alarm_type: req.query.alarm_type !== undefined ? parseInt(req.query.alarm_type, 10) : undefined,
@@ -1159,8 +1159,8 @@ router.get('/api/audit/alarm', requireAuth, (req, res) => {
             offset: Math.max(0, parseInt(req.query.offset, 10) || 0)
         };
 
-        const data = db.getAuditAlarms(filters);
-        const total = db.countAuditAlarms(filters);
+        const data = await db.getAuditAlarms(filters);
+        const total = await db.countAuditAlarms(filters);
 
         return res.json({ data, total });
     } catch (err) {
@@ -1175,9 +1175,9 @@ router.get('/api/audit/alarm', requireAuth, (req, res) => {
  * GET /api/user-groups
  * List all user groups.
  */
-router.get('/api/user-groups', requireAuth, (req, res) => {
+router.get('/api/user-groups', requireAuth, async (req, res) => {
     try {
-        const groups = db.getAllUserGroups();
+        const groups = await db.getAllUserGroups();
         return res.json({
             data: groups.map(g => ({
                 guid: g.guid,
@@ -1197,7 +1197,7 @@ router.get('/api/user-groups', requireAuth, (req, res) => {
  * POST /api/user-groups
  * Create or update a user group (admin only).
  */
-router.post('/api/user-groups', requireAuth, requireAdmin, (req, res) => {
+router.post('/api/user-groups', requireAuth, requireAdmin, async (req, res) => {
     try {
         const { guid, name, note, team_id } = req.body || {};
         if (!name || typeof name !== 'string' || name.trim().length === 0) {
@@ -1205,7 +1205,7 @@ router.post('/api/user-groups', requireAuth, requireAdmin, (req, res) => {
         }
 
         if (guid) {
-            const updated = db.updateUserGroup(guid, {
+            const updated = await db.updateUserGroup(guid, {
                 name: sanitizeStr(name, MAX_HOSTNAME_LEN),
                 note: sanitizeStr(note || '', MAX_STRING_LEN),
                 team_id: sanitizeStr(team_id || '', 64)
@@ -1215,7 +1215,7 @@ router.post('/api/user-groups', requireAuth, requireAdmin, (req, res) => {
             }
             return res.json(updated);
         } else {
-            const created = db.createUserGroup({
+            const created = await db.createUserGroup({
                 name: sanitizeStr(name, MAX_HOSTNAME_LEN),
                 note: sanitizeStr(note || '', MAX_STRING_LEN),
                 team_id: sanitizeStr(team_id || '', 64)
@@ -1234,9 +1234,9 @@ router.post('/api/user-groups', requireAuth, requireAdmin, (req, res) => {
  * GET /api/strategies
  * List all access control strategies.
  */
-router.get('/api/strategies', requireAuth, (req, res) => {
+router.get('/api/strategies', requireAuth, async (req, res) => {
     try {
-        const strategies = db.getAllStrategies();
+        const strategies = await db.getAllStrategies();
         return res.json({
             data: strategies.map(s => ({
                 guid: s.guid,
@@ -1258,7 +1258,7 @@ router.get('/api/strategies', requireAuth, (req, res) => {
  * POST /api/strategies
  * Create or update a strategy (admin only).
  */
-router.post('/api/strategies', requireAuth, requireAdmin, (req, res) => {
+router.post('/api/strategies', requireAuth, requireAdmin, async (req, res) => {
     try {
         const { guid, name, user_group_guid, device_group_guid, enabled, permissions } = req.body || {};
         if (!name || typeof name !== 'string' || name.trim().length === 0) {
@@ -1266,7 +1266,7 @@ router.post('/api/strategies', requireAuth, requireAdmin, (req, res) => {
         }
 
         if (guid) {
-            const updated = db.updateStrategy(guid, {
+            const updated = await db.updateStrategy(guid, {
                 name: sanitizeStr(name, MAX_HOSTNAME_LEN),
                 user_group_guid: sanitizeStr(user_group_guid || '', 64),
                 device_group_guid: sanitizeStr(device_group_guid || '', 64),
@@ -1278,7 +1278,7 @@ router.post('/api/strategies', requireAuth, requireAdmin, (req, res) => {
             }
             return res.json(updated);
         } else {
-            const created = db.createStrategy({
+            const created = await db.createStrategy({
                 name: sanitizeStr(name, MAX_HOSTNAME_LEN),
                 user_group_guid: sanitizeStr(user_group_guid || '', 64),
                 device_group_guid: sanitizeStr(device_group_guid || '', 64),
@@ -1300,14 +1300,14 @@ router.post('/api/strategies', requireAuth, requireAdmin, (req, res) => {
  * Returns the Curve25519 public key for a specific peer (base64).
  * Requires authentication — keys should only be disclosed to logged-in users.
  */
-router.get('/api/peer-key/:id', requireAuth, (req, res) => {
+router.get('/api/peer-key/:id', requireAuth, async (req, res) => {
     try {
         const peerId = sanitizeStr(req.params.id, MAX_ID_LEN);
         if (!peerId) {
             return res.status(400).json({ error: 'Invalid peer ID' });
         }
 
-        const device = db.getDeviceById(peerId);
+        const device = await db.getDeviceById(peerId);
         if (!device) {
             return res.json({ id: peerId, pk: '' });
         }

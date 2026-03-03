@@ -12,9 +12,9 @@ const { requireAuth } = require('../middleware/auth');
 /**
  * GET /api/folders - Get all folders
  */
-router.get('/api/folders', requireAuth, (req, res) => {
+router.get('/api/folders', requireAuth, async (req, res) => {
     try {
-        const folders = db.getAllFolders();
+        const folders = await db.getAllFolders();
         
         res.json({
             success: true,
@@ -35,7 +35,7 @@ router.get('/api/folders', requireAuth, (req, res) => {
 /**
  * POST /api/folders - Create new folder
  */
-router.post('/api/folders', requireAuth, (req, res) => {
+router.post('/api/folders', requireAuth, async (req, res) => {
     try {
         const { name, color, icon } = req.body;
         
@@ -53,10 +53,10 @@ router.post('/api/folders', requireAuth, (req, res) => {
             });
         }
         
-        const result = db.createFolder(name.trim(), color || '#6366f1', icon || 'folder');
+        const result = await db.createFolder(name.trim(), color || '#6366f1', icon || 'folder');
         
         // Log action
-        db.logAction(req.session.userId, 'folder_created', `Created folder: ${name}`, req.ip);
+        await db.logAction(req.session.userId, 'folder_created', `Created folder: ${name}`, req.ip);
         
         res.json({
             success: true,
@@ -79,12 +79,12 @@ router.post('/api/folders', requireAuth, (req, res) => {
 /**
  * PATCH /api/folders/:id - Update folder
  */
-router.patch('/api/folders/:id', requireAuth, (req, res) => {
+router.patch('/api/folders/:id', requireAuth, async (req, res) => {
     try {
         const folderId = parseInt(req.params.id, 10);
         const { name, color, icon } = req.body;
         
-        const folder = db.getFolderById(folderId);
+        const folder = await db.getFolderById(folderId);
         if (!folder) {
             return res.status(404).json({
                 success: false,
@@ -107,14 +107,14 @@ router.patch('/api/folders/:id', requireAuth, (req, res) => {
             }
         }
         
-        db.updateFolder(folderId, {
+        await db.updateFolder(folderId, {
             name: name !== undefined ? name.trim() : undefined,
             color,
             icon
         });
         
         // Log action
-        db.logAction(req.session.userId, 'folder_updated', `Updated folder: ${name || folder.name}`, req.ip);
+        await db.logAction(req.session.userId, 'folder_updated', `Updated folder: ${name || folder.name}`, req.ip);
         
         res.json({ success: true });
     } catch (err) {
@@ -129,11 +129,11 @@ router.patch('/api/folders/:id', requireAuth, (req, res) => {
 /**
  * DELETE /api/folders/:id - Delete folder
  */
-router.delete('/api/folders/:id', requireAuth, (req, res) => {
+router.delete('/api/folders/:id', requireAuth, async (req, res) => {
     try {
         const folderId = parseInt(req.params.id, 10);
         
-        const folder = db.getFolderById(folderId);
+        const folder = await db.getFolderById(folderId);
         if (!folder) {
             return res.status(404).json({
                 success: false,
@@ -142,13 +142,13 @@ router.delete('/api/folders/:id', requireAuth, (req, res) => {
         }
         
         // Remove folder assignment from devices
-        db.unassignDevicesFromFolder(folderId);
+        await db.unassignDevicesFromFolder(folderId);
         
         // Delete folder
-        db.deleteFolder(folderId);
+        await db.deleteFolder(folderId);
         
         // Log action
-        db.logAction(req.session.userId, 'folder_deleted', `Deleted folder: ${folder.name}`, req.ip);
+        await db.logAction(req.session.userId, 'folder_deleted', `Deleted folder: ${folder.name}`, req.ip);
         
         res.json({ success: true });
     } catch (err) {
@@ -163,7 +163,7 @@ router.delete('/api/folders/:id', requireAuth, (req, res) => {
 /**
  * POST /api/folders/:id/devices - Assign devices to folder
  */
-router.post('/api/folders/:id/devices', requireAuth, (req, res) => {
+router.post('/api/folders/:id/devices', requireAuth, async (req, res) => {
     try {
         const folderId = parseInt(req.params.id, 10);
         const { deviceIds } = req.body;
@@ -177,7 +177,7 @@ router.post('/api/folders/:id/devices', requireAuth, (req, res) => {
         
         // Verify folder exists (null = unassign)
         if (folderId !== 0) {
-            const folder = db.getFolderById(folderId);
+            const folder = await db.getFolderById(folderId);
             if (!folder) {
                 return res.status(404).json({
                     success: false,
@@ -188,10 +188,10 @@ router.post('/api/folders/:id/devices', requireAuth, (req, res) => {
         
         const assignFolderId = folderId === 0 ? null : folderId;
         
-        db.assignDevicesToFolder(deviceIds, assignFolderId);
+        await db.assignDevicesToFolder(deviceIds, assignFolderId);
         
         // Log action
-        db.logAction(req.session.userId, 'devices_moved', 
+        await db.logAction(req.session.userId, 'devices_moved', 
             `Moved ${deviceIds.length} device(s) to folder ID: ${folderId}`, req.ip);
         
         res.json({
@@ -226,7 +226,7 @@ router.patch('/api/devices/:id/folder', requireAuth, async (req, res) => {
         
         // Verify folder exists (null to unassign)
         if (folderId !== null && folderId !== undefined) {
-            const folder = db.getFolderById(folderId);
+            const folder = await db.getFolderById(folderId);
             if (!folder) {
                 return res.status(404).json({
                     success: false,
@@ -235,7 +235,7 @@ router.patch('/api/devices/:id/folder', requireAuth, async (req, res) => {
             }
         }
         
-        db.assignDeviceToFolder(deviceId, folderId);
+        await db.assignDeviceToFolder(deviceId, folderId);
         
         res.json({ success: true });
     } catch (err) {

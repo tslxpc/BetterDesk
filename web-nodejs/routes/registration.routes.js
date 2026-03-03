@@ -256,7 +256,7 @@ router.put('/api/registrations/:id/approve', requireAuth, requireRole('admin'), 
 
         // Log the approval
         try {
-            db.logAction(
+            await db.logAction(
                 req.session?.user?.id || 0,
                 'registration_approved',
                 `Approved registration for device ${reg.device_id} (${reg.hostname})`,
@@ -292,7 +292,7 @@ router.put('/api/registrations/:id/reject', requireAuth, requireRole('admin'), a
 
         // Log the rejection
         try {
-            db.logAction(
+            await db.logAction(
                 req.session?.user?.id || 0,
                 'registration_rejected',
                 `Rejected registration for device ${reg.device_id} (${reg.hostname}): ${reason}`,
@@ -313,11 +313,11 @@ router.put('/api/registrations/:id/reject', requireAuth, requireRole('admin'), a
 router.delete('/api/registrations/:id', requireAuth, requireRole('admin'), async (req, res) => {
     try {
         const id = parseInt(req.params.id, 10);
-        const reg = db.getPendingRegistrationById(id);
+        const reg = await db.getPendingRegistrationById(id);
         if (!reg) {
             return res.status(404).json({ success: false, error: 'Registration not found' });
         }
-        db.deletePendingRegistration(id);
+        await db.deletePendingRegistration(id);
         res.json({ success: true });
     } catch (err) {
         console.error('Delete registration error:', err);

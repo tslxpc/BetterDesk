@@ -32,7 +32,7 @@ router.get('/api/settings/info', requireAuth, async (req, res) => {
     try {
         const hbbsHealth = await serverBackend.getHealth();
         const serverConfig = keyService.getServerConfig();
-        const stats = db.getStats();
+        const stats = await db.getStats();
         
         res.json({
             success: true,
@@ -99,10 +99,10 @@ router.get('/api/settings/server-info', requireAuth, (req, res) => {
 /**
  * GET /api/settings/audit - Get audit log
  */
-router.get('/api/settings/audit', requireAuth, (req, res) => {
+router.get('/api/settings/audit', requireAuth, async (req, res) => {
     try {
         const limit = parseInt(req.query.limit, 10) || 100;
-        const logs = db.getAuditLogs(limit);
+        const logs = await db.getAuditLogs(limit);
         
         res.json({
             success: true,
@@ -169,7 +169,7 @@ router.post('/api/settings/backend', requireAuth, requireAdmin, async (req, res)
 
         serverBackend.setActiveBackend(backend);
 
-        db.logAction(req.session?.userId, 'backend_changed', `Server backend changed to: ${backend}`, req.ip);
+        await db.logAction(req.session?.userId, 'backend_changed', `Server backend changed to: ${backend}`, req.ip);
 
         res.json({
             success: true,
@@ -225,7 +225,7 @@ router.get('/api/settings/branding', requireAuth, (req, res) => {
 /**
  * POST /api/settings/branding - Save branding configuration (admin only)
  */
-router.post('/api/settings/branding', requireAuth, requireAdmin, (req, res) => {
+router.post('/api/settings/branding', requireAuth, requireAdmin, async (req, res) => {
     try {
         const updates = req.body;
         if (!updates || typeof updates !== 'object') {
@@ -234,7 +234,7 @@ router.post('/api/settings/branding', requireAuth, requireAdmin, (req, res) => {
         
         brandingService.saveBranding(updates);
         
-        db.logAction(req.session?.userId, 'branding_update', 'Updated branding configuration', req.ip);
+        await db.logAction(req.session?.userId, 'branding_update', 'Updated branding configuration', req.ip);
         
         res.json({ success: true, message: 'Branding saved' });
     } catch (err) {
@@ -246,11 +246,11 @@ router.post('/api/settings/branding', requireAuth, requireAdmin, (req, res) => {
 /**
  * POST /api/settings/branding/reset - Reset branding to defaults (admin only)
  */
-router.post('/api/settings/branding/reset', requireAuth, requireAdmin, (req, res) => {
+router.post('/api/settings/branding/reset', requireAuth, requireAdmin, async (req, res) => {
     try {
         brandingService.resetBranding();
         
-        db.logAction(req.session?.userId, 'branding_reset', 'Reset branding to defaults', req.ip);
+        await db.logAction(req.session?.userId, 'branding_reset', 'Reset branding to defaults', req.ip);
         
         res.json({ success: true, message: 'Branding reset to defaults' });
     } catch (err) {
@@ -277,7 +277,7 @@ router.get('/api/settings/branding/export', requireAuth, requireAdmin, (req, res
 /**
  * POST /api/settings/branding/import - Import branding preset from JSON (admin only)
  */
-router.post('/api/settings/branding/import', requireAuth, requireAdmin, (req, res) => {
+router.post('/api/settings/branding/import', requireAuth, requireAdmin, async (req, res) => {
     try {
         const preset = req.body;
         const success = brandingService.importPreset(preset);
@@ -286,7 +286,7 @@ router.post('/api/settings/branding/import', requireAuth, requireAdmin, (req, re
             return res.status(400).json({ success: false, error: 'Invalid theme preset file' });
         }
         
-        db.logAction(req.session?.userId, 'branding_import', 'Imported branding preset', req.ip);
+        await db.logAction(req.session?.userId, 'branding_import', 'Imported branding preset', req.ip);
         
         res.json({ success: true, message: 'Theme imported successfully' });
     } catch (err) {
@@ -354,7 +354,7 @@ router.get('/api/settings/backup', requireAuth, requireAdmin, async (req, res) =
         const json = JSON.stringify(backup, null, 2);
         const filename = `betterdesk-backup-${new Date().toISOString().slice(0, 10)}.json`;
 
-        db.logAction(req.session?.userId, 'backup_created', `Backup downloaded (${(json.length / 1024).toFixed(1)} KB)`, req.ip);
+        await db.logAction(req.session?.userId, 'backup_created', `Backup downloaded (${(json.length / 1024).toFixed(1)} KB)`, req.ip);
 
         res.setHeader('Content-Type', 'application/json');
         res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
@@ -402,7 +402,7 @@ router.post('/api/settings/restore', requireAuth, requireAdmin, backupUpload.sin
 
         const result = backupService.restoreBackup(data, opts);
 
-        db.logAction(
+        await db.logAction(
             req.session?.userId, 'backup_restored',
             `Restored: ${result.restored.join(', ')} | Skipped: ${result.skipped.join(', ')}`,
             req.ip

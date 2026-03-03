@@ -291,7 +291,130 @@ function createSqliteAdapter(config) {
                 created_at TEXT DEFAULT (datetime('now')),
                 expires_at TEXT NOT NULL
             );
+            CREATE TABLE IF NOT EXISTS device_folder_assignments (
+                device_id TEXT PRIMARY KEY NOT NULL,
+                folder_id INTEGER NOT NULL,
+                assigned_at TEXT DEFAULT (datetime('now')),
+                FOREIGN KEY (folder_id) REFERENCES folders(id) ON DELETE CASCADE
+            );
+            CREATE TABLE IF NOT EXISTS peer_sysinfo (
+                peer_id TEXT PRIMARY KEY,
+                hostname TEXT DEFAULT '',
+                username TEXT DEFAULT '',
+                platform TEXT DEFAULT '',
+                version TEXT DEFAULT '',
+                cpu_name TEXT DEFAULT '',
+                cpu_cores INTEGER DEFAULT 0,
+                cpu_freq_ghz REAL DEFAULT 0,
+                memory_gb REAL DEFAULT 0,
+                os_full TEXT DEFAULT '',
+                displays TEXT DEFAULT '[]',
+                encoding TEXT DEFAULT '[]',
+                features TEXT DEFAULT '{}',
+                platform_additions TEXT DEFAULT '{}',
+                raw_json TEXT DEFAULT '{}',
+                updated_at TEXT DEFAULT (datetime('now'))
+            );
+            CREATE TABLE IF NOT EXISTS peer_metrics (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                peer_id TEXT NOT NULL,
+                cpu_usage REAL DEFAULT 0,
+                memory_usage REAL DEFAULT 0,
+                disk_usage REAL DEFAULT 0,
+                created_at TEXT DEFAULT (datetime('now'))
+            );
+            CREATE INDEX IF NOT EXISTS idx_peer_metrics_peer_time ON peer_metrics (peer_id, created_at);
+            CREATE TABLE IF NOT EXISTS audit_connections (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                host_id TEXT NOT NULL,
+                host_uuid TEXT DEFAULT '',
+                peer_id TEXT DEFAULT '',
+                peer_name TEXT DEFAULT '',
+                action TEXT NOT NULL,
+                conn_type INTEGER DEFAULT 0,
+                session_id TEXT DEFAULT '',
+                ip TEXT DEFAULT '',
+                created_at TEXT DEFAULT (datetime('now'))
+            );
+            CREATE INDEX IF NOT EXISTS idx_audit_conn_host ON audit_connections (host_id, created_at);
+            CREATE INDEX IF NOT EXISTS idx_audit_conn_peer ON audit_connections (peer_id, created_at);
+            CREATE TABLE IF NOT EXISTS audit_files (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                host_id TEXT NOT NULL,
+                host_uuid TEXT DEFAULT '',
+                peer_id TEXT DEFAULT '',
+                direction INTEGER DEFAULT 0,
+                path TEXT DEFAULT '',
+                is_file INTEGER DEFAULT 1,
+                num_files INTEGER DEFAULT 0,
+                files_json TEXT DEFAULT '[]',
+                ip TEXT DEFAULT '',
+                peer_name TEXT DEFAULT '',
+                created_at TEXT DEFAULT (datetime('now'))
+            );
+            CREATE INDEX IF NOT EXISTS idx_audit_files_host ON audit_files (host_id, created_at);
+            CREATE TABLE IF NOT EXISTS audit_alarms (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                alarm_type INTEGER NOT NULL,
+                alarm_name TEXT DEFAULT '',
+                host_id TEXT DEFAULT '',
+                peer_id TEXT DEFAULT '',
+                ip TEXT DEFAULT '',
+                details TEXT DEFAULT '{}',
+                created_at TEXT DEFAULT (datetime('now'))
+            );
+            CREATE INDEX IF NOT EXISTS idx_audit_alarms_type ON audit_alarms (alarm_type, created_at);
+            CREATE TABLE IF NOT EXISTS user_groups (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                guid TEXT UNIQUE NOT NULL,
+                name TEXT NOT NULL,
+                note TEXT DEFAULT '',
+                team_id TEXT DEFAULT '',
+                created_at TEXT DEFAULT (datetime('now'))
+            );
+            CREATE TABLE IF NOT EXISTS device_groups (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                guid TEXT UNIQUE NOT NULL,
+                name TEXT NOT NULL,
+                note TEXT DEFAULT '',
+                team_id TEXT DEFAULT '',
+                created_at TEXT DEFAULT (datetime('now'))
+            );
+            CREATE TABLE IF NOT EXISTS device_group_members (
+                device_group_id INTEGER NOT NULL,
+                peer_id TEXT NOT NULL,
+                created_at TEXT DEFAULT (datetime('now')),
+                PRIMARY KEY (device_group_id, peer_id),
+                FOREIGN KEY (device_group_id) REFERENCES device_groups(id) ON DELETE CASCADE
+            );
+            CREATE TABLE IF NOT EXISTS strategies (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                guid TEXT UNIQUE NOT NULL,
+                name TEXT NOT NULL,
+                user_group_guid TEXT DEFAULT '',
+                device_group_guid TEXT DEFAULT '',
+                enabled INTEGER DEFAULT 1,
+                permissions TEXT DEFAULT '{}',
+                created_at TEXT DEFAULT (datetime('now')),
+                updated_at TEXT DEFAULT (datetime('now'))
+            );
         `);
+
+        // Seed default groups if empty
+        const ugCount = db.prepare('SELECT COUNT(*) as c FROM user_groups').get().c;
+        if (ugCount === 0) {
+            const crypto = require('crypto');
+            db.prepare('INSERT INTO user_groups (guid, name, note) VALUES (?, ?, ?)').run(
+                crypto.randomUUID(), 'Default', 'Default user group'
+            );
+        }
+        const dgCount = db.prepare('SELECT COUNT(*) as c FROM device_groups').get().c;
+        if (dgCount === 0) {
+            const crypto = require('crypto');
+            db.prepare('INSERT INTO device_groups (guid, name, note) VALUES (?, ?, ?)').run(
+                crypto.randomUUID(), 'Default', 'Default device group'
+            );
+        }
     }
 
     function ensureInventoryTables(db) {
@@ -604,6 +727,30 @@ function createSqliteAdapter(config) {
             ban_reason: row.banned_reason || '',
             folder_id: row.folder_id || null,
             info: row.info || '',
+        };
+    }
+
+    function safeJsonParse(str, fallback) {
+        try { return JSON.parse(str); } catch { return fallback; }
+    }
+
+    function parseSysinfoRow(row) {
+        return {
+            peer_id: row.peer_id,
+            hostname: row.hostname,
+            username: row.username,
+            platform: row.platform,
+            version: row.version,
+            cpu_name: row.cpu_name,
+            cpu_cores: row.cpu_cores,
+            cpu_freq_ghz: row.cpu_freq_ghz,
+            memory_gb: row.memory_gb,
+            os_full: row.os_full,
+            displays: safeJsonParse(row.displays, []),
+            encoding: safeJsonParse(row.encoding, []),
+            features: safeJsonParse(row.features, {}),
+            platform_additions: safeJsonParse(row.platform_additions, {}),
+            updated_at: row.updated_at,
         };
     }
 
@@ -1601,6 +1748,417 @@ function createSqliteAdapter(config) {
             const row = openMain().prepare("SELECT COUNT(*) as count FROM pending_registrations WHERE status = 'pending'").get();
             return row ? row.count : 0;
         },
+
+        // ---- Peer Sysinfo ----
+
+        async upsertPeerSysinfo(peerId, data) {
+            openAuth().prepare(`
+                INSERT INTO peer_sysinfo (peer_id, hostname, username, platform, version,
+                    cpu_name, cpu_cores, cpu_freq_ghz, memory_gb, os_full,
+                    displays, encoding, features, platform_additions, raw_json, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+                ON CONFLICT(peer_id) DO UPDATE SET
+                    hostname = excluded.hostname, username = excluded.username,
+                    platform = excluded.platform, version = excluded.version,
+                    cpu_name = excluded.cpu_name, cpu_cores = excluded.cpu_cores,
+                    cpu_freq_ghz = excluded.cpu_freq_ghz, memory_gb = excluded.memory_gb,
+                    os_full = excluded.os_full, displays = excluded.displays,
+                    encoding = excluded.encoding, features = excluded.features,
+                    platform_additions = excluded.platform_additions,
+                    raw_json = excluded.raw_json, updated_at = datetime('now')
+            `).run(
+                peerId,
+                data.hostname || '', data.username || '', data.platform || '', data.version || '',
+                data.cpu_name || '', data.cpu_cores || 0, data.cpu_freq_ghz || 0, data.memory_gb || 0,
+                data.os_full || '',
+                JSON.stringify(data.displays || []), JSON.stringify(data.encoding || []),
+                JSON.stringify(data.features || {}), JSON.stringify(data.platform_additions || {}),
+                JSON.stringify(data)
+            );
+        },
+
+        async getPeerSysinfo(peerId) {
+            const row = openAuth().prepare('SELECT * FROM peer_sysinfo WHERE peer_id = ?').get(peerId);
+            if (!row) return null;
+            return parseSysinfoRow(row);
+        },
+
+        async getAllPeerSysinfo() {
+            return openAuth().prepare('SELECT * FROM peer_sysinfo').all().map(parseSysinfoRow);
+        },
+
+        // ---- Peer Metrics ----
+
+        async updatePeerOnlineStatus(peerId) {
+            openMain().prepare(
+                "UPDATE peer SET status_online = 1, last_online = datetime('now') WHERE id = ?"
+            ).run(peerId);
+        },
+
+        async cleanupStaleOnlinePeers(thresholdSeconds = 90) {
+            const r = openMain().prepare(`
+                UPDATE peer SET status_online = 0
+                WHERE status_online = 1
+                  AND last_online IS NOT NULL
+                  AND last_online < datetime('now', '-' || ? || ' seconds')
+            `).run(thresholdSeconds);
+            return { changes: r.changes };
+        },
+
+        async insertPeerMetric(peerId, cpuUsage, memoryUsage, diskUsage) {
+            openAuth().prepare(
+                'INSERT INTO peer_metrics (peer_id, cpu_usage, memory_usage, disk_usage) VALUES (?, ?, ?, ?)'
+            ).run(peerId, cpuUsage || 0, memoryUsage || 0, diskUsage || 0);
+        },
+
+        async getPeerMetrics(peerId, limit = 100) {
+            return openAuth().prepare(
+                'SELECT * FROM peer_metrics WHERE peer_id = ? ORDER BY created_at DESC LIMIT ?'
+            ).all(peerId, limit);
+        },
+
+        async getLatestPeerMetric(peerId) {
+            return openAuth().prepare(
+                'SELECT * FROM peer_metrics WHERE peer_id = ? ORDER BY created_at DESC LIMIT 1'
+            ).get(peerId) || null;
+        },
+
+        async cleanupOldMetrics(days = 7) {
+            const safeDays = Math.max(1, parseInt(days, 10) || 7);
+            openAuth().prepare(
+                "DELETE FROM peer_metrics WHERE created_at < datetime('now', ? || ' days')"
+            ).run(`-${safeDays}`);
+        },
+
+        // ---- Audit: Connections ----
+
+        async insertAuditConnection(data) {
+            openAuth().prepare(`
+                INSERT INTO audit_connections (host_id, host_uuid, peer_id, peer_name, action, conn_type, session_id, ip)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            `).run(data.host_id || '', data.host_uuid || '', data.peer_id || '', data.peer_name || '',
+                data.action || '', data.conn_type || 0, data.session_id || '', data.ip || '');
+        },
+
+        async getAuditConnections(filters = {}) {
+            let sql = 'SELECT * FROM audit_connections WHERE 1=1';
+            const params = [];
+            if (filters.host_id) { sql += ' AND host_id = ?'; params.push(filters.host_id); }
+            if (filters.peer_id) { sql += ' AND peer_id = ?'; params.push(filters.peer_id); }
+            if (filters.action) { sql += ' AND action = ?'; params.push(filters.action); }
+            sql += ' ORDER BY created_at DESC LIMIT ? OFFSET ?';
+            params.push(filters.limit || 100, filters.offset || 0);
+            return openAuth().prepare(sql).all(...params);
+        },
+
+        async countAuditConnections(filters = {}) {
+            let sql = 'SELECT COUNT(*) as count FROM audit_connections WHERE 1=1';
+            const params = [];
+            if (filters.host_id) { sql += ' AND host_id = ?'; params.push(filters.host_id); }
+            if (filters.peer_id) { sql += ' AND peer_id = ?'; params.push(filters.peer_id); }
+            if (filters.action) { sql += ' AND action = ?'; params.push(filters.action); }
+            return openAuth().prepare(sql).get(...params).count;
+        },
+
+        // ---- Audit: File Transfers ----
+
+        async insertAuditFile(data) {
+            openAuth().prepare(`
+                INSERT INTO audit_files (host_id, host_uuid, peer_id, direction, path, is_file, num_files, files_json, ip, peer_name)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            `).run(data.host_id || '', data.host_uuid || '', data.peer_id || '',
+                data.direction || 0, data.path || '', data.is_file !== undefined ? (data.is_file ? 1 : 0) : 1,
+                data.num_files || 0, JSON.stringify(data.files || []), data.ip || '', data.peer_name || '');
+        },
+
+        async getAuditFiles(filters = {}) {
+            let sql = 'SELECT * FROM audit_files WHERE 1=1';
+            const params = [];
+            if (filters.host_id) { sql += ' AND host_id = ?'; params.push(filters.host_id); }
+            if (filters.peer_id) { sql += ' AND peer_id = ?'; params.push(filters.peer_id); }
+            sql += ' ORDER BY created_at DESC LIMIT ? OFFSET ?';
+            params.push(filters.limit || 100, filters.offset || 0);
+            return openAuth().prepare(sql).all(...params);
+        },
+
+        async countAuditFiles(filters = {}) {
+            let sql = 'SELECT COUNT(*) as count FROM audit_files WHERE 1=1';
+            const params = [];
+            if (filters.host_id) { sql += ' AND host_id = ?'; params.push(filters.host_id); }
+            if (filters.peer_id) { sql += ' AND peer_id = ?'; params.push(filters.peer_id); }
+            return openAuth().prepare(sql).get(...params).count;
+        },
+
+        // ---- Audit: Security Alarms ----
+
+        async insertAuditAlarm(data) {
+            openAuth().prepare(`
+                INSERT INTO audit_alarms (alarm_type, alarm_name, host_id, peer_id, ip, details)
+                VALUES (?, ?, ?, ?, ?, ?)
+            `).run(data.alarm_type || 0, data.alarm_name || '', data.host_id || '',
+                data.peer_id || '', data.ip || '',
+                typeof data.details === 'string' ? data.details : JSON.stringify(data.details || {}));
+        },
+
+        async getAuditAlarms(filters = {}) {
+            let sql = 'SELECT * FROM audit_alarms WHERE 1=1';
+            const params = [];
+            if (filters.alarm_type !== undefined) { sql += ' AND alarm_type = ?'; params.push(filters.alarm_type); }
+            if (filters.host_id) { sql += ' AND host_id = ?'; params.push(filters.host_id); }
+            sql += ' ORDER BY created_at DESC LIMIT ? OFFSET ?';
+            params.push(filters.limit || 100, filters.offset || 0);
+            return openAuth().prepare(sql).all(...params);
+        },
+
+        async countAuditAlarms(filters = {}) {
+            let sql = 'SELECT COUNT(*) as count FROM audit_alarms WHERE 1=1';
+            const params = [];
+            if (filters.alarm_type !== undefined) { sql += ' AND alarm_type = ?'; params.push(filters.alarm_type); }
+            if (filters.host_id) { sql += ' AND host_id = ?'; params.push(filters.host_id); }
+            return openAuth().prepare(sql).get(...params).count;
+        },
+
+        // ---- User Groups ----
+
+        async getAllUserGroups() {
+            return openAuth().prepare('SELECT * FROM user_groups ORDER BY name ASC').all();
+        },
+
+        async getUserGroupByGuid(guid) {
+            return openAuth().prepare('SELECT * FROM user_groups WHERE guid = ?').get(guid) || null;
+        },
+
+        async createUserGroup(data) {
+            const crypto = require('crypto');
+            const guid = data.guid || crypto.randomUUID();
+            openAuth().prepare('INSERT INTO user_groups (guid, name, note, team_id) VALUES (?, ?, ?, ?)').run(
+                guid, data.name, data.note || '', data.team_id || ''
+            );
+            return openAuth().prepare('SELECT * FROM user_groups WHERE guid = ?').get(guid);
+        },
+
+        async updateUserGroup(guid, data) {
+            const sets = []; const params = [];
+            if (data.name !== undefined) { sets.push('name = ?'); params.push(data.name); }
+            if (data.note !== undefined) { sets.push('note = ?'); params.push(data.note); }
+            if (data.team_id !== undefined) { sets.push('team_id = ?'); params.push(data.team_id); }
+            if (!sets.length) return null;
+            params.push(guid);
+            openAuth().prepare(`UPDATE user_groups SET ${sets.join(', ')} WHERE guid = ?`).run(...params);
+            return openAuth().prepare('SELECT * FROM user_groups WHERE guid = ?').get(guid);
+        },
+
+        async deleteUserGroup(guid) {
+            openAuth().prepare('DELETE FROM user_groups WHERE guid = ?').run(guid);
+        },
+
+        // ---- Device Groups ----
+
+        async getAllDeviceGroups() {
+            const groups = openAuth().prepare('SELECT * FROM device_groups ORDER BY name ASC').all();
+            for (const g of groups) {
+                g.member_count = openAuth().prepare('SELECT COUNT(*) as c FROM device_group_members WHERE device_group_id = ?').get(g.id).c;
+            }
+            return groups;
+        },
+
+        async getDeviceGroupByGuid(guid) {
+            return openAuth().prepare('SELECT * FROM device_groups WHERE guid = ?').get(guid) || null;
+        },
+
+        async createDeviceGroup(data) {
+            const crypto = require('crypto');
+            const guid = data.guid || crypto.randomUUID();
+            openAuth().prepare('INSERT INTO device_groups (guid, name, note, team_id) VALUES (?, ?, ?, ?)').run(
+                guid, data.name, data.note || '', data.team_id || ''
+            );
+            return openAuth().prepare('SELECT * FROM device_groups WHERE guid = ?').get(guid);
+        },
+
+        async updateDeviceGroup(guid, data) {
+            const sets = []; const params = [];
+            if (data.name !== undefined) { sets.push('name = ?'); params.push(data.name); }
+            if (data.note !== undefined) { sets.push('note = ?'); params.push(data.note); }
+            if (data.team_id !== undefined) { sets.push('team_id = ?'); params.push(data.team_id); }
+            if (!sets.length) return null;
+            params.push(guid);
+            openAuth().prepare(`UPDATE device_groups SET ${sets.join(', ')} WHERE guid = ?`).run(...params);
+            return openAuth().prepare('SELECT * FROM device_groups WHERE guid = ?').get(guid);
+        },
+
+        async deleteDeviceGroup(guid) {
+            const group = openAuth().prepare('SELECT id FROM device_groups WHERE guid = ?').get(guid);
+            if (!group) return;
+            openAuth().prepare('DELETE FROM device_groups WHERE guid = ?').run(guid);
+        },
+
+        async addDeviceToGroup(groupGuid, peerId) {
+            const group = openAuth().prepare('SELECT id FROM device_groups WHERE guid = ?').get(groupGuid);
+            if (!group) return null;
+            openAuth().prepare('INSERT OR IGNORE INTO device_group_members (device_group_id, peer_id) VALUES (?, ?)').run(group.id, peerId);
+        },
+
+        async removeDeviceFromGroup(groupGuid, peerId) {
+            const group = openAuth().prepare('SELECT id FROM device_groups WHERE guid = ?').get(groupGuid);
+            if (!group) return null;
+            openAuth().prepare('DELETE FROM device_group_members WHERE device_group_id = ? AND peer_id = ?').run(group.id, peerId);
+        },
+
+        async getDeviceGroupMembers(groupGuid) {
+            const group = openAuth().prepare('SELECT id FROM device_groups WHERE guid = ?').get(groupGuid);
+            if (!group) return [];
+            return openAuth().prepare('SELECT peer_id FROM device_group_members WHERE device_group_id = ?').all(group.id).map(r => r.peer_id);
+        },
+
+        async getDeviceGroupsForPeer(peerId) {
+            return openAuth().prepare(`
+                SELECT dg.* FROM device_groups dg
+                INNER JOIN device_group_members dgm ON dg.id = dgm.device_group_id
+                WHERE dgm.peer_id = ?
+                ORDER BY dg.name ASC
+            `).all(peerId);
+        },
+
+        // ---- Strategies / Policies ----
+
+        async getAllStrategies() {
+            return openAuth().prepare('SELECT * FROM strategies ORDER BY name ASC').all().map(r => ({
+                ...r, permissions: safeJsonParse(r.permissions, {})
+            }));
+        },
+
+        async getStrategyByGuid(guid) {
+            const row = openAuth().prepare('SELECT * FROM strategies WHERE guid = ?').get(guid);
+            if (!row) return null;
+            return { ...row, permissions: safeJsonParse(row.permissions, {}) };
+        },
+
+        async createStrategy(data) {
+            const crypto = require('crypto');
+            const guid = data.guid || crypto.randomUUID();
+            openAuth().prepare(`
+                INSERT INTO strategies (guid, name, user_group_guid, device_group_guid, enabled, permissions)
+                VALUES (?, ?, ?, ?, ?, ?)
+            `).run(guid, data.name, data.user_group_guid || '', data.device_group_guid || '',
+                data.enabled !== undefined ? (data.enabled ? 1 : 0) : 1,
+                JSON.stringify(data.permissions || {}));
+            return this.getStrategyByGuid(guid);
+        },
+
+        async updateStrategy(guid, data) {
+            const sets = []; const params = [];
+            if (data.name !== undefined) { sets.push('name = ?'); params.push(data.name); }
+            if (data.user_group_guid !== undefined) { sets.push('user_group_guid = ?'); params.push(data.user_group_guid); }
+            if (data.device_group_guid !== undefined) { sets.push('device_group_guid = ?'); params.push(data.device_group_guid); }
+            if (data.enabled !== undefined) { sets.push('enabled = ?'); params.push(data.enabled ? 1 : 0); }
+            if (data.permissions !== undefined) { sets.push('permissions = ?'); params.push(JSON.stringify(data.permissions)); }
+            if (!sets.length) return null;
+            sets.push("updated_at = datetime('now')");
+            params.push(guid);
+            openAuth().prepare(`UPDATE strategies SET ${sets.join(', ')} WHERE guid = ?`).run(...params);
+            return this.getStrategyByGuid(guid);
+        },
+
+        async deleteStrategy(guid) {
+            openAuth().prepare('DELETE FROM strategies WHERE guid = ?').run(guid);
+        },
+
+        // ---- Folder batch operations ----
+
+        async assignDevicesToFolder(deviceIds, folderId) {
+            const db = openAuth();
+            if (folderId === null || folderId === undefined) {
+                const stmt = db.prepare('DELETE FROM device_folder_assignments WHERE device_id = ?');
+                db.transaction((ids) => { for (const id of ids) stmt.run(id); })(deviceIds);
+            } else {
+                const stmt = db.prepare(`
+                    INSERT INTO device_folder_assignments (device_id, folder_id) VALUES (?, ?)
+                    ON CONFLICT(device_id) DO UPDATE SET folder_id = ?, assigned_at = datetime('now')
+                `);
+                db.transaction((ids) => { for (const id of ids) stmt.run(id, folderId, folderId); })(deviceIds);
+            }
+            // Also update peer table folder_id
+            const main = openMain();
+            const peerStmt = main.prepare('UPDATE peer SET folder_id = ? WHERE id = ?');
+            main.transaction((ids) => { for (const id of ids) peerStmt.run(folderId, id); })(deviceIds);
+        },
+
+        async unassignDevicesFromFolder(folderId) {
+            openAuth().prepare('DELETE FROM device_folder_assignments WHERE folder_id = ?').run(folderId);
+            openMain().prepare('UPDATE peer SET folder_id = NULL WHERE folder_id = ?').run(folderId);
+        },
+
+        async getUnassignedDeviceCount() {
+            try {
+                const total = openMain().prepare('SELECT COUNT(*) as count FROM peer WHERE is_deleted = 0').get().count;
+                const assigned = openAuth().prepare('SELECT COUNT(*) as count FROM device_folder_assignments').get().count;
+                return Math.max(0, total - assigned);
+            } catch { return -1; }
+        },
+
+        async getAllFolderAssignments() {
+            const rows = openAuth().prepare('SELECT device_id, folder_id FROM device_folder_assignments').all();
+            const map = {};
+            for (const row of rows) map[row.device_id] = row.folder_id;
+            return map;
+        },
+
+        // ---- Address Book Tags ----
+
+        async getAddressBookTags(userId) {
+            const row = openAuth().prepare('SELECT data FROM address_books WHERE user_id = ? AND ab_type = ?').get(userId, 'legacy');
+            if (!row) return [];
+            try { return JSON.parse(row.data).tags || []; } catch { return []; }
+        },
+
+        // ---- Login Cleanup ----
+
+        async cleanupOldLoginAttempts() {
+            openAuth().prepare("DELETE FROM login_attempts WHERE created_at < datetime('now', '-24 hours')").run();
+        },
+
+        // ---- User Admin ----
+
+        async resetAdminPassword(passwordHash) {
+            const admin = openAuth().prepare("SELECT * FROM users WHERE role = 'admin' ORDER BY id ASC LIMIT 1").get();
+            if (admin) {
+                openAuth().prepare('UPDATE users SET password_hash = ? WHERE id = ?').run(passwordHash, admin.id);
+                return admin;
+            }
+            return null;
+        },
+
+        async deleteAllUsers() {
+            openAuth().prepare('DELETE FROM users').run();
+        },
+
+        // ---- Count Devices ----
+
+        async countDevices(filters = {}) {
+            const db = openMain();
+            let sql = 'SELECT COUNT(*) as count FROM peer WHERE is_deleted = 0';
+            const params = [];
+            if (filters.search) {
+                sql += " AND (id LIKE ? ESCAPE '\\' OR \"user\" LIKE ? ESCAPE '\\' OR note LIKE ? ESCAPE '\\')";
+                const s = `%${escapeLikePattern(filters.search)}%`;
+                params.push(s, s, s);
+            }
+            if (filters.status === 'online') sql += ' AND status_online = 1';
+            else if (filters.status === 'offline') sql += ' AND status_online = 0';
+            else if (filters.status === 'banned') sql += ' AND is_banned = 1';
+            if (filters.hasNotes) sql += " AND note IS NOT NULL AND note != ''";
+            return db.prepare(sql).get(...params).count;
+        },
+
+        // ---- Integration Housekeeping ----
+
+        async runIntegrationHousekeeping() {
+            const db = openAuth();
+            db.prepare("DELETE FROM peer_metrics WHERE created_at < datetime('now', '-7 days')").run();
+            db.prepare("DELETE FROM audit_connections WHERE created_at < datetime('now', '-90 days')").run();
+            db.prepare("DELETE FROM audit_files WHERE created_at < datetime('now', '-90 days')").run();
+            db.prepare("DELETE FROM audit_alarms WHERE created_at < datetime('now', '-90 days')").run();
+        },
     };
 }
 
@@ -2059,6 +2617,154 @@ function createPostgresAdapter() {
         `);
         await q('CREATE INDEX IF NOT EXISTS idx_pending_reg_status ON pending_registrations (status)');
         await q('CREATE INDEX IF NOT EXISTS idx_pending_reg_device ON pending_registrations (device_id)');
+
+        // -- RustDesk Client Integration tables --
+        await q(`
+            CREATE TABLE IF NOT EXISTS device_folder_assignments (
+                device_id TEXT PRIMARY KEY NOT NULL,
+                folder_id INTEGER NOT NULL REFERENCES folders(id) ON DELETE CASCADE,
+                assigned_at TIMESTAMPTZ DEFAULT NOW()
+            )
+        `);
+
+        await q(`
+            CREATE TABLE IF NOT EXISTS peer_sysinfo (
+                peer_id TEXT PRIMARY KEY,
+                hostname TEXT DEFAULT '',
+                username TEXT DEFAULT '',
+                platform TEXT DEFAULT '',
+                version TEXT DEFAULT '',
+                cpu_name TEXT DEFAULT '',
+                cpu_cores INTEGER DEFAULT 0,
+                cpu_freq_ghz REAL DEFAULT 0,
+                memory_gb REAL DEFAULT 0,
+                os_full TEXT DEFAULT '',
+                displays JSONB DEFAULT '[]',
+                encoding JSONB DEFAULT '[]',
+                features JSONB DEFAULT '{}',
+                platform_additions JSONB DEFAULT '{}',
+                raw_json JSONB DEFAULT '{}',
+                updated_at TIMESTAMPTZ DEFAULT NOW()
+            )
+        `);
+
+        await q(`
+            CREATE TABLE IF NOT EXISTS peer_metrics (
+                id SERIAL PRIMARY KEY,
+                peer_id TEXT NOT NULL,
+                cpu_usage REAL DEFAULT 0,
+                memory_usage REAL DEFAULT 0,
+                disk_usage REAL DEFAULT 0,
+                created_at TIMESTAMPTZ DEFAULT NOW()
+            )
+        `);
+        await q('CREATE INDEX IF NOT EXISTS idx_peer_metrics_peer_time ON peer_metrics (peer_id, created_at)');
+
+        await q(`
+            CREATE TABLE IF NOT EXISTS audit_connections (
+                id SERIAL PRIMARY KEY,
+                host_id TEXT NOT NULL,
+                host_uuid TEXT DEFAULT '',
+                peer_id TEXT DEFAULT '',
+                peer_name TEXT DEFAULT '',
+                action TEXT NOT NULL,
+                conn_type INTEGER DEFAULT 0,
+                session_id TEXT DEFAULT '',
+                ip TEXT DEFAULT '',
+                created_at TIMESTAMPTZ DEFAULT NOW()
+            )
+        `);
+        await q('CREATE INDEX IF NOT EXISTS idx_audit_conn_host ON audit_connections (host_id, created_at)');
+        await q('CREATE INDEX IF NOT EXISTS idx_audit_conn_peer ON audit_connections (peer_id, created_at)');
+
+        await q(`
+            CREATE TABLE IF NOT EXISTS audit_files (
+                id SERIAL PRIMARY KEY,
+                host_id TEXT NOT NULL,
+                host_uuid TEXT DEFAULT '',
+                peer_id TEXT DEFAULT '',
+                direction INTEGER DEFAULT 0,
+                path TEXT DEFAULT '',
+                is_file BOOLEAN DEFAULT TRUE,
+                num_files INTEGER DEFAULT 0,
+                files_json JSONB DEFAULT '[]',
+                ip TEXT DEFAULT '',
+                peer_name TEXT DEFAULT '',
+                created_at TIMESTAMPTZ DEFAULT NOW()
+            )
+        `);
+        await q('CREATE INDEX IF NOT EXISTS idx_audit_files_host ON audit_files (host_id, created_at)');
+
+        await q(`
+            CREATE TABLE IF NOT EXISTS audit_alarms (
+                id SERIAL PRIMARY KEY,
+                alarm_type INTEGER NOT NULL,
+                alarm_name TEXT DEFAULT '',
+                host_id TEXT DEFAULT '',
+                peer_id TEXT DEFAULT '',
+                ip TEXT DEFAULT '',
+                details JSONB DEFAULT '{}',
+                created_at TIMESTAMPTZ DEFAULT NOW()
+            )
+        `);
+        await q('CREATE INDEX IF NOT EXISTS idx_audit_alarms_type ON audit_alarms (alarm_type, created_at)');
+
+        await q(`
+            CREATE TABLE IF NOT EXISTS user_groups (
+                id SERIAL PRIMARY KEY,
+                guid TEXT UNIQUE NOT NULL,
+                name TEXT NOT NULL,
+                note TEXT DEFAULT '',
+                team_id TEXT DEFAULT '',
+                created_at TIMESTAMPTZ DEFAULT NOW()
+            )
+        `);
+
+        await q(`
+            CREATE TABLE IF NOT EXISTS device_groups (
+                id SERIAL PRIMARY KEY,
+                guid TEXT UNIQUE NOT NULL,
+                name TEXT NOT NULL,
+                note TEXT DEFAULT '',
+                team_id TEXT DEFAULT '',
+                created_at TIMESTAMPTZ DEFAULT NOW()
+            )
+        `);
+
+        await q(`
+            CREATE TABLE IF NOT EXISTS device_group_members (
+                device_group_id INTEGER NOT NULL REFERENCES device_groups(id) ON DELETE CASCADE,
+                peer_id TEXT NOT NULL,
+                created_at TIMESTAMPTZ DEFAULT NOW(),
+                PRIMARY KEY (device_group_id, peer_id)
+            )
+        `);
+
+        await q(`
+            CREATE TABLE IF NOT EXISTS strategies (
+                id SERIAL PRIMARY KEY,
+                guid TEXT UNIQUE NOT NULL,
+                name TEXT NOT NULL,
+                user_group_guid TEXT DEFAULT '',
+                device_group_guid TEXT DEFAULT '',
+                enabled BOOLEAN DEFAULT TRUE,
+                permissions JSONB DEFAULT '{}',
+                created_at TIMESTAMPTZ DEFAULT NOW(),
+                updated_at TIMESTAMPTZ DEFAULT NOW()
+            )
+        `);
+
+        // Seed default groups if empty
+        const ugCheck = await one('SELECT COUNT(*)::INTEGER AS c FROM user_groups');
+        if (ugCheck && ugCheck.c === 0) {
+            const crypto = require('crypto');
+            await q('INSERT INTO user_groups (guid, name, note) VALUES ($1, $2, $3)', [crypto.randomUUID(), 'Default', 'Default user group']);
+        }
+        const dgCheck = await one('SELECT COUNT(*)::INTEGER AS c FROM device_groups');
+        if (dgCheck && dgCheck.c === 0) {
+            const crypto = require('crypto');
+            await q('INSERT INTO device_groups (guid, name, note) VALUES ($1, $2, $3)', [crypto.randomUUID(), 'Default', 'Default device group']);
+        }
     }
 
     // Parse helpers
@@ -2084,6 +2790,31 @@ function createPostgresAdapter() {
             ban_reason: row.banned_reason || '',
             folder_id: row.folder_id || null,
             info: typeof row.info === 'object' ? JSON.stringify(row.info) : (row.info || ''),
+        };
+    }
+
+    function safeJsonParse(val, fallback) {
+        if (val && typeof val === 'object') return val; // PostgreSQL JSONB is already parsed
+        try { return JSON.parse(val); } catch { return fallback; }
+    }
+
+    function parseSysinfoRow(row) {
+        return {
+            peer_id: row.peer_id,
+            hostname: row.hostname,
+            username: row.username,
+            platform: row.platform,
+            version: row.version,
+            cpu_name: row.cpu_name,
+            cpu_cores: row.cpu_cores,
+            cpu_freq_ghz: +row.cpu_freq_ghz,
+            memory_gb: +row.memory_gb,
+            os_full: row.os_full,
+            displays: safeJsonParse(row.displays, []),
+            encoding: safeJsonParse(row.encoding, []),
+            features: safeJsonParse(row.features, {}),
+            platform_additions: safeJsonParse(row.platform_additions, {}),
+            updated_at: row.updated_at,
         };
     }
 
@@ -2967,6 +3698,413 @@ function createPostgresAdapter() {
         async getPendingRegistrationCount() {
             const row = await one("SELECT COUNT(*)::INTEGER AS count FROM pending_registrations WHERE status = 'pending'");
             return row ? row.count : 0;
+        },
+
+        // ---- Peer Sysinfo ----
+
+        async upsertPeerSysinfo(peerId, data) {
+            await q(`
+                INSERT INTO peer_sysinfo (peer_id, hostname, username, platform, version,
+                    cpu_name, cpu_cores, cpu_freq_ghz, memory_gb, os_full,
+                    displays, encoding, features, platform_additions, raw_json, updated_at)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, NOW())
+                ON CONFLICT(peer_id) DO UPDATE SET
+                    hostname = EXCLUDED.hostname, username = EXCLUDED.username,
+                    platform = EXCLUDED.platform, version = EXCLUDED.version,
+                    cpu_name = EXCLUDED.cpu_name, cpu_cores = EXCLUDED.cpu_cores,
+                    cpu_freq_ghz = EXCLUDED.cpu_freq_ghz, memory_gb = EXCLUDED.memory_gb,
+                    os_full = EXCLUDED.os_full, displays = EXCLUDED.displays,
+                    encoding = EXCLUDED.encoding, features = EXCLUDED.features,
+                    platform_additions = EXCLUDED.platform_additions,
+                    raw_json = EXCLUDED.raw_json, updated_at = NOW()
+            `, [peerId,
+                data.hostname || '', data.username || '', data.platform || '', data.version || '',
+                data.cpu_name || '', data.cpu_cores || 0, data.cpu_freq_ghz || 0, data.memory_gb || 0,
+                data.os_full || '',
+                JSON.stringify(data.displays || []), JSON.stringify(data.encoding || []),
+                JSON.stringify(data.features || {}), JSON.stringify(data.platform_additions || {}),
+                JSON.stringify(data)
+            ]);
+        },
+
+        async getPeerSysinfo(peerId) {
+            const row = await one('SELECT * FROM peer_sysinfo WHERE peer_id = $1', [peerId]);
+            if (!row) return null;
+            return parseSysinfoRow(row);
+        },
+
+        async getAllPeerSysinfo() {
+            return (await all('SELECT * FROM peer_sysinfo')).map(parseSysinfoRow);
+        },
+
+        // ---- Peer Metrics ----
+
+        async updatePeerOnlineStatus(peerId) {
+            await q('UPDATE peer SET status_online = TRUE, last_online = NOW() WHERE id = $1', [peerId]);
+        },
+
+        async cleanupStaleOnlinePeers(thresholdSeconds = 90) {
+            const r = await q(`
+                UPDATE peer SET status_online = FALSE
+                WHERE status_online = TRUE
+                  AND last_online IS NOT NULL
+                  AND last_online < NOW() - INTERVAL '1 second' * $1
+            `, [thresholdSeconds]);
+            return { changes: r.rowCount };
+        },
+
+        async insertPeerMetric(peerId, cpuUsage, memoryUsage, diskUsage) {
+            await q('INSERT INTO peer_metrics (peer_id, cpu_usage, memory_usage, disk_usage) VALUES ($1, $2, $3, $4)',
+                [peerId, cpuUsage || 0, memoryUsage || 0, diskUsage || 0]);
+        },
+
+        async getPeerMetrics(peerId, limit = 100) {
+            return all('SELECT * FROM peer_metrics WHERE peer_id = $1 ORDER BY created_at DESC LIMIT $2', [peerId, limit]);
+        },
+
+        async getLatestPeerMetric(peerId) {
+            return one('SELECT * FROM peer_metrics WHERE peer_id = $1 ORDER BY created_at DESC LIMIT 1', [peerId]);
+        },
+
+        async cleanupOldMetrics(days = 7) {
+            const safeDays = Math.max(1, parseInt(days, 10) || 7);
+            await q("DELETE FROM peer_metrics WHERE created_at < NOW() - INTERVAL '1 day' * $1", [safeDays]);
+        },
+
+        // ---- Audit: Connections ----
+
+        async insertAuditConnection(data) {
+            await q(`
+                INSERT INTO audit_connections (host_id, host_uuid, peer_id, peer_name, action, conn_type, session_id, ip)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+            `, [data.host_id || '', data.host_uuid || '', data.peer_id || '', data.peer_name || '',
+                data.action || '', data.conn_type || 0, data.session_id || '', data.ip || '']);
+        },
+
+        async getAuditConnections(filters = {}) {
+            let sql = 'SELECT * FROM audit_connections WHERE 1=1';
+            const params = [];
+            let idx = 1;
+            if (filters.host_id) { sql += ` AND host_id = $${idx++}`; params.push(filters.host_id); }
+            if (filters.peer_id) { sql += ` AND peer_id = $${idx++}`; params.push(filters.peer_id); }
+            if (filters.action) { sql += ` AND action = $${idx++}`; params.push(filters.action); }
+            sql += ` ORDER BY created_at DESC LIMIT $${idx++} OFFSET $${idx++}`;
+            params.push(filters.limit || 100, filters.offset || 0);
+            return all(sql, params);
+        },
+
+        async countAuditConnections(filters = {}) {
+            let sql = 'SELECT COUNT(*)::INTEGER AS count FROM audit_connections WHERE 1=1';
+            const params = [];
+            let idx = 1;
+            if (filters.host_id) { sql += ` AND host_id = $${idx++}`; params.push(filters.host_id); }
+            if (filters.peer_id) { sql += ` AND peer_id = $${idx++}`; params.push(filters.peer_id); }
+            if (filters.action) { sql += ` AND action = $${idx++}`; params.push(filters.action); }
+            return +(await one(sql, params)).count;
+        },
+
+        // ---- Audit: File Transfers ----
+
+        async insertAuditFile(data) {
+            await q(`
+                INSERT INTO audit_files (host_id, host_uuid, peer_id, direction, path, is_file, num_files, files_json, ip, peer_name)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+            `, [data.host_id || '', data.host_uuid || '', data.peer_id || '',
+                data.direction || 0, data.path || '', data.is_file !== undefined ? data.is_file : true,
+                data.num_files || 0, JSON.stringify(data.files || []), data.ip || '', data.peer_name || '']);
+        },
+
+        async getAuditFiles(filters = {}) {
+            let sql = 'SELECT * FROM audit_files WHERE 1=1';
+            const params = [];
+            let idx = 1;
+            if (filters.host_id) { sql += ` AND host_id = $${idx++}`; params.push(filters.host_id); }
+            if (filters.peer_id) { sql += ` AND peer_id = $${idx++}`; params.push(filters.peer_id); }
+            sql += ` ORDER BY created_at DESC LIMIT $${idx++} OFFSET $${idx++}`;
+            params.push(filters.limit || 100, filters.offset || 0);
+            return all(sql, params);
+        },
+
+        async countAuditFiles(filters = {}) {
+            let sql = 'SELECT COUNT(*)::INTEGER AS count FROM audit_files WHERE 1=1';
+            const params = [];
+            let idx = 1;
+            if (filters.host_id) { sql += ` AND host_id = $${idx++}`; params.push(filters.host_id); }
+            if (filters.peer_id) { sql += ` AND peer_id = $${idx++}`; params.push(filters.peer_id); }
+            return +(await one(sql, params)).count;
+        },
+
+        // ---- Audit: Security Alarms ----
+
+        async insertAuditAlarm(data) {
+            await q(`
+                INSERT INTO audit_alarms (alarm_type, alarm_name, host_id, peer_id, ip, details)
+                VALUES ($1, $2, $3, $4, $5, $6)
+            `, [data.alarm_type || 0, data.alarm_name || '', data.host_id || '',
+                data.peer_id || '', data.ip || '',
+                typeof data.details === 'string' ? data.details : JSON.stringify(data.details || {})]);
+        },
+
+        async getAuditAlarms(filters = {}) {
+            let sql = 'SELECT * FROM audit_alarms WHERE 1=1';
+            const params = [];
+            let idx = 1;
+            if (filters.alarm_type !== undefined) { sql += ` AND alarm_type = $${idx++}`; params.push(filters.alarm_type); }
+            if (filters.host_id) { sql += ` AND host_id = $${idx++}`; params.push(filters.host_id); }
+            sql += ` ORDER BY created_at DESC LIMIT $${idx++} OFFSET $${idx++}`;
+            params.push(filters.limit || 100, filters.offset || 0);
+            return all(sql, params);
+        },
+
+        async countAuditAlarms(filters = {}) {
+            let sql = 'SELECT COUNT(*)::INTEGER AS count FROM audit_alarms WHERE 1=1';
+            const params = [];
+            let idx = 1;
+            if (filters.alarm_type !== undefined) { sql += ` AND alarm_type = $${idx++}`; params.push(filters.alarm_type); }
+            if (filters.host_id) { sql += ` AND host_id = $${idx++}`; params.push(filters.host_id); }
+            return +(await one(sql, params)).count;
+        },
+
+        // ---- User Groups ----
+
+        async getAllUserGroups() {
+            return all('SELECT * FROM user_groups ORDER BY name ASC');
+        },
+
+        async getUserGroupByGuid(guid) {
+            return one('SELECT * FROM user_groups WHERE guid = $1', [guid]);
+        },
+
+        async createUserGroup(data) {
+            const crypto = require('crypto');
+            const guid = data.guid || crypto.randomUUID();
+            return one('INSERT INTO user_groups (guid, name, note, team_id) VALUES ($1, $2, $3, $4) RETURNING *',
+                [guid, data.name, data.note || '', data.team_id || '']);
+        },
+
+        async updateUserGroup(guid, data) {
+            const sets = []; const params = []; let idx = 1;
+            if (data.name !== undefined) { sets.push(`name = $${idx++}`); params.push(data.name); }
+            if (data.note !== undefined) { sets.push(`note = $${idx++}`); params.push(data.note); }
+            if (data.team_id !== undefined) { sets.push(`team_id = $${idx++}`); params.push(data.team_id); }
+            if (!sets.length) return null;
+            params.push(guid);
+            return one(`UPDATE user_groups SET ${sets.join(', ')} WHERE guid = $${idx} RETURNING *`, params);
+        },
+
+        async deleteUserGroup(guid) {
+            await q('DELETE FROM user_groups WHERE guid = $1', [guid]);
+        },
+
+        // ---- Device Groups ----
+
+        async getAllDeviceGroups() {
+            const groups = await all('SELECT * FROM device_groups ORDER BY name ASC');
+            for (const g of groups) {
+                g.member_count = +(await one('SELECT COUNT(*)::INTEGER AS c FROM device_group_members WHERE device_group_id = $1', [g.id])).c;
+            }
+            return groups;
+        },
+
+        async getDeviceGroupByGuid(guid) {
+            return one('SELECT * FROM device_groups WHERE guid = $1', [guid]);
+        },
+
+        async createDeviceGroup(data) {
+            const crypto = require('crypto');
+            const guid = data.guid || crypto.randomUUID();
+            return one('INSERT INTO device_groups (guid, name, note, team_id) VALUES ($1, $2, $3, $4) RETURNING *',
+                [guid, data.name, data.note || '', data.team_id || '']);
+        },
+
+        async updateDeviceGroup(guid, data) {
+            const sets = []; const params = []; let idx = 1;
+            if (data.name !== undefined) { sets.push(`name = $${idx++}`); params.push(data.name); }
+            if (data.note !== undefined) { sets.push(`note = $${idx++}`); params.push(data.note); }
+            if (data.team_id !== undefined) { sets.push(`team_id = $${idx++}`); params.push(data.team_id); }
+            if (!sets.length) return null;
+            params.push(guid);
+            return one(`UPDATE device_groups SET ${sets.join(', ')} WHERE guid = $${idx} RETURNING *`, params);
+        },
+
+        async deleteDeviceGroup(guid) {
+            await q('DELETE FROM device_groups WHERE guid = $1', [guid]);
+        },
+
+        async addDeviceToGroup(groupGuid, peerId) {
+            const group = await one('SELECT id FROM device_groups WHERE guid = $1', [groupGuid]);
+            if (!group) return null;
+            await q('INSERT INTO device_group_members (device_group_id, peer_id) VALUES ($1, $2) ON CONFLICT DO NOTHING', [group.id, peerId]);
+        },
+
+        async removeDeviceFromGroup(groupGuid, peerId) {
+            const group = await one('SELECT id FROM device_groups WHERE guid = $1', [groupGuid]);
+            if (!group) return null;
+            await q('DELETE FROM device_group_members WHERE device_group_id = $1 AND peer_id = $2', [group.id, peerId]);
+        },
+
+        async getDeviceGroupMembers(groupGuid) {
+            const group = await one('SELECT id FROM device_groups WHERE guid = $1', [groupGuid]);
+            if (!group) return [];
+            return (await all('SELECT peer_id FROM device_group_members WHERE device_group_id = $1', [group.id])).map(r => r.peer_id);
+        },
+
+        async getDeviceGroupsForPeer(peerId) {
+            return all(`
+                SELECT dg.* FROM device_groups dg
+                INNER JOIN device_group_members dgm ON dg.id = dgm.device_group_id
+                WHERE dgm.peer_id = $1
+                ORDER BY dg.name ASC
+            `, [peerId]);
+        },
+
+        // ---- Strategies / Policies ----
+
+        async getAllStrategies() {
+            const rows = await all('SELECT * FROM strategies ORDER BY name ASC');
+            return rows.map(r => ({
+                ...r,
+                permissions: typeof r.permissions === 'object' ? r.permissions : safeJsonParse(r.permissions, {})
+            }));
+        },
+
+        async getStrategyByGuid(guid) {
+            const row = await one('SELECT * FROM strategies WHERE guid = $1', [guid]);
+            if (!row) return null;
+            return { ...row, permissions: typeof row.permissions === 'object' ? row.permissions : safeJsonParse(row.permissions, {}) };
+        },
+
+        async createStrategy(data) {
+            const crypto = require('crypto');
+            const guid = data.guid || crypto.randomUUID();
+            return one(`
+                INSERT INTO strategies (guid, name, user_group_guid, device_group_guid, enabled, permissions)
+                VALUES ($1, $2, $3, $4, $5, $6) RETURNING *
+            `, [guid, data.name, data.user_group_guid || '', data.device_group_guid || '',
+                data.enabled !== undefined ? data.enabled : true,
+                JSON.stringify(data.permissions || {})]);
+        },
+
+        async updateStrategy(guid, data) {
+            const sets = []; const params = []; let idx = 1;
+            if (data.name !== undefined) { sets.push(`name = $${idx++}`); params.push(data.name); }
+            if (data.user_group_guid !== undefined) { sets.push(`user_group_guid = $${idx++}`); params.push(data.user_group_guid); }
+            if (data.device_group_guid !== undefined) { sets.push(`device_group_guid = $${idx++}`); params.push(data.device_group_guid); }
+            if (data.enabled !== undefined) { sets.push(`enabled = $${idx++}`); params.push(!!data.enabled); }
+            if (data.permissions !== undefined) { sets.push(`permissions = $${idx++}`); params.push(JSON.stringify(data.permissions)); }
+            if (!sets.length) return null;
+            sets.push('updated_at = NOW()');
+            params.push(guid);
+            return one(`UPDATE strategies SET ${sets.join(', ')} WHERE guid = $${idx} RETURNING *`, params);
+        },
+
+        async deleteStrategy(guid) {
+            await q('DELETE FROM strategies WHERE guid = $1', [guid]);
+        },
+
+        // ---- Folder batch operations ----
+
+        async assignDevicesToFolder(deviceIds, folderId) {
+            const client = await getPool().connect();
+            try {
+                await client.query('BEGIN');
+                for (const id of deviceIds) {
+                    if (folderId === null || folderId === undefined) {
+                        await client.query('DELETE FROM device_folder_assignments WHERE device_id = $1', [id]);
+                    } else {
+                        await client.query(`
+                            INSERT INTO device_folder_assignments (device_id, folder_id) VALUES ($1, $2)
+                            ON CONFLICT(device_id) DO UPDATE SET folder_id = $2, assigned_at = NOW()
+                        `, [id, folderId]);
+                    }
+                    await client.query('UPDATE peer SET folder_id = $1 WHERE id = $2', [folderId, id]);
+                }
+                await client.query('COMMIT');
+            } catch (err) {
+                await client.query('ROLLBACK');
+                throw err;
+            } finally {
+                client.release();
+            }
+        },
+
+        async unassignDevicesFromFolder(folderId) {
+            await q('DELETE FROM device_folder_assignments WHERE folder_id = $1', [folderId]);
+            await q('UPDATE peer SET folder_id = NULL WHERE folder_id = $1', [folderId]);
+        },
+
+        async getUnassignedDeviceCount() {
+            try {
+                const total = +(await one('SELECT COUNT(*)::INTEGER AS count FROM peer WHERE NOT is_deleted')).count;
+                const assigned = +(await one('SELECT COUNT(*)::INTEGER AS count FROM device_folder_assignments')).count;
+                return Math.max(0, total - assigned);
+            } catch { return -1; }
+        },
+
+        async getAllFolderAssignments() {
+            const rows = await all('SELECT device_id, folder_id FROM device_folder_assignments');
+            const map = {};
+            for (const row of rows) map[row.device_id] = row.folder_id;
+            return map;
+        },
+
+        // ---- Address Book Tags ----
+
+        async getAddressBookTags(userId) {
+            const row = await one('SELECT data FROM address_books WHERE user_id = $1 AND ab_type = $2', [userId, 'legacy']);
+            if (!row) return [];
+            try {
+                const data = typeof row.data === 'object' ? row.data : JSON.parse(row.data);
+                return data.tags || [];
+            } catch { return []; }
+        },
+
+        // ---- Login Cleanup ----
+
+        async cleanupOldLoginAttempts() {
+            await q("DELETE FROM login_attempts WHERE created_at < NOW() - INTERVAL '24 hours'");
+        },
+
+        // ---- User Admin ----
+
+        async resetAdminPassword(passwordHash) {
+            const admin = await one("SELECT * FROM users WHERE role = 'admin' ORDER BY id ASC LIMIT 1");
+            if (admin) {
+                await q('UPDATE users SET password_hash = $1 WHERE id = $2', [passwordHash, admin.id]);
+                return admin;
+            }
+            return null;
+        },
+
+        async deleteAllUsers() {
+            await q('DELETE FROM users');
+        },
+
+        // ---- Count Devices ----
+
+        async countDevices(filters = {}) {
+            let sql = 'SELECT COUNT(*)::INTEGER AS count FROM peer WHERE NOT is_deleted';
+            const params = [];
+            let idx = 1;
+            if (filters.search) {
+                sql += ` AND (id ILIKE $${idx} ESCAPE '\\' OR "user" ILIKE $${idx} ESCAPE '\\' OR note ILIKE $${idx} ESCAPE '\\')`;
+                params.push(`%${escapeLikePattern(filters.search)}%`);
+                idx++;
+            }
+            if (filters.status === 'online') sql += ' AND status_online = TRUE';
+            else if (filters.status === 'offline') sql += ' AND status_online = FALSE';
+            else if (filters.status === 'banned') sql += ' AND is_banned = TRUE';
+            if (filters.hasNotes) sql += " AND note IS NOT NULL AND note != ''";
+            return +(await one(sql, params)).count;
+        },
+
+        // ---- Integration Housekeeping ----
+
+        async runIntegrationHousekeeping() {
+            await q("DELETE FROM peer_metrics WHERE created_at < NOW() - INTERVAL '7 days'");
+            await q("DELETE FROM audit_connections WHERE created_at < NOW() - INTERVAL '90 days'");
+            await q("DELETE FROM audit_files WHERE created_at < NOW() - INTERVAL '90 days'");
+            await q("DELETE FROM audit_alarms WHERE created_at < NOW() - INTERVAL '90 days'");
         },
     };
 }

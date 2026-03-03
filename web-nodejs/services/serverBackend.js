@@ -24,10 +24,10 @@ let _cachedBackend = null;
 /**
  * Return the active backend name: 'rustdesk' | 'betterdesk'
  */
-function getActiveBackend() {
+async function getActiveBackend() {
     if (_cachedBackend) return _cachedBackend;
     try {
-        const stored = db.getSetting('server_backend');
+        const stored = await db.getSetting('server_backend');
         _cachedBackend = stored || config.serverBackend || 'rustdesk';
     } catch {
         _cachedBackend = config.serverBackend || 'rustdesk';
@@ -39,33 +39,33 @@ function getActiveBackend() {
  * Change the active backend. Persists to auth.db and invalidates cache.
  * @param {'rustdesk'|'betterdesk'} name
  */
-function setActiveBackend(name) {
+async function setActiveBackend(name) {
     const allowed = ['rustdesk', 'betterdesk'];
     if (!allowed.includes(name)) {
         throw new Error(`Invalid backend: ${name}. Allowed: ${allowed.join(', ')}`);
     }
-    db.setSetting('server_backend', name);
+    await db.setSetting('server_backend', name);
     _cachedBackend = name;
 }
 
 /**
  * Returns true when the active backend is BetterDesk (Go server).
  */
-function isBetterDesk() {
-    return getActiveBackend() === 'betterdesk';
+async function isBetterDesk() {
+    return (await getActiveBackend()) === 'betterdesk';
 }
 
 // ========================== Health / Stats ===================================
 
 async function getHealth() {
-    if (isBetterDesk()) {
+    if (await isBetterDesk()) {
         return betterdeskApi.getHealth();
     }
     return hbbsApi.getHealth();
 }
 
 async function getStats() {
-    if (isBetterDesk()) {
+    if (await isBetterDesk()) {
         const result = await betterdeskApi.getServerStats();
         if (result.success && result.data) {
             // Normalise Go shape → panel shape
@@ -82,11 +82,11 @@ async function getStats() {
         }
         // Fallthrough: fetch from local DB as fallback
     }
-    return db.getStats();
+    return await db.getStats();
 }
 
 async function getServerInfo() {
-    if (isBetterDesk()) {
+    if (await isBetterDesk()) {
         return betterdeskApi.getServerInfo();
     }
     return hbbsApi.getServerInfo();
@@ -95,12 +95,12 @@ async function getServerInfo() {
 // ========================== Devices / Peers ==================================
 
 async function getAllDevices(filters = {}) {
-    if (isBetterDesk()) {
+    if (await isBetterDesk()) {
         let peers = await betterdeskApi.getAllPeers();
 
         // Overlay folder_id from auth.db assignments (Go server doesn't track folders)
         try {
-            const assignments = db.getAllFolderAssignments();
+            const assignments = await db.getAllFolderAssignments();
             for (const peer of peers) {
                 if (assignments[peer.id] !== undefined) {
                     peer.folder_id = assignments[peer.id];
@@ -141,16 +141,16 @@ async function getAllDevices(filters = {}) {
         });
         return peers;
     }
-    return db.getAllDevices(filters);
+    return await db.getAllDevices(filters);
 }
 
 async function getDeviceById(id) {
-    if (isBetterDesk()) {
+    if (await isBetterDesk()) {
         const peer = await betterdeskApi.getPeer(id);
         // Overlay folder_id from auth.db
         if (peer) {
             try {
-                const assignments = db.getAllFolderAssignments();
+                const assignments = await db.getAllFolderAssignments();
                 if (assignments[peer.id] !== undefined) {
                     peer.folder_id = assignments[peer.id];
                 }
@@ -158,33 +158,33 @@ async function getDeviceById(id) {
         }
         return peer;
     }
-    return db.getDeviceById(id);
+    return await db.getDeviceById(id);
 }
 
 async function deleteDevice(id) {
-    if (isBetterDesk()) {
+    if (await isBetterDesk()) {
         return betterdeskApi.deletePeer(id);
     }
-    return db.deleteDevice(id);
+    return await db.deleteDevice(id);
 }
 
 async function setBanStatus(id, banned, reason = '') {
-    if (isBetterDesk()) {
+    if (await isBetterDesk()) {
         return banned
             ? betterdeskApi.banPeer(id, reason)
             : betterdeskApi.unbanPeer(id);
     }
-    return db.setBanStatus(id, banned, reason);
+    return await db.setBanStatus(id, banned, reason);
 }
 
 async function updateDevice(id, data) {
     // BetterDesk Go server does not expose a peer-update endpoint for user/note,
     // so we keep writing to the local SQLite in both modes for now.
-    return db.updateDevice(id, data);
+    return await db.updateDevice(id, data);
 }
 
 async function changePeerId(oldId, newId) {
-    if (isBetterDesk()) {
+    if (await isBetterDesk()) {
         return betterdeskApi.changePeerId(oldId, newId);
     }
     return hbbsApi.changePeerId(oldId, newId);
@@ -193,7 +193,7 @@ async function changePeerId(oldId, newId) {
 // ========================== Online Status Sync ===============================
 
 async function syncOnlineStatus() {
-    if (isBetterDesk()) {
+    if (await isBetterDesk()) {
         // BetterDesk Go server owns the peer map — no sync needed.
         return betterdeskApi.syncOnlineStatus();
     }
@@ -205,37 +205,37 @@ async function syncOnlineStatus() {
 // Routes should check isBetterDesk() before calling them.
 
 async function getStatusSummary() {
-    if (!isBetterDesk()) return { success: false, error: 'Requires BetterDesk backend' };
+    if (!await isBetterDesk()) return { success: false, error: 'Requires BetterDesk backend' };
     return betterdeskApi.getStatusSummary();
 }
 
 async function getBlocklist() {
-    if (!isBetterDesk()) return { success: false, error: 'Requires BetterDesk backend' };
+    if (!await isBetterDesk()) return { success: false, error: 'Requires BetterDesk backend' };
     return betterdeskApi.getBlocklist();
 }
 
 async function addBlocklistEntry(entry) {
-    if (!isBetterDesk()) return { success: false, error: 'Requires BetterDesk backend' };
+    if (!await isBetterDesk()) return { success: false, error: 'Requires BetterDesk backend' };
     return betterdeskApi.addBlocklistEntry(entry);
 }
 
 async function removeBlocklistEntry(entry) {
-    if (!isBetterDesk()) return { success: false, error: 'Requires BetterDesk backend' };
+    if (!await isBetterDesk()) return { success: false, error: 'Requires BetterDesk backend' };
     return betterdeskApi.removeBlocklistEntry(entry);
 }
 
 async function setPeerTags(id, tags) {
-    if (!isBetterDesk()) return { success: false, error: 'Requires BetterDesk backend' };
+    if (!await isBetterDesk()) return { success: false, error: 'Requires BetterDesk backend' };
     return betterdeskApi.setPeerTags(id, tags);
 }
 
 async function getPeersByTag(tag) {
-    if (!isBetterDesk()) return [];
+    if (!await isBetterDesk()) return [];
     return betterdeskApi.getPeersByTag(tag);
 }
 
 async function getAuditEvents(limit) {
-    if (!isBetterDesk()) return { success: false, error: 'Requires BetterDesk backend' };
+    if (!await isBetterDesk()) return { success: false, error: 'Requires BetterDesk backend' };
     return betterdeskApi.getAuditEvents(limit);
 }
 

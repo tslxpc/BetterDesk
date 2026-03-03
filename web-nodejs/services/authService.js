@@ -34,7 +34,7 @@ async function verifyPassword(password, hash) {
  * Returns user object with totpRequired flag if 2FA is enabled
  */
 async function authenticate(username, password) {
-    const user = db.getUserByUsername(username);
+    const user = await db.getUserByUsername(username);
     
     if (!user) {
         // Timing-safe: do a real hash comparison to prevent user enumeration
@@ -58,7 +58,7 @@ async function authenticate(username, password) {
     }
     
     // Update last login
-    db.updateLastLogin(user.id);
+    await db.updateLastLogin(user.id);
     
     return {
         id: user.id,
@@ -72,7 +72,7 @@ async function authenticate(username, password) {
  * Create default admin user if no users exist
  */
 async function ensureDefaultAdmin() {
-    if (db.hasUsers()) {
+    if (await db.hasUsers()) {
         return false;
     }
     
@@ -80,7 +80,7 @@ async function ensureDefaultAdmin() {
     const defaultPassword = process.env.DEFAULT_ADMIN_PASSWORD || require('crypto').randomBytes(16).toString('hex');
     
     const hash = await hashPassword(defaultPassword);
-    db.createUser(defaultUsername, hash, 'admin');
+    await db.createUser(defaultUsername, hash, 'admin');
     
     console.log(`Created default admin user: ${defaultUsername}`);
     if (!process.env.DEFAULT_ADMIN_PASSWORD) {
@@ -95,7 +95,7 @@ async function ensureDefaultAdmin() {
  * Change user password
  */
 async function changePassword(userId, currentPassword, newPassword) {
-    const user = db.getUserById(userId);
+    const user = await db.getUserById(userId);
     if (!user) {
         return { success: false, error: 'User not found' };
     }
@@ -111,7 +111,7 @@ async function changePassword(userId, currentPassword, newPassword) {
     }
     
     const newHash = await hashPassword(newPassword);
-    db.updateUserPassword(userId, newHash);
+    await db.updateUserPassword(userId, newHash);
     
     return { success: true };
 }
@@ -153,7 +153,7 @@ function validatePasswordStrength(password) {
  * Generate TOTP secret and QR code for user setup
  */
 async function generateTotpSetup(userId) {
-    const user = db.getUserById(userId);
+    const user = await db.getUserById(userId);
     if (!user) {
         return { success: false, error: 'User not found' };
     }
@@ -162,7 +162,7 @@ async function generateTotpSetup(userId) {
     const secret = authenticator.generateSecret();
     
     // Save secret to DB (not yet enabled)
-    db.saveTotpSecret(userId, secret);
+    await db.saveTotpSecret(userId, secret);
     
     // Generate otpauth URI
     const otpauthUrl = authenticator.keyuri(user.username, 'BetterDesk Console', secret);
@@ -188,8 +188,8 @@ async function generateTotpSetup(userId) {
 /**
  * Verify TOTP code and enable 2FA
  */
-function verifyAndEnableTotp(userId, token) {
-    const user = db.getUserById(userId);
+async function verifyAndEnableTotp(userId, token) {
+    const user = await db.getUserById(userId);
     if (!user || !user.totp_secret) {
         return { success: false, error: 'TOTP not set up' };
     }
@@ -208,7 +208,7 @@ function verifyAndEnableTotp(userId, token) {
     const recoveryCodes = generateRecoveryCodes(8);
     
     // Enable TOTP
-    db.enableTotp(userId, recoveryCodes);
+    await db.enableTotp(userId, recoveryCodes);
     
     return {
         success: true,
@@ -219,8 +219,8 @@ function verifyAndEnableTotp(userId, token) {
 /**
  * Verify TOTP code during login
  */
-function verifyTotpCode(userId, token) {
-    const user = db.getUserById(userId);
+async function verifyTotpCode(userId, token) {
+    const user = await db.getUserById(userId);
     if (!user || !user.totp_enabled || !user.totp_secret) {
         return false;
     }
@@ -236,8 +236,8 @@ function verifyTotpCode(userId, token) {
 /**
  * Verify recovery code during login
  */
-function verifyRecoveryCode(userId, code) {
-    const user = db.getUserById(userId);
+async function verifyRecoveryCode(userId, code) {
+    const user = await db.getUserById(userId);
     if (!user || !user.totp_enabled || !user.totp_recovery_codes) {
         return false;
     }
@@ -258,7 +258,7 @@ function verifyRecoveryCode(userId, code) {
     
     // Remove used code
     codes.splice(index, 1);
-    db.useRecoveryCode(userId, codes);
+    await db.useRecoveryCode(userId, codes);
     
     return true;
 }
@@ -266,16 +266,16 @@ function verifyRecoveryCode(userId, code) {
 /**
  * Disable TOTP for user
  */
-function disableTotp(userId) {
-    db.disableTotp(userId);
+async function disableTotp(userId) {
+    await db.disableTotp(userId);
     return { success: true };
 }
 
 /**
  * Check if user has TOTP enabled
  */
-function isTotpEnabled(userId) {
-    const user = db.getUserById(userId);
+async function isTotpEnabled(userId) {
+    const user = await db.getUserById(userId);
     return user ? !!user.totp_enabled : false;
 }
 
@@ -303,9 +303,9 @@ const ATTEMPT_WINDOW_MINUTES = parseInt(process.env.API_ATTEMPT_WINDOW, 10) || 1
  * Generate a secure access token for RustDesk client
  * Token format: 64 hex chars (256 bits of entropy)
  */
-function generateAccessToken(userId, clientId, clientUuid, ipAddress) {
+async function generateAccessToken(userId, clientId, clientUuid, ipAddress) {
     // Revoke old tokens for the same client device
-    db.revokeUserClientTokens(userId, clientId, clientUuid);
+    await db.revokeUserClientTokens(userId, clientId, clientUuid);
 
     // Generate cryptographically secure token
     const token = crypto.randomBytes(32).toString('hex');
@@ -314,7 +314,7 @@ function generateAccessToken(userId, clientId, clientUuid, ipAddress) {
     const expiresAt = new Date(Date.now() + TOKEN_EXPIRY_DAYS * 24 * 60 * 60 * 1000)
         .toISOString().replace('T', ' ').replace('Z', '');
 
-    db.createAccessToken(token, userId, clientId, clientUuid, expiresAt, ipAddress);
+    await db.createAccessToken(token, userId, clientId, clientUuid, expiresAt, ipAddress);
 
     return token;
 }
@@ -322,23 +322,23 @@ function generateAccessToken(userId, clientId, clientUuid, ipAddress) {
 /**
  * Validate an access token and return associated user
  */
-function validateAccessToken(token) {
+async function validateAccessToken(token) {
     if (!token || typeof token !== 'string' || token.length !== 64) {
         return null;
     }
 
-    const tokenRecord = db.getAccessToken(token);
+    const tokenRecord = await db.getAccessToken(token);
     if (!tokenRecord) {
         return null;
     }
 
-    const user = db.getUserById(tokenRecord.user_id);
+    const user = await db.getUserById(tokenRecord.user_id);
     if (!user) {
         return null;
     }
 
     // Update last_used
-    db.touchAccessToken(token);
+    await db.touchAccessToken(token);
 
     return {
         id: user.id,
@@ -352,11 +352,11 @@ function validateAccessToken(token) {
 /**
  * Revoke all tokens for a user+client during logout
  */
-function revokeClientTokens(userId, clientId, clientUuid) {
+async function revokeClientTokens(userId, clientId, clientUuid) {
     if (clientId && clientUuid) {
-        db.revokeUserClientTokens(userId, clientId, clientUuid);
+        await db.revokeUserClientTokens(userId, clientId, clientUuid);
     } else {
-        db.revokeAllUserTokens(userId);
+        await db.revokeAllUserTokens(userId);
     }
 }
 
@@ -366,10 +366,10 @@ function revokeClientTokens(userId, clientId, clientUuid) {
  * Check if login should be blocked (account lockout or IP rate limit)
  * Returns { blocked: boolean, reason: string, retryAfter: number }
  */
-function checkBruteForce(username, ipAddress) {
+async function checkBruteForce(username, ipAddress) {
     // Check account lockout
     if (username) {
-        const lockout = db.getAccountLockout(username);
+        const lockout = await db.getAccountLockout(username);
         if (lockout) {
             const retryAfter = Math.ceil(
                 (new Date(lockout.locked_until + 'Z').getTime() - Date.now()) / 1000
@@ -384,7 +384,7 @@ function checkBruteForce(username, ipAddress) {
 
     // Check IP rate limiting
     if (ipAddress) {
-        const ipAttempts = db.countRecentFailedAttemptsFromIp(ipAddress, ATTEMPT_WINDOW_MINUTES);
+        const ipAttempts = await db.countRecentFailedAttemptsFromIp(ipAddress, ATTEMPT_WINDOW_MINUTES);
         if (ipAttempts >= IP_RATE_LIMIT) {
             return {
                 blocked: true,
@@ -400,31 +400,31 @@ function checkBruteForce(username, ipAddress) {
 /**
  * Record a login attempt and potentially lock account
  */
-function recordAttempt(username, ipAddress, success) {
-    db.recordLoginAttempt(username, ipAddress, success);
+async function recordAttempt(username, ipAddress, success) {
+    await db.recordLoginAttempt(username, ipAddress, success);
 
     if (success) {
         // Clear lockout on successful login
-        db.clearAccountLockout(username);
+        await db.clearAccountLockout(username);
         return;
     }
 
     // Check if we need to lock the account
-    const failedCount = db.countRecentFailedAttempts(username, ATTEMPT_WINDOW_MINUTES);
+    const failedCount = await db.countRecentFailedAttempts(username, ATTEMPT_WINDOW_MINUTES);
     if (failedCount >= MAX_FAILED_ATTEMPTS) {
         const lockedUntil = new Date(Date.now() + LOCKOUT_MINUTES * 60 * 1000)
             .toISOString().replace('T', ' ').replace('Z', '');
-        db.lockAccount(username, lockedUntil, failedCount);
+        await db.lockAccount(username, lockedUntil, failedCount);
     }
 }
 
 /**
  * Run periodic housekeeping (expired tokens, old attempts)
  */
-function cleanupHousekeeping() {
+async function cleanupHousekeeping() {
     try {
-        db.cleanupExpiredTokens();
-        db.cleanupOldLoginAttempts();
+        await db.cleanupExpiredTokens();
+        await db.cleanupOldLoginAttempts();
     } catch (err) {
         console.error('Housekeeping error:', err.message);
     }

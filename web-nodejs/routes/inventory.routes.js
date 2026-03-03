@@ -36,15 +36,15 @@ function extractBearerToken(req) {
 /**
  * Lightweight auth — token OR X-Device-Id header.
  */
-function identifyDevice(req, res, next) {
+async function identifyDevice(req, res, next) {
     const token = extractBearerToken(req);
     if (token) {
         try {
-            const tokenRow = db.getAccessToken(token);
+            const tokenRow = await db.getAccessToken(token);
             if (tokenRow) {
                 req.deviceId = tokenRow.client_id || null;
                 req.deviceToken = tokenRow;
-                db.touchAccessToken(token);
+                await db.touchAccessToken(token);
                 return next();
             }
         } catch (_) { /* ignored */ }
@@ -95,7 +95,7 @@ router.post('/inventory', identifyDevice, async (req, res) => {
 
         // Also update peer info in main database if peer exists
         try {
-            const peer = db.getPeerById(device_id);
+            const peer = await db.getPeerById(device_id);
             if (peer) {
                 const info = {
                     ...(peer.info ? JSON.parse(peer.info) : {}),
@@ -108,7 +108,7 @@ router.post('/inventory', identifyDevice, async (req, res) => {
                         ? Math.round(hardware.memory.total_bytes / 1048576)
                         : undefined,
                 };
-                db.updatePeer(device_id, { info: JSON.stringify(info) });
+                await db.updatePeer(device_id, { info: JSON.stringify(info) });
             }
         } catch (dbErr) {
             console.warn('[Inventory] Failed to update peer info:', dbErr.message);

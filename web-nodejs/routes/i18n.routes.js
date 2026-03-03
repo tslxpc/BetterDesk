@@ -126,7 +126,7 @@ router.get('/validate/:code', requireAuth, (req, res) => {
 /**
  * POST /upload - Upload a new language file
  */
-router.post('/upload', requireAuth, upload.single('file'), (req, res) => {
+router.post('/upload', requireAuth, upload.single('file'), async (req, res) => {
     try {
         if (!req.file) {
             return res.status(400).json({
@@ -168,7 +168,7 @@ router.post('/upload', requireAuth, upload.single('file'), (req, res) => {
         }
         
         // Log action
-        db.logAction(req.session.userId, 'language_uploaded', `Language ${code} uploaded`, req.ip);
+        await db.logAction(req.session.userId, 'language_uploaded', `Language ${code} uploaded`, req.ip);
         
         res.json({
             success: true,
@@ -189,7 +189,7 @@ router.post('/upload', requireAuth, upload.single('file'), (req, res) => {
 /**
  * DELETE /:code - Delete a language
  */
-router.delete('/:code', requireAuth, (req, res) => {
+router.delete('/:code', requireAuth, async (req, res) => {
     try {
         const { code } = req.params;
         
@@ -203,7 +203,7 @@ router.delete('/:code', requireAuth, (req, res) => {
         }
         
         // Log action
-        db.logAction(req.session.userId, 'language_deleted', `Language ${code} deleted`, req.ip);
+        await db.logAction(req.session.userId, 'language_deleted', `Language ${code} deleted`, req.ip);
         
         res.json({ success: true });
     } catch (err) {

@@ -456,15 +456,15 @@ router.get('/attachments/:aid(\\d+)', requireAuth, async (req, res) => {
 
 const db = require('../services/database');
 
-function identifyDevice(req, res, next) {
+async function identifyDevice(req, res, next) {
     const auth = req.headers['authorization'];
     if (auth && auth.startsWith('Bearer ')) {
         const token = auth.substring(7).trim();
         try {
-            const tokenRow = db.getAccessToken(token);
+            const tokenRow = await db.getAccessToken(token);
             if (tokenRow) {
                 req.deviceId = tokenRow.client_id || null;
-                db.touchAccessToken(token);
+                await db.touchAccessToken(token);
                 return next();
             }
         } catch (_) { /* ignored */ }

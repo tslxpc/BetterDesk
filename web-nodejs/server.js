@@ -224,6 +224,9 @@ function createHttpRedirectServer() {
 
 async function startServer() {
     try {
+        // Initialize database adapter (creates tables, runs migrations)
+        await db.init();
+
         // Ensure default admin exists
         await authService.ensureDefaultAdmin();
         
@@ -296,11 +299,11 @@ async function startServer() {
         }
         
         // ============ Periodic Housekeeping ============
-        const housekeepingInterval = setInterval(() => {
-            authService.cleanupHousekeeping();
+        const housekeepingInterval = setInterval(async () => {
+            await authService.cleanupHousekeeping();
             // Clean up old integration data (metrics >7d, audit >90d)
             try {
-                db.runIntegrationHousekeeping();
+                await db.runIntegrationHousekeeping();
             } catch (err) {
                 // Silent fail — don't crash the server for housekeeping
             }
@@ -318,7 +321,7 @@ async function startServer() {
             // Also clean up stale heartbeat-based online status
             try {
                 if (typeof db.cleanupStaleOnlinePeers === 'function') {
-                    db.cleanupStaleOnlinePeers(heartbeatStaleThreshold);
+                    await db.cleanupStaleOnlinePeers(heartbeatStaleThreshold);
                 }
             } catch (err) {
                 // Silent fail
@@ -473,7 +476,10 @@ function printStartupBanner(protocol, port) {
     console.log(`  ║   Client API: ${apiStatus}`.padEnd(53) + '║');
     console.log(`  ║   Mode:      ${config.nodeEnv}`.padEnd(53) + '║');
     console.log(`  ║   Security:  ${sslStatus}`.padEnd(53) + '║');
-    console.log(`  ║   Database:  ${path.basename(config.dbPath)}`.padEnd(53) + '║');
+    const dbLabel = (db.DB_TYPE === 'postgres' || db.DB_TYPE === 'postgresql')
+        ? `PostgreSQL (${process.env.DATABASE_URL ? new URL(process.env.DATABASE_URL).hostname : 'localhost'})`
+        : path.basename(config.dbPath);
+    console.log(`  ║   Database:  ${dbLabel}`.padEnd(53) + '║');
     console.log('  ║                                                  ║');
     console.log('  ╚══════════════════════════════════════════════════╝');
     console.log('');

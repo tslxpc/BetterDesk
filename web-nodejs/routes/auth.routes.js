@@ -46,7 +46,7 @@ router.post('/api/auth/login', loginLimiter, async (req, res) => {
         
         if (!user) {
             // Log failed attempt
-            db.logAction(null, 'login_failed', `Username: ${username}`, req.ip);
+            await db.logAction(null, 'login_failed', `Username: ${username}`, req.ip);
             
             return res.status(401).json({
                 success: false,
@@ -68,7 +68,7 @@ router.post('/api/auth/login', loginLimiter, async (req, res) => {
         
         // Regenerate session to prevent session fixation
         const oldSession = req.session;
-        req.session.regenerate((err) => {
+        req.session.regenerate(async (err) => {
             if (err) {
                 console.error('Session regeneration error:', err);
                 return res.status(500).json({ success: false, error: 'Server error' });
@@ -83,7 +83,7 @@ router.post('/api/auth/login', loginLimiter, async (req, res) => {
             };
             
             // Log successful login
-            db.logAction(user.id, 'login', `User logged in`, req.ip);
+            await db.logAction(user.id, 'login', `User logged in`, req.ip);
             
             res.json({
                 success: true,
@@ -105,11 +105,11 @@ router.post('/api/auth/login', loginLimiter, async (req, res) => {
 /**
  * POST /api/auth/logout - Logout API
  */
-router.post('/api/auth/logout', (req, res) => {
+router.post('/api/auth/logout', async (req, res) => {
     const userId = req.session?.userId;
     
     if (userId) {
-        db.logAction(userId, 'logout', 'User logged out', req.ip);
+        await db.logAction(userId, 'logout', 'User logged out', req.ip);
     }
     
     req.session.destroy((err) => {
@@ -166,7 +166,7 @@ router.post('/api/auth/password', requireAuth, passwordChangeLimiter, async (req
         }
         
         // Log password change
-        db.logAction(req.session.userId, 'password_changed', 'Password changed', req.ip);
+        await db.logAction(req.session.userId, 'password_changed', 'Password changed', req.ip);
         
         res.json({ success: true });
     } catch (err) {
@@ -193,7 +193,7 @@ router.get('/logout', (req, res) => {
 /**
  * POST /api/auth/totp/verify - Verify TOTP code during login
  */
-router.post('/api/auth/totp/verify', loginLimiter, (req, res) => {
+router.post('/api/auth/totp/verify', loginLimiter, async (req, res) => {
     try {
         const { code, recoveryCode } = req.body;
         const pendingUserId = req.session.pendingTotpUserId;
@@ -219,7 +219,7 @@ router.post('/api/auth/totp/verify', loginLimiter, (req, res) => {
         }
         
         if (!verified) {
-            db.logAction(pendingUserId, 'totp_failed', `Method: ${method}`, req.ip);
+            await db.logAction(pendingUserId, 'totp_failed', `Method: ${method}`, req.ip);
             return res.status(401).json({
                 success: false,
                 error: req.t('auth.totp_invalid_code')
@@ -239,10 +239,10 @@ router.post('/api/auth/totp/verify', loginLimiter, (req, res) => {
         };
         
         // Update last login
-        db.updateLastLogin(pendingUser.id);
+        await db.updateLastLogin(pendingUser.id);
         
         // Log login
-        db.logAction(pendingUser.id, 'login', `User logged in (2FA: ${method})`, req.ip);
+        await db.logAction(pendingUser.id, 'login', `User logged in (2FA: ${method})`, req.ip);
         
         res.json({
             success: true,
@@ -300,7 +300,7 @@ router.post('/api/auth/totp/setup', requireAuth, async (req, res) => {
 /**
  * POST /api/auth/totp/enable - Verify code and enable TOTP
  */
-router.post('/api/auth/totp/enable', requireAuth, (req, res) => {
+router.post('/api/auth/totp/enable', requireAuth, async (req, res) => {
     try {
         const { code } = req.body;
         
@@ -321,7 +321,7 @@ router.post('/api/auth/totp/enable', requireAuth, (req, res) => {
         }
         
         // Log action
-        db.logAction(req.session.userId, 'totp_enabled', '2FA enabled', req.ip);
+        await db.logAction(req.session.userId, 'totp_enabled', '2FA enabled', req.ip);
         
         res.json({
             success: true,
@@ -339,7 +339,7 @@ router.post('/api/auth/totp/enable', requireAuth, (req, res) => {
 /**
  * POST /api/auth/totp/disable - Disable TOTP
  */
-router.post('/api/auth/totp/disable', requireAuth, (req, res) => {
+router.post('/api/auth/totp/disable', requireAuth, async (req, res) => {
     try {
         const { password } = req.body;
         
@@ -351,7 +351,7 @@ router.post('/api/auth/totp/disable', requireAuth, (req, res) => {
         }
         
         // Verify password before disabling
-        const user = db.getUserById(req.session.userId);
+        const user = await db.getUserById(req.session.userId);
         if (!user) {
             return res.status(404).json({
                 success: false,
@@ -371,7 +371,7 @@ router.post('/api/auth/totp/disable', requireAuth, (req, res) => {
         authService.disableTotp(req.session.userId);
         
         // Log action
-        db.logAction(req.session.userId, 'totp_disabled', '2FA disabled', req.ip);
+        await db.logAction(req.session.userId, 'totp_disabled', '2FA disabled', req.ip);
         
         res.json({ success: true });
     } catch (err) {

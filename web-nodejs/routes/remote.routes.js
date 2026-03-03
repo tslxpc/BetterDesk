@@ -39,7 +39,7 @@ router.get('/remote/:deviceId', requireAuth, (req, res) => {
     // Look up device in database for display info (optional, not blocking)
     let device = null;
     try {
-        const stmt = db.getDatabase().prepare(
+        const stmt = db.getDb().prepare(
             'SELECT id, hostname, platform, note FROM peer WHERE id = ?'
         );
         device = stmt.get(deviceId);
@@ -70,7 +70,7 @@ router.get('/remote-desktop/:deviceId', requireAuth, (req, res) => {
 
     let device = null;
     try {
-        const stmt = db.getDatabase().prepare(
+        const stmt = db.getDb().prepare(
             'SELECT id, hostname, platform, note FROM peer WHERE id = ?'
         );
         device = stmt.get(deviceId);
