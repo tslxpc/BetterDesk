@@ -94,6 +94,11 @@ app.use('/protos', express.static(path.join(__dirname, 'protos'), {
 // Rate limiting for API
 app.use('/api/', apiLimiter);
 
+// RustDesk Client API — mounted BEFORE CSRF because desktop clients use Bearer
+// token auth, not cookie-based CSRF.  These routes are also served on the
+// dedicated WAN-facing port (21121) with additional hardening.
+app.use(rustdeskApiRoutes);
+
 // i18n middleware
 app.use(initI18n());
 

@@ -1370,9 +1370,21 @@ install_nodejs_console() {
     # Create data directory for databases
     mkdir -p "$CONSOLE_PATH/data"
     
+    # Remove old auth database to ensure the newly generated password is used.
+    # Without this, a reinstall would keep the old auth.db with a stale password
+    # hash while .env gets a new password — making login impossible.
+    if [ -f "$CONSOLE_PATH/data/auth.db" ]; then
+        print_info "Removing old auth database (will be recreated with new credentials)..."
+        rm -f "$CONSOLE_PATH/data/auth.db" "$CONSOLE_PATH/data/auth.db-wal" "$CONSOLE_PATH/data/auth.db-shm"
+    fi
+    
     # Generate admin password for Node.js console
     ADMIN_PASSWORD=$(openssl rand -base64 12 | tr -d '/+=' | head -c 16)
     local nodejs_admin_password="$ADMIN_PASSWORD"
+    
+    # Create sentinel file so ensureDefaultAdmin() force-updates the password
+    # even if auth.db was somehow preserved (e.g. shared volume, manual copy)
+    touch "$CONSOLE_PATH/data/.force_password_update"
     
     # Determine database configuration
     local db_config=""
@@ -3216,7 +3228,7 @@ do_diagnostics() {
     fi
     
     printf "  Web Console (5000):    "
-    if curl -sfo /dev/null --connect-timeout 3 "http://127.0.0.1:5000/api/health" 2>/dev/null; then
+    if curl -sfo /dev/null --connect-timeout 3 "http://127.0.0.1:5000/health" 2>/dev/null; then
         echo -e "${GREEN}OK${NC}"
     else
         echo -e "${RED}UNREACHABLE${NC}"

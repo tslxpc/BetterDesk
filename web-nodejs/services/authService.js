@@ -7,6 +7,8 @@ const bcrypt = require('bcrypt');
 const { authenticator } = require('otplib');
 const QRCode = require('qrcode');
 const crypto = require('crypto');
+const fs = require('fs');
+const path = require('path');
 const db = require('./database');
 const config = require('../config/config');
 
@@ -136,6 +138,31 @@ async function authenticate(username, password) {
 }
 
 /**
+ * Check if the installation scripts requested a forced password update.
+ * Two mechanisms: sentinel file (.force_password_update) or env var FORCE_PASSWORD_UPDATE.
+ * Returns true if force update is requested, and removes the sentinel file.
+ */
+function checkForcePasswordUpdate() {
+    // Env var (Docker installs set FORCE_PASSWORD_UPDATE=true in compose)
+    if (process.env.FORCE_PASSWORD_UPDATE === 'true') {
+        console.log(`[AUTH] FORCE_PASSWORD_UPDATE env var detected — will force admin password update`);
+        // Clear the env var so it only takes effect once per startup
+        delete process.env.FORCE_PASSWORD_UPDATE;
+        return true;
+    }
+    // Sentinel file (native installs create .force_password_update in data dir)
+    const sentinelPath = path.join(config.dataDir || '.', '.force_password_update');
+    try {
+        if (fs.existsSync(sentinelPath)) {
+            console.log(`[AUTH] .force_password_update sentinel file detected — will force admin password update`);
+            fs.unlinkSync(sentinelPath);
+            return true;
+        }
+    } catch (_) { /* ignore fs errors */ }
+    return false;
+}
+
+/**
  * Create default admin user if no users exist.
  * In PostgreSQL mode, the Go server may have already created the admin user
  * with a PBKDF2 hash. In that case, we migrate the hash to bcrypt format
@@ -144,6 +171,7 @@ async function authenticate(username, password) {
 async function ensureDefaultAdmin() {
     const defaultUsername = process.env.DEFAULT_ADMIN_USERNAME || 'admin';
     const defaultPassword = process.env.DEFAULT_ADMIN_PASSWORD || '';
+    const forceUpdate = checkForcePasswordUpdate();
 
     console.log(`[AUTH] ensureDefaultAdmin: checking for existing users...`);
 
@@ -162,12 +190,16 @@ async function ensureDefaultAdmin() {
                     console.warn(`[AUTH] DEFAULT_ADMIN_PASSWORD does not match existing PBKDF2 hash — skipping migration`);
                 }
             } else if (admin) {
-                // Admin exists with bcrypt hash — check if password matches
-                // ONLY fix the hash if the admin has never logged in (fresh install).
-                // If they have logged in, they may have changed password via the UI;
-                // overwriting it would lock them out.
+                // Admin exists with bcrypt hash — check if password matches.
+                // Force update when the install script requested it (reinstallation),
+                // or when admin has never logged in (fresh install with stale auth.db).
                 const hashType = (admin.password_hash || '').startsWith('$2') ? 'bcrypt' : 'unknown';
-                if (!admin.last_login) {
+                if (forceUpdate) {
+                    console.log(`[AUTH] Force password update requested — updating admin password regardless of last_login`);
+                    const bcryptHash = await hashPassword(defaultPassword);
+                    await db.updateUserPassword(admin.id, bcryptHash);
+                    console.log(`[AUTH] Admin password hash force-updated to match DEFAULT_ADMIN_PASSWORD`);
+                } else if (!admin.last_login) {
                     const matches = await verifyPassword(defaultPassword, admin.password_hash);
                     if (!matches) {
                         console.warn(`[AUTH] DEFAULT_ADMIN_PASSWORD does not match stored ${hashType} hash for '${defaultUsername}' (never logged in). Updating hash...`);

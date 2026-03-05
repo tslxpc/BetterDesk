@@ -517,6 +517,16 @@ EOF
     admin_password=$(openssl rand -base64 12 | tr -d '/+=' | head -c 16)
     DOCKER_ADMIN_PASSWORD="$admin_password"
     
+    # Clean old auth database from console_data volume to ensure the newly
+    # generated password is used. Without this, a reinstall would keep the
+    # old auth.db with a stale password hash while the env var gets a new
+    # password — making login impossible.
+    if docker volume inspect "${PROJECT_NAME:-betterdesk}_console_data" >/dev/null 2>&1; then
+        print_info "Cleaning old auth database from console_data volume..."
+        docker run --rm -v "${PROJECT_NAME:-betterdesk}_console_data:/data" alpine \
+            sh -c "rm -f /data/auth.db /data/auth.db-wal /data/auth.db-shm" 2>/dev/null || true
+    fi
+    
     # Get server public IP for relay-servers
     local server_ip
     server_ip=$(curl -s ifconfig.me 2>/dev/null || curl -s icanhazip.com 2>/dev/null || echo "127.0.0.1")
@@ -589,6 +599,7 @@ EOF
       - API_KEY_PATH=/opt/rustdesk/.api_key
       - KEYS_PATH=/opt/rustdesk
       - DEFAULT_ADMIN_PASSWORD=$admin_password
+      - FORCE_PASSWORD_UPDATE=true
       - WS_HBBS_HOST=$SERVER_CONTAINER
       - WS_HBBS_PORT=21116
       - WS_HBBR_HOST=$SERVER_CONTAINER
@@ -1521,7 +1532,7 @@ do_diagnostics() {
     fi
 
     printf "  Web Console (5000):  "
-    if curl -sfo /dev/null --connect-timeout 3 "http://127.0.0.1:5000/api/health" 2>/dev/null; then
+    if curl -sfo /dev/null --connect-timeout 3 "http://127.0.0.1:5000/health" 2>/dev/null; then
         echo -e "${GREEN}OK${NC}"
     else
         echo -e "${RED}UNREACHABLE${NC}"

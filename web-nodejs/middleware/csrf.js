@@ -29,24 +29,45 @@ const {
     }
 });
 
+/** Safe HTTP methods that render views and need a fresh CSRF token. */
+const SAFE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);
+
 /**
  * Middleware that generates a CSRF token and makes it available to views.
  * Must be applied AFTER cookie-parser and session middleware.
  *
+ * IMPORTANT: Token generation runs ONLY on safe methods (GET/HEAD/OPTIONS).
+ * On state-changing methods (POST/PUT/DELETE/PATCH) we skip generation
+ * entirely so that we never interfere with doubleCsrfProtection's
+ * validation of req.cookies — calling generateToken on POST with an
+ * invalid cookie would delete req.cookies['__csrf'] in the catch block
+ * before the validation middleware could read it, causing spurious 403s.
+ *
  * If the existing __csrf cookie is malformed (e.g. leftover from an older
- * session or manual edit), generating/validating the token will throw.
- * We catch that, clear the bad cookie, and retry once so that the user
- * is never locked out on a simple GET page load.
+ * installation with a different secret), we clear it and regenerate so
+ * the next page load works.
  */
 function csrfTokenProvider(req, res, next) {
+    // State-changing methods: let doubleCsrfProtection handle everything
+    if (!SAFE_METHODS.has(req.method)) {
+        return next();
+    }
+
     try {
         const token = generateToken(req, res);
         res.locals.csrfToken = token;
         return next();
     } catch (_err) {
-        // Clear the corrupt cookie and try once more
-        res.clearCookie('__csrf', { path: '/' });
+        // Cookie exists but is invalid (e.g. secret changed after reinstall).
+        // Clear the corrupt cookie so the browser forgets it, then generate
+        // a fresh token+cookie pair.
         if (req.cookies) delete req.cookies['__csrf'];
+        res.clearCookie('__csrf', {
+            httpOnly: true,
+            sameSite: 'lax',
+            secure: config.httpsEnabled,
+            path: '/'
+        });
         try {
             const token = generateToken(req, res);
             res.locals.csrfToken = token;
@@ -66,9 +87,15 @@ function csrfTokenProvider(req, res, next) {
  */
 function safeCsrfProtection(req, res, next) {
     doubleCsrfProtection(req, res, (err) => {
-        if (err && ['GET', 'HEAD', 'OPTIONS'].includes(req.method)) {
-            // Corrupt cookie on a safe method — clear and continue
-            res.clearCookie('__csrf', { path: '/' });
+        if (err && SAFE_METHODS.has(req.method)) {
+            // Corrupt cookie on a safe method — clear and continue.
+            // clearCookie must use identical options for the browser to match.
+            res.clearCookie('__csrf', {
+                httpOnly: true,
+                sameSite: 'lax',
+                secure: config.httpsEnabled,
+                path: '/'
+            });
             if (req.cookies) delete req.cookies['__csrf'];
             return next();
         }

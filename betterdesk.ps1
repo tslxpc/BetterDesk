@@ -1003,8 +1003,23 @@ function Install-NodeJsConsole {
             New-Item -ItemType Directory -Path $dataDir -Force | Out-Null
         }
         
+        # Remove old auth database to ensure the newly generated password is used.
+        # Without this, a reinstall would keep the old auth.db with a stale password
+        # hash while .env gets a new password — making login impossible.
+        $authDbPath = Join-Path $dataDir "auth.db"
+        if (Test-Path $authDbPath) {
+            Print-Info "Removing old auth database (will be recreated with new credentials)..."
+            Remove-Item -Force -Path $authDbPath -ErrorAction SilentlyContinue
+            Remove-Item -Force -Path "$authDbPath-wal" -ErrorAction SilentlyContinue
+            Remove-Item -Force -Path "$authDbPath-shm" -ErrorAction SilentlyContinue
+        }
+        
         # Generate admin password for Node.js console
         $nodejsAdminPassword = Generate-RandomPassword
+        
+        # Create sentinel file so ensureDefaultAdmin() force-updates the password
+        # even if auth.db was somehow preserved (e.g. shared volume, manual copy)
+        New-Item -ItemType File -Path (Join-Path $dataDir ".force_password_update") -Force | Out-Null
         
         # Create .env file (always update to ensure correct paths)
         $envFile = Join-Path $script:CONSOLE_PATH ".env"
@@ -2954,7 +2969,7 @@ conn.close()
         Write-Host "UNREACHABLE" -ForegroundColor Red
     }
     
-    $consoleUrl = "http://127.0.0.1:5000/api/health"
+    $consoleUrl = "http://127.0.0.1:5000/health"
     try {
         $response = Invoke-WebRequest -Uri $consoleUrl -TimeoutSec 5 -UseBasicParsing -ErrorAction Stop
         Write-Host "  Web Console (5000):   " -NoNewline
