@@ -110,14 +110,15 @@ func (pg *PostgresDB) Migrate() error {
 		`CREATE INDEX IF NOT EXISTS idx_id_history_new ON id_change_history(new_id)`,
 
 		`CREATE TABLE IF NOT EXISTS users (
-			id            BIGSERIAL PRIMARY KEY,
-			username      TEXT UNIQUE NOT NULL,
-			password_hash TEXT NOT NULL,
-			role          TEXT NOT NULL DEFAULT 'viewer',
-			totp_secret   TEXT NOT NULL DEFAULT '',
-			totp_enabled  BOOLEAN NOT NULL DEFAULT FALSE,
-			created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-			last_login    TIMESTAMPTZ
+			id                   BIGSERIAL PRIMARY KEY,
+			username             TEXT UNIQUE NOT NULL,
+			password_hash        TEXT NOT NULL,
+			role                 TEXT NOT NULL DEFAULT 'viewer',
+			totp_secret          TEXT NOT NULL DEFAULT '',
+			totp_enabled         BOOLEAN NOT NULL DEFAULT FALSE,
+			totp_recovery_codes  TEXT DEFAULT NULL,
+			created_at           TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+			last_login           TIMESTAMPTZ
 		)`,
 
 		`CREATE TABLE IF NOT EXISTS api_keys (
@@ -164,6 +165,7 @@ func (pg *PostgresDB) Migrate() error {
 		// users: TOTP 2FA columns (added in v2.3.0)
 		`ALTER TABLE users ADD COLUMN IF NOT EXISTS totp_secret TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE users ADD COLUMN IF NOT EXISTS totp_enabled BOOLEAN NOT NULL DEFAULT FALSE`,
+		`ALTER TABLE users ADD COLUMN IF NOT EXISTS totp_recovery_codes TEXT DEFAULT NULL`,
 		// peers: ban columns (added in v2.1.0)
 		`ALTER TABLE peers ADD COLUMN IF NOT EXISTS banned BOOLEAN NOT NULL DEFAULT FALSE`,
 		`ALTER TABLE peers ADD COLUMN IF NOT EXISTS ban_reason TEXT NOT NULL DEFAULT ''`,

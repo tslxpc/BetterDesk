@@ -66,7 +66,8 @@ func (s *Server) handleMessage(msg *pb.RendezvousMessage, raddr net.Addr) *pb.Re
 		return s.handleRequestRelayTCP(msg.GetRequestRelay(), udpAddr)
 	case msg.GetRelayResponse() != nil:
 		// Target sends RelayResponse to be forwarded to the initiator via TCP.
-		s.handleRelayResponseForward(msg)
+		udpAddr, _ := net.ResolveUDPAddr("udp", raddr.String())
+		s.handleRelayResponseForward(msg, udpAddr)
 		return nil
 	case msg.GetPunchHoleSent() != nil:
 		// Target sends PunchHoleSent via TCP — convert to PunchHoleResponse
@@ -411,6 +412,12 @@ func (s *Server) handlePunchHoleRequest(msg *pb.PunchHoleRequest, raddr *net.UDP
 	}
 
 	relayServer := s.getRelayServer()
+
+	// Early LAN detection for ForceRelay path (needs relay before the check).
+	if target.UDPAddr != nil && isSameNetwork(raddr, target.UDPAddr) {
+		relayServer = s.getLANRelayServer()
+	}
+
 	log.Printf("[signal] PunchHole: target %s found (addr=%s, status=%s, lastReg=%v ago), relay=%s",
 		targetID, target.UDPAddr, target.StatusTier, time.Since(target.LastReg), relayServer)
 
@@ -421,11 +428,12 @@ func (s *Server) handlePunchHoleRequest(msg *pb.PunchHoleRequest, raddr *net.UDP
 		return
 	}
 
-	// LAN detection: if both peers share the same public IP, they are likely on
-	// the same local network. Include local addresses for direct connection.
-	sameNetwork := isSamePublicIP(raddr, target.UDPAddr)
+	// LAN detection: if both peers share the same public IP or are on the same
+	// private /24 subnet, they are on the same local network (matching Rust hbbs).
+	sameNetwork := isSameNetwork(raddr, target.UDPAddr)
 	if sameNetwork {
-		log.Printf("[signal] LAN detected: %s and %s share public IP", raddr.IP, target.UDPAddr.IP)
+		relayServer = s.getLANRelayServer()
+		log.Printf("[signal] LAN detected: %s and %s on same network, relay=%s", raddr.IP, target.UDPAddr.IP, relayServer)
 	}
 
 	// Send PunchHole to the TARGET peer (tell it the initiator's address)
@@ -468,14 +476,22 @@ func (s *Server) handlePunchHoleRequest(msg *pb.PunchHoleRequest, raddr *net.UDP
 		}
 	}
 
+	// When peers are on the same LAN, set IsLocal instead of NatType so the
+	// client knows to use direct LAN addresses (FetchLocalAddr exchange).
+	phr := &pb.PunchHoleResponse{
+		SocketAddr:  targetAddr,
+		Pk:          signedPk,
+		RelayServer: relayServer,
+	}
+	if sameNetwork {
+		phr.Union = &pb.PunchHoleResponse_IsLocal{IsLocal: true}
+	} else {
+		phr.Union = &pb.PunchHoleResponse_NatType{NatType: pb.NatType(target.NATType)}
+	}
+
 	resp := &pb.RendezvousMessage{
 		Union: &pb.RendezvousMessage_PunchHoleResponse{
-			PunchHoleResponse: &pb.PunchHoleResponse{
-				SocketAddr:  targetAddr,
-				Pk:          signedPk,
-				RelayServer: relayServer,
-				Union:       &pb.PunchHoleResponse_NatType{NatType: pb.NatType(target.NATType)},
-			},
+			PunchHoleResponse: phr,
 		},
 	}
 	s.sendUDP(resp, raddr)
@@ -536,6 +552,12 @@ func (s *Server) handlePunchHoleRequestTCP(msg *pb.PunchHoleRequest, raddr *net.
 	}
 
 	relayServer := s.getRelayServer()
+
+	// Early LAN detection (needed before ForceRelay check).
+	if target.UDPAddr != nil && isSameNetwork(raddr, target.UDPAddr) {
+		relayServer = s.getLANRelayServer()
+	}
+
 	log.Printf("[signal] PunchHole (TCP): target %s found (addr=%s, status=%s), relay=%s",
 		targetID, target.UDPAddr, target.StatusTier, relayServer)
 
@@ -583,11 +605,12 @@ func (s *Server) handlePunchHoleRequestTCP(msg *pb.PunchHoleRequest, raddr *net.
 		log.Printf("[signal] PunchHole (TCP): forwarded PunchHole to target %s at %s", targetID, target.UDPAddr)
 	}
 
-	// LAN detection: if both peers share the same public IP, they are likely on
-	// the same local network.
-	sameNetwork := isSamePublicIP(raddr, target.UDPAddr)
+	// LAN detection: if both peers share the same public IP or are on the same
+	// private /24 subnet, they are on the same local network.
+	sameNetwork := isSameNetwork(raddr, target.UDPAddr)
 	if sameNetwork {
-		log.Printf("[signal] LAN detected (TCP): %s and %s share public IP", raddr.IP, target.UDPAddr.IP)
+		relayServer = s.getLANRelayServer()
+		log.Printf("[signal] LAN detected (TCP): %s and %s on same network, relay=%s", raddr.IP, target.UDPAddr.IP, relayServer)
 	}
 
 	// Sign the target's PK with server's Ed25519 key for E2E verification.
@@ -610,14 +633,20 @@ func (s *Server) handlePunchHoleRequestTCP(msg *pb.PunchHoleRequest, raddr *net.
 		targetAddr = crypto.EncodeAddr(target.UDPAddr)
 	}
 
+	phr := &pb.PunchHoleResponse{
+		SocketAddr:  targetAddr,
+		Pk:          signedPk,
+		RelayServer: relayServer,
+	}
+	if sameNetwork {
+		phr.Union = &pb.PunchHoleResponse_IsLocal{IsLocal: true}
+	} else {
+		phr.Union = &pb.PunchHoleResponse_NatType{NatType: pb.NatType(target.NATType)}
+	}
+
 	return &pb.RendezvousMessage{
 		Union: &pb.RendezvousMessage_PunchHoleResponse{
-			PunchHoleResponse: &pb.PunchHoleResponse{
-				SocketAddr:  targetAddr,
-				Pk:          signedPk,
-				RelayServer: relayServer,
-				Union:       &pb.PunchHoleResponse_NatType{NatType: pb.NatType(target.NATType)},
-			},
+			PunchHoleResponse: phr,
 		},
 	}
 }
@@ -687,14 +716,28 @@ func (s *Server) handlePunchHoleSent(phs *pb.PunchHoleSent, senderAddr *net.UDPA
 
 	// Build PunchHoleResponse for the initiator.
 	// socket_addr = target's (sender's) address, pk = SIGNED target's public key.
+	// LAN detection: set is_local when sender and initiator are on the same network.
+	relayServer := phs.RelayServer
+	sameNetwork := isSameNetwork(senderAddr, initiatorAddr)
+	if sameNetwork {
+		relayServer = s.getLANRelayServer()
+		log.Printf("[signal] PunchHoleSent LAN detected: %s and %s on same network, relay=%s", senderAddr.IP, initiatorAddr.IP, relayServer)
+	}
+
+	phr := &pb.PunchHoleResponse{
+		SocketAddr:  crypto.EncodeAddr(senderAddr),
+		Pk:          signedPk,
+		RelayServer: relayServer,
+	}
+	if sameNetwork {
+		phr.Union = &pb.PunchHoleResponse_IsLocal{IsLocal: true}
+	} else {
+		phr.Union = &pb.PunchHoleResponse_NatType{NatType: phs.NatType}
+	}
+
 	resp := &pb.RendezvousMessage{
 		Union: &pb.RendezvousMessage_PunchHoleResponse{
-			PunchHoleResponse: &pb.PunchHoleResponse{
-				SocketAddr:  crypto.EncodeAddr(senderAddr),
-				Pk:          signedPk,
-				RelayServer: phs.RelayServer,
-				Union:       &pb.PunchHoleResponse_NatType{NatType: phs.NatType},
-			},
+			PunchHoleResponse: phr,
 		},
 	}
 
@@ -762,6 +805,12 @@ func (s *Server) handleRequestRelay(msg *pb.RequestRelay, raddr *net.UDPAddr) {
 		}
 		s.sendUDP(resp, raddr)
 		return
+	}
+
+	// LAN detection: use server's LAN IP for relay when both peers are on same network.
+	if target.UDPAddr != nil && isSameNetwork(raddr, target.UDPAddr) {
+		relayServer = s.getLANRelayServer()
+		log.Printf("[signal] RequestRelay LAN detected: %s and %s on same network, relay=%s", raddr.IP, target.UDPAddr.IP, relayServer)
 	}
 
 	// Forward relay info to target peer
@@ -849,6 +898,12 @@ func (s *Server) handleRequestRelayTCP(msg *pb.RequestRelay, raddr *net.UDPAddr)
 		}
 	}
 
+	// LAN detection: use server's LAN IP for relay when both peers are on same network.
+	if target.UDPAddr != nil && isSameNetwork(raddr, target.UDPAddr) {
+		relayServer = s.getLANRelayServer()
+		log.Printf("[signal] RequestRelay (TCP) LAN detected: %s and %s on same network, relay=%s", raddr.IP, target.UDPAddr.IP, relayServer)
+	}
+
 	// Forward RequestRelay to target peer via UDP.
 	if target.UDPAddr != nil {
 		reqRelay := &pb.RendezvousMessage{
@@ -899,6 +954,9 @@ func (s *Server) handleRequestRelayTCP(msg *pb.RequestRelay, raddr *net.UDPAddr)
 // RelayResponse to the signal server (TCP) with socket_addr = initiator's
 // address.
 //
+// senderAddr is the address of the TCP connection that sent this RelayResponse
+// (the target peer). Used for IP-based PK lookup when the id field is empty.
+//
 // Following the Rust hbbs behavior:
 // 1. Decode socket_addr to get initiator's address (addr_b in Rust)
 // 2. Clear socket_addr (initiator doesn't need it)
@@ -906,7 +964,7 @@ func (s *Server) handleRequestRelayTCP(msg *pb.RequestRelay, raddr *net.UDPAddr)
 // 4. Set pk field (initiator needs this)
 // 5. Adjust relay_server if needed
 // 6. Forward to initiator via their stored TCP connection (tcpPunchConns)
-func (s *Server) handleRelayResponseForward(msg *pb.RendezvousMessage) {
+func (s *Server) handleRelayResponseForward(msg *pb.RendezvousMessage, senderAddr *net.UDPAddr) {
 	rr := msg.GetRelayResponse()
 	if rr == nil || len(rr.SocketAddr) == 0 {
 		return
@@ -922,6 +980,16 @@ func (s *Server) handleRelayResponseForward(msg *pb.RendezvousMessage) {
 
 	// Look up the target peer to get its public key and sign it (matching Rust's get_pk).
 	targetID := rr.GetId()
+
+	// Fallback: if id field is empty (common with some RustDesk client versions),
+	// identify the sender by their IP address in the peer map.
+	if targetID == "" && senderAddr != nil {
+		if entry := s.peers.FindByIP(senderAddr.IP); entry != nil {
+			targetID = entry.ID
+			log.Printf("[signal] RelayResponse forward: resolved sender %s to peer %s via IP lookup", senderAddr, targetID)
+		}
+	}
+
 	var signedPk []byte
 	if targetID != "" {
 		if target := s.peers.Get(targetID); target != nil && len(target.PK) > 0 {
@@ -936,13 +1004,21 @@ func (s *Server) handleRelayResponseForward(msg *pb.RendezvousMessage) {
 		}
 	}
 
+	if len(signedPk) == 0 {
+		log.Printf("[signal] WARNING: RelayResponse forward — no PK available for target %q (sender=%s)", targetID, senderAddr)
+	}
+
 	// Modify the RelayResponse in-place (matching Rust hbbs behavior).
-	// Rust does: rr.socket_addr = Default; rr.set_pk(pk); adjust relay_server;
-	// then forwards the entire rr preserving version, feedback, upnp_port, etc.
 	rr.SocketAddr = nil
 	rr.SocketAddrV6 = nil
+
+	// LAN detection: use LAN relay when both peers are on same network.
 	relayServer := s.getRelayServer()
+	if senderAddr != nil && isSameNetwork(senderAddr, initiatorAddr) {
+		relayServer = s.getLANRelayServer()
+	}
 	rr.RelayServer = relayServer
+
 	// Replace union: id → SIGNED pk (initiator needs target's signed public key)
 	rr.Union = &pb.RelayResponse_Pk{Pk: signedPk}
 
@@ -953,8 +1029,6 @@ func (s *Server) handleRelayResponseForward(msg *pb.RendezvousMessage) {
 	}
 
 	// Primary delivery: TCP forwarding via tcpPunchConns.
-	// This is the expected path — the initiator's TCP connection should still be
-	// open because we now return nil from handlePunchHoleRequestTCP.
 	if s.forwardToTCPInitiator(addrStr, initiatorResp) {
 		log.Printf("[signal] RelayResponse forwarded via TCP to %s (uuid=%s, relay=%s, signedPk=%d bytes)", addrStr, rr.Uuid, relayServer, len(signedPk))
 		return
@@ -1125,6 +1199,21 @@ func (s *Server) getRelayServer() string {
 	return fmt.Sprintf(":%d", s.cfg.RelayPort)
 }
 
+// getLANRelayServer returns the relay server address suitable for LAN peers.
+// Uses the server's detected LAN IP (from OS routing table) rather than public IP.
+func (s *Server) getLANRelayServer() string {
+	relays := s.cfg.GetRelayServers()
+	if len(relays) > 0 {
+		// Explicitly configured relay — use as-is (admin knows best)
+		return relays[0]
+	}
+	// Prefer LAN IP for local peers
+	if ip, ok := s.lanIP.Load().(string); ok && ip != "" {
+		return fmt.Sprintf("%s:%d", ip, s.cfg.RelayPort)
+	}
+	return s.getRelayServer()
+}
+
 // registerPkResponse is a helper to create a RegisterPkResponse message.
 func registerPkResponse(result pb.RegisterPkResponse_Result) *pb.RendezvousMessage {
 	return &pb.RendezvousMessage{
@@ -1136,13 +1225,26 @@ func registerPkResponse(result pb.RegisterPkResponse_Result) *pb.RendezvousMessa
 	}
 }
 
-// isSamePublicIP returns true if both addresses have the same public IP.
-// Used for LAN detection — peers behind the same NAT share a public IP.
-func isSamePublicIP(a, b *net.UDPAddr) bool {
+// isSameNetwork returns true if both addresses are on the same LAN or behind
+// the same NAT. Used for LAN detection to enable direct local connections.
+//
+// Matches the original Rust hbbs logic:
+//   is_local = (both private IPv4 && same /24 subnet) || (same IP)
+func isSameNetwork(a, b *net.UDPAddr) bool {
 	if a == nil || b == nil {
 		return false
 	}
-	return a.IP.Equal(b.IP)
+	// Same IP — behind the same NAT, or same machine
+	if a.IP.Equal(b.IP) {
+		return true
+	}
+	// Both private IPv4 on the same /24 subnet — same LAN
+	a4 := a.IP.To4()
+	b4 := b.IP.To4()
+	if a4 != nil && b4 != nil && isPrivateIP(a4) && isPrivateIP(b4) {
+		return a4[0] == b4[0] && a4[1] == b4[1] && a4[2] == b4[2]
+	}
+	return false
 }
 
 // isPrivateIP returns true if the IP is in a private/local range.

@@ -2906,7 +2906,7 @@ do_build_legacy_rust() {
 #===============================================================================
 
 configure_firewall_rules() {
-    local required_ports="21114 21115 21116 21117 5000 21121"
+    local required_ports="21114 21115 21116 21117 21118 21119 5000 5443 21121"
     local created=0
     local total=0
     
@@ -3487,10 +3487,70 @@ do_configure_ssl() {
             ;;
     esac
     
+    # ── Update API URLs in .env when SSL is enabled/disabled ──
+    # The Go server (betterdesk-server) also uses TLS on port 21114 when
+    # -tls-cert/-tls-key flags are set.  Node.js console must match the
+    # protocol; otherwise health-checks send HTTP to an HTTPS endpoint,
+    # flooding the Go server log with TLS handshake errors.
+    local env_file="$CONSOLE_PATH/.env"
+    local api_port
+    api_port=$(grep -oP '^HBBS_API_URL=https?://localhost:\K[0-9]+' "$env_file" 2>/dev/null || echo "$API_PORT")
+    
+    if [ "${ssl_choice:-1}" != "4" ]; then
+        # SSL enabled — switch API URLs to HTTPS
+        sed -i "s|^HBBS_API_URL=http://localhost|HBBS_API_URL=https://localhost|" "$env_file"
+        sed -i "s|^BETTERDESK_API_URL=http://localhost|BETTERDESK_API_URL=https://localhost|" "$env_file"
+        
+        # For self-signed certs, Node.js needs NODE_EXTRA_CA_CERTS to trust the CA
+        local ssl_cert_path
+        ssl_cert_path=$(grep -oP '^SSL_CERT_PATH=\K.+' "$env_file" 2>/dev/null || true)
+        if [ -n "$ssl_cert_path" ] && [ -f "$ssl_cert_path" ]; then
+            if grep -q '^NODE_EXTRA_CA_CERTS=' "$env_file" 2>/dev/null; then
+                sed -i "s|^NODE_EXTRA_CA_CERTS=.*|NODE_EXTRA_CA_CERTS=$ssl_cert_path|" "$env_file"
+            else
+                echo "NODE_EXTRA_CA_CERTS=$ssl_cert_path" >> "$env_file"
+            fi
+            print_info "NODE_EXTRA_CA_CERTS set to $ssl_cert_path"
+        fi
+        
+        # Also update systemd service environment if it exists
+        local svc_file="/etc/systemd/system/betterdesk-console.service"
+        if [ -f "$svc_file" ]; then
+            sed -i "s|Environment=HBBS_API_URL=http://localhost|Environment=HBBS_API_URL=https://localhost|" "$svc_file"
+            sed -i "s|Environment=BETTERDESK_API_URL=http://localhost|Environment=BETTERDESK_API_URL=https://localhost|" "$svc_file"
+            if [ -n "$ssl_cert_path" ] && [ -f "$ssl_cert_path" ]; then
+                if grep -q 'NODE_EXTRA_CA_CERTS' "$svc_file"; then
+                    sed -i "s|Environment=NODE_EXTRA_CA_CERTS=.*|Environment=NODE_EXTRA_CA_CERTS=$ssl_cert_path|" "$svc_file"
+                else
+                    sed -i "/^\[Service\]/a Environment=NODE_EXTRA_CA_CERTS=$ssl_cert_path" "$svc_file"
+                fi
+            fi
+            systemctl daemon-reload 2>/dev/null || true
+        fi
+        
+        print_info "API URLs updated to HTTPS in .env and systemd service"
+    else
+        # SSL disabled — revert API URLs to HTTP
+        sed -i "s|^HBBS_API_URL=https://localhost|HBBS_API_URL=http://localhost|" "$env_file"
+        sed -i "s|^BETTERDESK_API_URL=https://localhost|BETTERDESK_API_URL=http://localhost|" "$env_file"
+        sed -i '/^NODE_EXTRA_CA_CERTS=/d' "$env_file"
+        
+        # Also update systemd service
+        local svc_file="/etc/systemd/system/betterdesk-console.service"
+        if [ -f "$svc_file" ]; then
+            sed -i "s|Environment=HBBS_API_URL=https://localhost|Environment=HBBS_API_URL=http://localhost|" "$svc_file"
+            sed -i "s|Environment=BETTERDESK_API_URL=https://localhost|Environment=BETTERDESK_API_URL=http://localhost|" "$svc_file"
+            sed -i '/Environment=NODE_EXTRA_CA_CERTS=/d' "$svc_file"
+            systemctl daemon-reload 2>/dev/null || true
+        fi
+        
+        print_info "API URLs reverted to HTTP"
+    fi
+    
     echo ""
     if confirm "Restart BetterDesk to apply changes?"; then
-        systemctl restart betterdesk 2>/dev/null || true
-        print_success "BetterDesk restarted"
+        systemctl restart betterdesk-server betterdesk-console 2>/dev/null || true
+        print_success "BetterDesk services restarted"
     fi
     
     press_enter

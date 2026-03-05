@@ -94,6 +94,7 @@ func (s *SQLiteDB) Migrate() error {
 			role TEXT NOT NULL DEFAULT 'viewer',
 			totp_secret TEXT DEFAULT '',
 			totp_enabled INTEGER DEFAULT 0,
+			totp_recovery_codes TEXT DEFAULT NULL,
 			created_at TEXT DEFAULT (datetime('now')),
 			last_login TEXT DEFAULT ''
 		)`,
@@ -150,6 +151,7 @@ func (s *SQLiteDB) Migrate() error {
 		// users: TOTP 2FA columns (added in v2.3.0)
 		{"users", "totp_secret", `ALTER TABLE users ADD COLUMN totp_secret TEXT DEFAULT ''`},
 		{"users", "totp_enabled", `ALTER TABLE users ADD COLUMN totp_enabled INTEGER DEFAULT 0`},
+		{"users", "totp_recovery_codes", `ALTER TABLE users ADD COLUMN totp_recovery_codes TEXT DEFAULT NULL`},
 		// peers: ban columns (added in v2.1.0)
 		{"peers", "banned", `ALTER TABLE peers ADD COLUMN banned INTEGER DEFAULT 0`},
 		{"peers", "ban_reason", `ALTER TABLE peers ADD COLUMN ban_reason TEXT DEFAULT ''`},

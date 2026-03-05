@@ -359,8 +359,9 @@ router.get('/api/ab', async (req, res) => {
     if (!user) {
         return res.status(401).json({ error: 'Invalid or expired token' });
     }
-    const data = await db.getAddressBook(user.id, 'legacy');
-    return res.json({ data: data, licensed_devices: 0 });
+    const abRecord = await db.getAddressBook(user.id, 'legacy');
+    const abData = (abRecord && abRecord.data) ? String(abRecord.data) : '{}';
+    return res.json({ data: abData, licensed_devices: 0 });
 });
 
 /**
@@ -399,8 +400,9 @@ router.get('/api/ab/personal', async (req, res) => {
     if (!user) {
         return res.status(401).json({ error: 'Invalid or expired token' });
     }
-    const data = await db.getAddressBook(user.id, 'personal');
-    return res.json({ data: data });
+    const abRecord = await db.getAddressBook(user.id, 'personal');
+    const abData = (abRecord && abRecord.data) ? String(abRecord.data) : '{}';
+    return res.json({ data: abData });
 });
 
 /**

@@ -759,6 +759,57 @@ function createSqliteAdapter(config) {
         };
     }
 
+    // ========= Go ↔ Node.js peer sync (SQLite) =========
+
+    let _lastGoPeerSyncSqlite = 0;
+    const GO_SYNC_INTERVAL_SQLITE_MS = 30_000;
+
+    function syncGoPeersSqlite() {
+        const now = Date.now();
+        if (now - _lastGoPeerSyncSqlite < GO_SYNC_INTERVAL_SQLITE_MS) return;
+        _lastGoPeerSyncSqlite = now;
+        const db = openMain();
+        try {
+            // Check if Go's 'peers' table exists
+            const tbl = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='peers'").get();
+            if (!tbl) return;
+            db.prepare(`
+                INSERT INTO peer (id, uuid, pk, info, ip, "user", status_online, last_online, created_at,
+                                  is_deleted, is_banned, banned_at, banned_reason)
+                SELECT
+                    p.id,
+                    COALESCE(p.uuid, ''),
+                    p.pk,
+                    json_object(
+                        'hostname', COALESCE(p.hostname, ''),
+                        'os',       COALESCE(p.os, ''),
+                        'platform', COALESCE(p.os, ''),
+                        'version',  COALESCE(p.version, '')
+                    ),
+                    COALESCE(p.ip, ''),
+                    COALESCE(p."user", ''),
+                    CASE WHEN p.status = 'ONLINE' THEN 1 ELSE 0 END,
+                    p.last_online,
+                    COALESCE(p.created_at, datetime('now')),
+                    0,
+                    CASE WHEN p.banned THEN 1 ELSE 0 END,
+                    p.banned_at,
+                    COALESCE(p.ban_reason, '')
+                FROM peers p
+                WHERE NOT p.soft_deleted
+                ON CONFLICT(id) DO UPDATE SET
+                    status_online = excluded.status_online,
+                    last_online   = COALESCE(excluded.last_online, last_online),
+                    info          = CASE WHEN info IS NULL OR info = '{}' OR info = '' THEN excluded.info ELSE info END,
+                    is_deleted    = 0
+            `).run();
+        } catch (err) {
+            if (!err.message.includes('no such table')) {
+                console.warn('[DB] syncGoPeersSqlite error:', err.message);
+            }
+        }
+    }
+
     // ========= Adapter object =========
 
     return {
@@ -789,6 +840,7 @@ function createSqliteAdapter(config) {
         // ---- Peers ----
 
         async getAllPeers(filters = {}) {
+            syncGoPeersSqlite();
             const db = openMain();
             let where = 'WHERE is_deleted = 0';
             const params = [];
@@ -804,7 +856,57 @@ function createSqliteAdapter(config) {
         },
 
         async getPeerById(id) {
-            return parsePeer(openMain().prepare('SELECT * FROM peer WHERE id = ? AND is_deleted = 0').get(id));
+            const db = openMain();
+            let row = db.prepare('SELECT * FROM peer WHERE id = ? AND is_deleted = 0').get(id);
+            if (!row) {
+                // Fallback: check Go server's 'peers' table (different schema).
+                // Both Go and Node.js use the same db_v2.sqlite3 file but create
+                // different tables ('peers' vs 'peer'). Bridge them here.
+                try {
+                    const goRow = db.prepare('SELECT * FROM peers WHERE id = ? AND NOT soft_deleted').get(id);
+                    if (goRow) {
+                        const info = JSON.stringify({
+                            hostname: goRow.hostname || '',
+                            os: goRow.os || '',
+                            platform: goRow.os || '',
+                            version: goRow.version || ''
+                        });
+                        db.prepare(`
+                            INSERT INTO peer (id, uuid, pk, info, ip, "user", status_online, last_online, created_at, is_deleted, is_banned, banned_at, banned_reason)
+                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?)
+                            ON CONFLICT(id) DO UPDATE SET
+                                uuid = COALESCE(NULLIF(excluded.uuid, ''), uuid),
+                                pk = COALESCE(excluded.pk, pk),
+                                info = COALESCE(NULLIF(excluded.info, '{}'), info),
+                                ip = COALESCE(NULLIF(excluded.ip, ''), ip),
+                                "user" = COALESCE(NULLIF(excluded."user", ''), "user"),
+                                status_online = excluded.status_online,
+                                last_online = COALESCE(excluded.last_online, last_online),
+                                is_deleted = 0
+                        `).run(
+                            goRow.id,
+                            goRow.uuid || '',
+                            goRow.pk || null,
+                            info,
+                            goRow.ip || '',
+                            goRow.user || '',
+                            goRow.status === 'ONLINE' ? 1 : 0,
+                            goRow.last_online || null,
+                            goRow.created_at || new Date().toISOString(),
+                            goRow.banned ? 1 : 0,
+                            goRow.banned_at || null,
+                            goRow.ban_reason || ''
+                        );
+                        row = db.prepare('SELECT * FROM peer WHERE id = ? AND is_deleted = 0').get(id);
+                    }
+                } catch (err) {
+                    // 'peers' table might not exist if Go server hasn't run yet
+                    if (!err.message.includes('no such table')) {
+                        console.warn('[DB] Fallback peers lookup error:', err.message);
+                    }
+                }
+            }
+            return parsePeer(row);
         },
 
         async upsertPeer({ id, uuid, pk, info, ip }) {
@@ -841,8 +943,8 @@ function createSqliteAdapter(config) {
         },
 
         async getPeerStats() {
+            syncGoPeersSqlite();
             const db = openMain();
-            const total = db.prepare('SELECT COUNT(*) as c FROM peer WHERE is_deleted = 0').get().c;
             const online = db.prepare('SELECT COUNT(*) as c FROM peer WHERE is_deleted = 0 AND status_online = 1').get().c;
             const banned = db.prepare('SELECT COUNT(*) as c FROM peer WHERE is_deleted = 0 AND is_banned = 1').get().c;
             return { total, online, banned, offline: total - online };
@@ -2888,6 +2990,59 @@ function createPostgresAdapter() {
         };
     }
 
+    // ========= Go ↔ Node.js peer sync (PostgreSQL only) =========
+
+    let _lastGoPeerSync = 0;
+    const GO_SYNC_INTERVAL_MS = 30_000; // sync at most every 30 seconds
+
+    /**
+     * Sync devices from Go server's "peers" table into Node.js "peer" table.
+     * Called before bulk queries (getAllPeers, getPeerStats) to ensure the
+     * console shows all devices the Go signal server has registered.
+     */
+    async function syncGoPeers() {
+        const now = Date.now();
+        if (now - _lastGoPeerSync < GO_SYNC_INTERVAL_MS) return;
+        _lastGoPeerSync = now;
+        try {
+            await q(`
+                INSERT INTO peer (id, uuid, pk, info, ip, "user", status_online, last_online, created_at,
+                                  is_deleted, is_banned, banned_at, banned_reason)
+                SELECT
+                    p.id,
+                    COALESCE(p.uuid, ''),
+                    p.pk,
+                    json_build_object(
+                        'hostname', COALESCE(p.hostname, ''),
+                        'os',       COALESCE(p.os, ''),
+                        'platform', COALESCE(p.os, ''),
+                        'version',  COALESCE(p.version, '')
+                    )::text,
+                    COALESCE(p.ip, ''),
+                    COALESCE(p."user", ''),
+                    (p.status = 'ONLINE'),
+                    p.last_online,
+                    COALESCE(p.created_at, NOW()),
+                    FALSE,
+                    COALESCE(p.banned, FALSE),
+                    p.banned_at,
+                    COALESCE(p.ban_reason, '')
+                FROM peers p
+                WHERE NOT p.soft_deleted
+                ON CONFLICT(id) DO UPDATE SET
+                    status_online = EXCLUDED.status_online,
+                    last_online   = COALESCE(EXCLUDED.last_online, peer.last_online),
+                    info          = CASE WHEN peer.info IS NULL OR peer.info = '{}' THEN EXCLUDED.info ELSE peer.info END,
+                    is_deleted    = FALSE
+            `);
+        } catch (err) {
+            // 'peers' table might not exist when Go server is not used
+            if (!err.message.includes('does not exist')) {
+                console.warn('[DB] syncGoPeers error:', err.message);
+            }
+        }
+    }
+
     // ========= Adapter =========
 
     return {
@@ -2905,6 +3060,7 @@ function createPostgresAdapter() {
         // ---- Peers ----
 
         async getAllPeers(filters = {}) {
+            await syncGoPeers();
             let where = 'WHERE NOT is_deleted';
             const params = [];
             let idx = 1;
@@ -2919,7 +3075,60 @@ function createPostgresAdapter() {
         },
 
         async getPeerById(id) {
-            return parsePeer(await one('SELECT * FROM peer WHERE id = $1 AND NOT is_deleted', [id]));
+            let row = await one('SELECT * FROM peer WHERE id = $1 AND NOT is_deleted', [id]);
+            if (!row) {
+                // Fallback: check Go server's 'peers' table (different schema).
+                // When using PostgreSQL, the Go signal server registers devices in
+                // 'peers' while the Node.js console uses 'peer'. Bridge them here.
+                try {
+                    const goRow = await one(
+                        'SELECT * FROM peers WHERE id = $1 AND NOT soft_deleted', [id]
+                    );
+                    if (goRow) {
+                        // Auto-sync: create the device in the Node.js 'peer' table
+                        const info = JSON.stringify({
+                            hostname: goRow.hostname || '',
+                            os: goRow.os || '',
+                            platform: goRow.os || '',
+                            version: goRow.version || ''
+                        });
+                        await q(`
+                            INSERT INTO peer (id, uuid, pk, info, ip, "user", status_online, last_online, created_at, is_deleted, is_banned, banned_at, banned_reason)
+                            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, FALSE, $10, $11, $12)
+                            ON CONFLICT(id) DO UPDATE SET
+                                uuid = COALESCE(NULLIF($2, ''), peer.uuid),
+                                pk = COALESCE($3, peer.pk),
+                                info = COALESCE(NULLIF($4, '{}'), peer.info),
+                                ip = COALESCE(NULLIF($5, ''), peer.ip),
+                                "user" = COALESCE(NULLIF($6, ''), peer."user"),
+                                status_online = $7,
+                                last_online = $8,
+                                is_deleted = FALSE
+                        `, [
+                            goRow.id,
+                            goRow.uuid || '',
+                            goRow.pk || null,
+                            info,
+                            goRow.ip || '',
+                            goRow.user || '',
+                            goRow.status === 'ONLINE',
+                            goRow.last_online || null,
+                            goRow.created_at || new Date(),
+                            !!goRow.banned,
+                            goRow.banned_at || null,
+                            goRow.ban_reason || ''
+                        ]);
+                        // Re-read the just-synced row
+                        row = await one('SELECT * FROM peer WHERE id = $1 AND NOT is_deleted', [id]);
+                    }
+                } catch (err) {
+                    // 'peers' table might not exist (SQLite mode, or Go server not used)
+                    if (!err.message.includes('does not exist')) {
+                        console.warn('[DB] Fallback peers lookup error:', err.message);
+                    }
+                }
+            }
+            return parsePeer(row);
         },
 
         async upsertPeer({ id, uuid, pk, info, ip }) {
@@ -2955,6 +3164,7 @@ function createPostgresAdapter() {
         },
 
         async getPeerStats() {
+            await syncGoPeers();
             const r = await one(`
                 SELECT
                     COUNT(*) FILTER (WHERE NOT is_deleted) as total,

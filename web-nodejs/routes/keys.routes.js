@@ -47,11 +47,17 @@ router.get('/api/keys/public', requireAuth, (req, res) => {
 });
 
 /**
- * GET /api/keys/public/qr - Get public key as QR code
+ * GET /api/keys/public/qr - Get server config as QR code
+ * Generates a QR code in rustdesk://config/<base64-json> format
+ * that the RustDesk mobile app can scan to auto-configure.
  */
 router.get('/api/keys/public/qr', requireAuth, async (req, res) => {
     try {
-        const qrDataUrl = await keyService.getPublicKeyQR();
+        // Determine the server host from request headers (what the browser used to reach us)
+        let serverHost = req.headers['x-forwarded-host'] || req.headers.host || req.hostname || 'localhost';
+        serverHost = serverHost.split(':')[0]; // strip port
+
+        const qrDataUrl = await keyService.getServerConfigQR(serverHost);
         
         if (!qrDataUrl) {
             return res.status(404).json({
@@ -166,7 +172,10 @@ router.get('/api/keys/server-info', requireAuth, (req, res) => {
  */
 router.get('/api/keys/qr', requireAuth, async (req, res) => {
     try {
-        const qrDataUrl = await keyService.getPublicKeyQR();
+        let serverHost = req.headers['x-forwarded-host'] || req.headers.host || req.hostname || 'localhost';
+        serverHost = serverHost.split(':')[0];
+
+        const qrDataUrl = await keyService.getServerConfigQR(serverHost);
         
         if (!qrDataUrl) {
             return res.status(404).json({

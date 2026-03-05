@@ -2391,7 +2391,7 @@ function Do-Validate {
     $firewallProfile = Get-NetFirewallProfile -ErrorAction SilentlyContinue
     $activeProfiles = $firewallProfile | Where-Object { $_.Enabled -eq $true }
     if ($activeProfiles) {
-        $fwPorts = @(21114, 21115, 21116, 21117, 5000, 21121)
+        $fwPorts = @(21114, 21115, 21116, 21117, 21118, 21119, 5000, 5443, 21121)
         $fwMissing = 0
         foreach ($fwPort in $fwPorts) {
             $rules = Get-NetFirewallRule -Direction Inbound -Enabled True -ErrorAction SilentlyContinue | 
@@ -2726,8 +2726,11 @@ function Check-FirewallRules {
         @{Port=21116; Proto="TCP";  Name="ID Server TCP"},
         @{Port=21116; Proto="UDP";  Name="ID Server UDP"},
         @{Port=21117; Proto="TCP";  Name="Relay Server"},
+        @{Port=21118; Proto="TCP";  Name="WebSocket Signal"},
+        @{Port=21119; Proto="TCP";  Name="WebSocket Relay"},
         @{Port=21114; Proto="TCP";  Name="HBBS API"},
         @{Port=5000;  Proto="TCP";  Name="Web Console"},
+        @{Port=5443;  Proto="TCP";  Name="Web Console HTTPS"},
         @{Port=21121; Proto="TCP";  Name="Client API"}
     )
     
@@ -2762,8 +2765,11 @@ function Configure-Firewall {
             @{Port=21116; Proto="TCP";  Name="BetterDesk ID Server TCP"},
             @{Port=21116; Proto="UDP";  Name="BetterDesk ID Server UDP"},
             @{Port=21117; Proto="TCP";  Name="BetterDesk Relay Server"},
+            @{Port=21118; Proto="TCP";  Name="BetterDesk WebSocket Signal"},
+            @{Port=21119; Proto="TCP";  Name="BetterDesk WebSocket Relay"},
             @{Port=21114; Proto="TCP";  Name="BetterDesk HBBS API"},
             @{Port=5000;  Proto="TCP";  Name="BetterDesk Web Console"},
+            @{Port=5443;  Proto="TCP";  Name="BetterDesk Console HTTPS"},
             @{Port=21121; Proto="TCP";  Name="BetterDesk Client API"}
         )
         
@@ -3483,15 +3489,64 @@ function Do-ConfigureSSL {
         }
     }
     
+    # ── Update API URLs in .env when SSL is enabled/disabled ──
+    # The Go server uses TLS on port 21114 when -tls-cert/-tls-key flags are set.
+    # Node.js console must match the protocol to avoid TLS handshake errors.
+    $envContent = Get-Content $envFile -Raw
+    
+    if ($sslChoice -ne "3") {
+        # SSL enabled — switch API URLs to HTTPS
+        $envContent = $envContent -replace 'HBBS_API_URL=http://localhost', 'HBBS_API_URL=https://localhost'
+        $envContent = $envContent -replace 'BETTERDESK_API_URL=http://localhost', 'BETTERDESK_API_URL=https://localhost'
+        
+        # For self-signed certs, Node.js needs NODE_EXTRA_CA_CERTS to trust the CA
+        $sslCertValue = [regex]::Match($envContent, 'SSL_CERT_PATH=(.+)').Groups[1].Value.Trim()
+        if ($sslCertValue -and (Test-Path $sslCertValue -ErrorAction SilentlyContinue)) {
+            if ($envContent -match 'NODE_EXTRA_CA_CERTS=') {
+                $envContent = $envContent -replace 'NODE_EXTRA_CA_CERTS=.*', "NODE_EXTRA_CA_CERTS=$sslCertValue"
+            } else {
+                $envContent = $envContent.TrimEnd() + "`nNODE_EXTRA_CA_CERTS=$sslCertValue`n"
+            }
+            Print-Info "NODE_EXTRA_CA_CERTS set to $sslCertValue"
+        }
+        
+        # Also update NSSM service environment if available
+        $nssm = Get-Command nssm -ErrorAction SilentlyContinue
+        if ($nssm) {
+            $svcName = $script:CONSOLE_SERVICE
+            try {
+                $currentEnv = & nssm get $svcName AppEnvironmentExtra 2>$null
+                if ($currentEnv) {
+                    $currentEnv = $currentEnv -replace 'HBBS_API_URL=http://localhost', 'HBBS_API_URL=https://localhost'
+                    $currentEnv = $currentEnv -replace 'BETTERDESK_API_URL=http://localhost', 'BETTERDESK_API_URL=https://localhost'
+                    & nssm set $svcName AppEnvironmentExtra $currentEnv 2>$null
+                }
+            } catch { }
+        }
+        
+        Print-Info "API URLs updated to HTTPS"
+    } else {
+        # SSL disabled — revert API URLs to HTTP
+        $envContent = $envContent -replace 'HBBS_API_URL=https://localhost', 'HBBS_API_URL=http://localhost'
+        $envContent = $envContent -replace 'BETTERDESK_API_URL=https://localhost', 'BETTERDESK_API_URL=http://localhost'
+        $envContent = $envContent -replace '(?m)^NODE_EXTRA_CA_CERTS=.*\r?\n?', ''
+        
+        Print-Info "API URLs reverted to HTTP"
+    }
+    
+    Set-Content $envFile -Value $envContent -NoNewline
+    
     Write-Host ""
     if (Confirm-Action "Restart BetterDesk to apply changes?") {
-        $serviceName = $script:CONSOLE_SERVICE
-        if (Get-Service -Name $serviceName -ErrorAction SilentlyContinue) {
-            Restart-Service -Name $serviceName -Force -ErrorAction SilentlyContinue
-            Print-Success "BetterDesk restarted"
-        } else {
-            Print-Warning "Service not found. Please restart manually."
+        $serverService = $script:SERVER_SERVICE
+        $consoleService = $script:CONSOLE_SERVICE
+        if (Get-Service -Name $serverService -ErrorAction SilentlyContinue) {
+            Restart-Service -Name $serverService -Force -ErrorAction SilentlyContinue
         }
+        if (Get-Service -Name $consoleService -ErrorAction SilentlyContinue) {
+            Restart-Service -Name $consoleService -Force -ErrorAction SilentlyContinue
+        }
+        Print-Success "BetterDesk services restarted"
     }
     
     Press-Enter

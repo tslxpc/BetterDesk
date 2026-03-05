@@ -71,10 +71,13 @@ type Server struct {
 	// initiator's addr key and forward the message over their TCP connection.
 	tcpPunchConns sync.Map // map[string]*tcpPunchConn
 
-	// localIP is the server's detected local/public IP address, learned from
-	// the UDP socket's local address when sending to peers.  Used to build
-	// the relay server address when -relay-servers is not explicitly set.
+	// localIP is the server's detected public IP address (via external service).
+	// Used to build the relay server address when -relay-servers is not set.
 	localIP atomic.Value // stores string
+
+	// lanIP is the server's local/private IP address (from OS routing table).
+	// Used for LAN relay advertisements when both peers are on the same network.
+	lanIP atomic.Value // stores string
 }
 
 // New creates a new signal server instance.
@@ -115,25 +118,28 @@ func (s *Server) EventBus() *events.Bus {
 //
 // The result is stored in s.localIP for use by getRelayServer().
 func (s *Server) detectLocalIP() {
-	// Try to detect public IP via external HTTP service
+	// Always detect LAN IP via OS routing table (needed for LAN relay).
+	conn, err := net.Dial("udp4", "8.8.8.8:53")
+	if err == nil {
+		localAddr := conn.LocalAddr().(*net.UDPAddr)
+		lanIP := localAddr.IP.String()
+		s.lanIP.Store(lanIP)
+		conn.Close()
+		log.Printf("[signal] Detected LAN IP: %s (used for local relay advertisements)", lanIP)
+	}
+
+	// Try to detect public IP via external HTTP service.
 	if ip := detectPublicIP(); ip != "" {
 		s.localIP.Store(ip)
 		log.Printf("[signal] Detected public IP: %s (used for relay advertisements)", ip)
 		return
 	}
 
-	// Fallback: use OS routing table (local IP)
-	conn, err := net.Dial("udp4", "8.8.8.8:53")
-	if err != nil {
-		log.Printf("[signal] Could not detect local IP: %v", err)
-		return
+	// Fallback: use LAN IP as public IP too
+	if ip, ok := s.lanIP.Load().(string); ok && ip != "" {
+		s.localIP.Store(ip)
+		log.Printf("[signal] No public IP detected, using LAN IP: %s (consider setting -relay-servers)", ip)
 	}
-	defer conn.Close()
-
-	localAddr := conn.LocalAddr().(*net.UDPAddr)
-	ip := localAddr.IP.String()
-	s.localIP.Store(ip)
-	log.Printf("[signal] Detected local IP: %s (used for relay advertisements; consider setting -relay-servers for public IP)", ip)
 }
 
 // detectPublicIP tries to determine the server's public IP address by querying

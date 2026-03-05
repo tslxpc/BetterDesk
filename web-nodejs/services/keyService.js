@@ -42,7 +42,51 @@ function getApiKey(masked = true) {
 }
 
 /**
- * Generate QR code for public key
+ * Generate QR code containing the RustDesk configuration URI.
+ * Format: rustdesk://config/<base64-encoded-json>
+ * The JSON contains: { host, relay, api, key }
+ * @param {string} serverHost - server host/IP used for the config
+ */
+async function getServerConfigQR(serverHost) {
+    const pubKey = getPublicKey();
+    if (!pubKey) {
+        return null;
+    }
+
+    try {
+        const apiKey = getApiKey(false); // unmasked
+        const configPayload = {
+            host: serverHost || 'localhost',
+            relay: serverHost || 'localhost',
+            api: `http://${serverHost || 'localhost'}:${config.apiPort}`,
+            key: pubKey
+        };
+        if (apiKey) {
+            configPayload.key = pubKey;
+        }
+        const jsonStr = JSON.stringify(configPayload);
+        const b64 = Buffer.from(jsonStr).toString('base64');
+        const configUri = `rustdesk://config/${b64}`;
+
+        const qrDataUrl = await QRCode.toDataURL(configUri, {
+            errorCorrectionLevel: 'M',
+            type: 'image/png',
+            width: 256,
+            margin: 2,
+            color: {
+                dark: '#e6edf3',
+                light: '#0d1117'
+            }
+        });
+        return qrDataUrl;
+    } catch (err) {
+        console.warn('Could not generate config QR code:', err.message);
+        return null;
+    }
+}
+
+/**
+ * Generate QR code for public key (legacy — raw key text)
  */
 async function getPublicKeyQR() {
     const pubKey = getPublicKey();
@@ -86,5 +130,6 @@ module.exports = {
     getPublicKey,
     getApiKey,
     getPublicKeyQR,
+    getServerConfigQR,
     getServerConfig
 };
