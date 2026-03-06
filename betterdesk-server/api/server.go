@@ -159,6 +159,7 @@ func (s *Server) Start(ctx context.Context) error {
 	mux.HandleFunc("GET /api/login-options", s.handleClientLoginOptions)
 	mux.HandleFunc("POST /api/logout", s.handleClientLogout)
 	mux.HandleFunc("GET /api/currentUser", s.handleClientCurrentUser)
+	mux.HandleFunc("POST /api/currentUser", s.handleClientCurrentUser)
 	mux.HandleFunc("GET /api/ab", s.handleClientAddressBook)
 	mux.HandleFunc("POST /api/ab", s.handleClientAddressBook)
 	mux.HandleFunc("POST /api/heartbeat", s.handleClientHeartbeat)

@@ -15,7 +15,21 @@ const { requireAuth } = require('../middleware/auth');
 router.get('/api/folders', requireAuth, async (req, res) => {
     try {
         const folders = await db.getAllFolders();
-        
+
+        // Enrich each folder with device_count from assignments table
+        try {
+            const assignments = await db.getAllFolderAssignments();
+            const countMap = {};
+            for (const [, folderId] of Object.entries(assignments)) {
+                countMap[folderId] = (countMap[folderId] || 0) + 1;
+            }
+            for (const f of folders) {
+                f.device_count = countMap[f.id] || 0;
+            }
+        } catch (err) {
+            console.error('Failed to compute folder device counts:', err.message);
+        }
+
         res.json({
             success: true,
             data: {

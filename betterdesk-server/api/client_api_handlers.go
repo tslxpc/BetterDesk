@@ -4,12 +4,13 @@
 // so these endpoints must be served on the same port as the admin API.
 //
 // Endpoints:
-//   POST /api/login          — RustDesk-compatible login (username/password + TOTP)
-//   GET  /api/login-options   — Available authentication methods
-//   POST /api/logout          — Invalidate session (no-op for stateless JWT)
-//   GET  /api/currentUser     — Get current user info (Bearer token required)
-//   POST /api/ab              — Get/update address book
-//   GET  /api/ab              — Get address book
+//
+//	POST /api/login          — RustDesk-compatible login (username/password + TOTP)
+//	GET  /api/login-options   — Available authentication methods
+//	POST /api/logout          — Invalidate session (no-op for stateless JWT)
+//	GET  /api/currentUser     — Get current user info (Bearer token required)
+//	POST /api/ab              — Get/update address book
+//	GET  /api/ab              — Get address book
 package api
 
 import (
@@ -85,7 +86,8 @@ func rustdeskUserPayload(username, role string) map[string]any {
 		"email":    "",
 		"note":     "",
 		"status":   1, // kNormal
-		"is_admin": role == auth.RoleAdmin,
+		"grp":      "",
+		"is_admin":  role == auth.RoleAdmin,
 	}
 }
 
@@ -268,7 +270,7 @@ func (s *Server) handleClientTFAVerify(w http.ResponseWriter, clientIP, totpCode
 // handleClientLoginOptions returns available authentication methods.
 // GET /api/login-options
 func (s *Server) handleClientLoginOptions(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, http.StatusOK, []string{"account"})
+	writeJSON(w, http.StatusOK, []string{""})
 }
 
 // handleClientLogout handles logout for RustDesk clients.
@@ -319,7 +321,8 @@ func (s *Server) handleClientAddressBook(w http.ResponseWriter, r *http.Request)
 // POST /api/heartbeat
 // Request:  { "id": "DEVICE_ID", "uuid": "...", "cpu": 42, "memory": 55, "disk": 30 }
 // Response: { "modified_at": "2026-...", "sysinfo": true } (if sysinfo needed)
-//           { "modified_at": "2026-..." }                   (normal ACK)
+//
+//	{ "modified_at": "2026-..." }                   (normal ACK)
 func (s *Server) handleClientHeartbeat(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		ID   string `json:"id"`
@@ -371,7 +374,8 @@ func (s *Server) handleClientHeartbeat(w http.ResponseWriter, r *http.Request) {
 // POST /api/sysinfo
 // Request:  { "id": "DEVICE_ID", "hostname": "...", "platform": "...", "os": "...", "version": "..." ... }
 // Response: plain text "SYSINFO_UPDATED" (activates PRO mode in client),
-//           "ID_NOT_FOUND" (client retries), or "ERROR".
+//
+//	"ID_NOT_FOUND" (client retries), or "ERROR".
 func (s *Server) handleClientSysinfo(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		ID       string `json:"id"`

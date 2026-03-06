@@ -69,6 +69,9 @@
             // Update count
             document.getElementById('devices-count').textContent = devices.length;
             
+            // Update folder counts now that devices are loaded
+            updateFolderCounts();
+            
             applyFilters();
             
         } catch (error) {
@@ -83,7 +86,7 @@
     function applyFilters() {
         filteredDevices = devices.filter(device => {
             // Folder filter
-            if (currentFolder === 'unassigned' && device.folder_id !== null) return false;
+            if (currentFolder === 'unassigned' && device.folder_id) return false;
             if (currentFolder !== 'all' && currentFolder !== 'unassigned') {
                 if (device.folder_id !== parseInt(currentFolder, 10)) return false;
             }
@@ -785,7 +788,6 @@
             // Expose folders globally for DeviceDetail panel
             window._betterdesk_folders = folders;
             renderFolders();
-            updateFolderCounts();
             updateBulkMoveSelect();
         } catch (error) {
             console.error('Failed to load folders:', error);
@@ -872,11 +874,20 @@
         const allCount = document.getElementById('folder-count-all');
         if (allCount) allCount.textContent = devices.length;
         
-        // Unassigned count
+        // Unassigned count (devices without folder_id — null, undefined, or missing)
         const unassignedCount = document.getElementById('folder-count-unassigned');
         if (unassignedCount) {
-            const count = devices.filter(d => d.folder_id === null).length;
+            const count = devices.filter(d => !d.folder_id).length;
             unassignedCount.textContent = count;
+        }
+        
+        // Update custom folder counts from devices array
+        for (const folder of folders) {
+            const el = document.querySelector(`.folder-item[data-folder="${folder.id}"] .folder-count`);
+            if (el) {
+                const count = devices.filter(d => d.folder_id === folder.id).length;
+                el.textContent = count;
+            }
         }
     }
     

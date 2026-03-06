@@ -83,6 +83,7 @@ function buildUserPayload(user) {
         email: '',
         note: '',
         status: 1, // kNormal
+        grp: '',
         is_admin: user.role === 'admin'
     };
 }
@@ -143,7 +144,7 @@ function isValidDeviceId(id) {
  * We only support account-password.
  */
 router.get('/api/login-options', (req, res) => {
-    res.json(['account-password']);
+    res.json(['']);
 });
 
 /**
