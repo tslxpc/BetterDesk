@@ -1262,6 +1262,7 @@
                     loadDevices();
                     loadFolders();
                 } catch (error) {
+                    console.error('Folder assignment failed:', error);
                     Notifications.error(error.message || _('errors.server_error'));
                 }
             });

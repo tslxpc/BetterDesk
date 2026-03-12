@@ -72,6 +72,37 @@ BOLD='\033[1m'
 LOG_FILE="/tmp/betterdesk_docker_$(date +%Y%m%d_%H%M%S).log"
 
 #===============================================================================
+# SELinux / Volume Helper Functions
+#===============================================================================
+
+# Create directory with proper permissions for Docker volumes
+# Handles SELinux context on RHEL-based systems (AlmaLinux, CentOS, Rocky)
+create_data_directory() {
+    local dir_path="$1"
+    
+    mkdir -p "$dir_path" || {
+        print_error "Failed to create directory: $dir_path"
+        return 1
+    }
+    
+    # Set proper ownership (root or current user)
+    chmod 755 "$dir_path"
+    
+    # Handle SELinux on RHEL-based systems
+    if command -v getenforce &> /dev/null; then
+        if [ "$(getenforce 2>/dev/null)" = "Enforcing" ]; then
+            # Apply SVirt sandbox context for Docker
+            if command -v chcon &> /dev/null; then
+                chcon -Rt svirt_sandbox_file_t "$dir_path" 2>/dev/null || true
+                log "SELinux: Applied svirt_sandbox_file_t context to $dir_path"
+            fi
+        fi
+    fi
+    
+    return 0
+}
+
+#===============================================================================
 # Helper Functions
 #===============================================================================
 
@@ -801,9 +832,17 @@ do_install() {
     # Choose database type (SQLite or PostgreSQL)
     choose_database_type
     
-    # Create data directory
-    mkdir -p "$DATA_DIR"
-    mkdir -p "$BACKUP_DIR"
+    # Create data directory with proper permissions (handles SELinux)
+    print_step "Creating data directories..."
+    create_data_directory "$DATA_DIR" || {
+        print_error "Failed to create data directory: $DATA_DIR"
+        print_info "If you're on SELinux-enabled system (AlmaLinux, RHEL, CentOS):"
+        print_info "  sudo setenforce 0  # Temporarily disable"
+        print_info "  # Or: sudo chcon -Rt svirt_sandbox_file_t $DATA_DIR"
+        press_enter
+        return
+    }
+    create_data_directory "$BACKUP_DIR" || true
     
     # Always recreate compose file to include database configuration
     create_compose_file
@@ -1905,8 +1944,15 @@ do_migrate() {
         DATA_DIR="/opt/betterdesk-data"
     fi
     
-    mkdir -p "$DATA_DIR"
-    mkdir -p "$BACKUP_DIR"
+    # Create directories with proper permissions (handles SELinux)
+    create_data_directory "$DATA_DIR" || {
+        print_error "Failed to create data directory: $DATA_DIR"
+        print_info "If you're on SELinux-enabled system (AlmaLinux, RHEL, CentOS):"
+        print_info "  sudo setenforce 0  # Temporarily disable"
+        print_info "  # Or: sudo chcon -Rt svirt_sandbox_file_t $DATA_DIR"
+        return
+    }
+    create_data_directory "$BACKUP_DIR" || true
     
     # Copy key files
     if [ -n "$EXISTING_DATA_DIR" ] && [ "$EXISTING_DATA_DIR" != "$DATA_DIR" ]; then

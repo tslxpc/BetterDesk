@@ -1107,14 +1107,12 @@ function createSqliteAdapter(config) {
             openAuth().prepare(`UPDATE folders SET ${sets.join(', ')} WHERE id = ?`).run(...params);
         },
         async deleteFolder(id) {
-            openMain().prepare('UPDATE peer SET folder_id = NULL WHERE folder_id = ?').run(id);
+            // Clear folder assignments first
+            openAuth().prepare('DELETE FROM device_folder_assignments WHERE folder_id = ?').run(id);
             openAuth().prepare('DELETE FROM folders WHERE id = ?').run(id);
         },
         async assignDeviceToFolder(deviceId, folderId) {
-            // First update peer table for direct lookups
-            openMain().prepare('UPDATE peer SET folder_id = ? WHERE id = ?').run(folderId, deviceId);
-            
-            // Then update assignment tracking table (used by getAllFolderAssignments)
+            // Update assignment tracking table (device_folder_assignments is the single source of truth)
             if (folderId === null || folderId === undefined) {
                 openAuth().prepare('DELETE FROM device_folder_assignments WHERE device_id = ?').run(deviceId);
             } else {
@@ -2266,20 +2264,24 @@ function createSqliteAdapter(config) {
                 `);
                 db.transaction((ids) => { for (const id of ids) stmt.run(id, folderId, folderId); })(deviceIds);
             }
-            // Also update peer table folder_id
-            const main = openMain();
-            const peerStmt = main.prepare('UPDATE peer SET folder_id = ? WHERE id = ?');
-            main.transaction((ids) => { for (const id of ids) peerStmt.run(folderId, id); })(deviceIds);
         },
 
         async unassignDevicesFromFolder(folderId) {
             openAuth().prepare('DELETE FROM device_folder_assignments WHERE folder_id = ?').run(folderId);
-            openMain().prepare('UPDATE peer SET folder_id = NULL WHERE folder_id = ?').run(folderId);
         },
 
         async getUnassignedDeviceCount() {
+            // Note: When using Go server, the peer count comes from Go server API (peers table)
+            // This function will return -1 if the local 'peer' table doesn't exist
+            // The UI should handle -1 by fetching count from serverBackend instead
             try {
-                const total = openMain().prepare('SELECT COUNT(*) as count FROM peer WHERE is_deleted = 0').get().count;
+                // Try 'peers' first (Go server schema), then 'peer' (legacy schema)
+                let total = 0;
+                try {
+                    total = openMain().prepare('SELECT COUNT(*) as count FROM peers WHERE NOT is_deleted').get().count;
+                } catch {
+                    total = openMain().prepare('SELECT COUNT(*) as count FROM peer WHERE is_deleted = 0').get().count;
+                }
                 const assigned = openAuth().prepare('SELECT COUNT(*) as count FROM device_folder_assignments').get().count;
                 return Math.max(0, total - assigned);
             } catch { return -1; }
@@ -3283,15 +3285,12 @@ function createPostgresAdapter() {
             await q(`UPDATE folders SET ${sets.join(', ')} WHERE id = $${idx}`, params);
         },
         async deleteFolder(id) {
-            await q('UPDATE peer SET folder_id = NULL WHERE folder_id = $1', [id]);
+            // Clear folder assignments first
             await q('DELETE FROM device_folder_assignments WHERE folder_id = $1', [id]);
             await q('DELETE FROM folders WHERE id = $1', [id]);
         },
         async assignDeviceToFolder(deviceId, folderId) {
-            // First update peer table for direct lookups
-            await q('UPDATE peer SET folder_id = $1 WHERE id = $2', [folderId, deviceId]);
-            
-            // Then update assignment tracking table (used by getAllFolderAssignments)
+            // Update assignment tracking table (device_folder_assignments is the single source of truth)
             if (folderId === null || folderId === undefined) {
                 await q('DELETE FROM device_folder_assignments WHERE device_id = $1', [deviceId]);
             } else {
@@ -4402,7 +4401,6 @@ function createPostgresAdapter() {
                             ON CONFLICT(device_id) DO UPDATE SET folder_id = $2, assigned_at = NOW()
                         `, [id, folderId]);
                     }
-                    await client.query('UPDATE peer SET folder_id = $1 WHERE id = $2', [folderId, id]);
                 }
                 await client.query('COMMIT');
             } catch (err) {
@@ -4415,12 +4413,21 @@ function createPostgresAdapter() {
 
         async unassignDevicesFromFolder(folderId) {
             await q('DELETE FROM device_folder_assignments WHERE folder_id = $1', [folderId]);
-            await q('UPDATE peer SET folder_id = NULL WHERE folder_id = $1', [folderId]);
         },
 
         async getUnassignedDeviceCount() {
+            // Note: When using Go server, the peer count comes from Go server API (peers table)
+            // This function will return -1 if the peer table doesn't exist or can't be queried
+            // The UI should handle -1 by fetching count from serverBackend instead
             try {
-                const total = +(await one('SELECT COUNT(*)::INTEGER AS count FROM peer WHERE NOT is_deleted')).count;
+                // Try 'peers' first (Go server schema), then 'peer' (legacy schema)
+                let totalRes;
+                try {
+                    totalRes = await one('SELECT COUNT(*)::INTEGER AS count FROM peers WHERE NOT is_deleted');
+                } catch {
+                    totalRes = await one('SELECT COUNT(*)::INTEGER AS count FROM peer WHERE NOT is_deleted');
+                }
+                const total = +(totalRes?.count ?? 0);
                 const assigned = +(await one('SELECT COUNT(*)::INTEGER AS count FROM device_folder_assignments')).count;
                 return Math.max(0, total - assigned);
             } catch { return -1; }
