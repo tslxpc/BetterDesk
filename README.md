@@ -1038,6 +1038,7 @@ ws.onmessage = (event) => {
 
 The migration tool (`betterdesk-server/tools/migrate/`) supports multiple migration paths:
 
+**Linux/macOS:**
 ```bash
 # Compile migration tool
 cd betterdesk-server/tools/migrate
@@ -1058,6 +1059,19 @@ go build -o migrate .
 # Mode 5: Backup
 ./migrate -mode backup -src /opt/betterdesk/db_v2.sqlite3
 ```
+
+**Windows (PowerShell):**
+```powershell
+# Compile migration tool (requires Go installed)
+cd betterdesk-server\tools\migrate
+go build -o migrate.exe .
+
+# Usage (same modes as Linux)
+.\migrate.exe -mode rust2go -src C:\BetterDesk\db_v2.sqlite3 -dst C:\BetterDesk\db_v2_new.sqlite3
+.\migrate.exe -mode sqlite2pg -src C:\BetterDesk\db_v2.sqlite3 -dst "postgres://user:pass@localhost:5432/betterdesk"
+```
+
+> **Note:** Windows users need [Go](https://go.dev/dl/) installed to compile the migration tool. Pre-built binaries are available in [GitHub Releases](https://github.com/UNITRONIX/BetterDesk/releases) (when available).
 
 The migration tool auto-detects the source schema (original RustDesk `peer` table vs BetterDesk `peers` table) and maps columns accordingly. Ed25519 keys, UUIDs, ID history, bans, and tags are fully preserved.
 

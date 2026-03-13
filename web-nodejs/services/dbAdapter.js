@@ -458,6 +458,19 @@ function createSqliteAdapter(config) {
                 UNIQUE(device_id)
             );
         `);
+        
+        // Migration: Add TOTP columns to existing users table (for upgrades from older versions)
+        const userCols = [
+            { name: 'totp_secret', sql: 'TEXT DEFAULT NULL' },
+            { name: 'totp_enabled', sql: 'INTEGER DEFAULT 0' },
+            { name: 'totp_recovery_codes', sql: 'TEXT DEFAULT NULL' },
+        ];
+        const existingUserCols = new Set(db.prepare('PRAGMA table_info(users)').all().map(c => c.name));
+        for (const c of userCols) {
+            if (!existingUserCols.has(c.name)) {
+                try { db.exec(`ALTER TABLE users ADD COLUMN ${c.name} ${c.sql}`); } catch (_) {}
+            }
+        }
     }
 
     function ensureActivityTables(db) {
@@ -2963,6 +2976,19 @@ function createPostgresAdapter() {
         if (dgCheck && dgCheck.c === 0) {
             const crypto = require('crypto');
             await q('INSERT INTO device_groups (guid, name, note) VALUES ($1, $2, $3)', [crypto.randomUUID(), 'Default', 'Default device group']);
+        }
+        
+        // Migration: Add TOTP columns to existing users table (for upgrades from older versions)
+        const columnCheck = await all(`SELECT column_name FROM information_schema.columns WHERE table_name = 'users'`);
+        const existingCols = new Set(columnCheck.map(c => c.column_name));
+        if (!existingCols.has('totp_secret')) {
+            await q('ALTER TABLE users ADD COLUMN IF NOT EXISTS totp_secret TEXT DEFAULT NULL');
+        }
+        if (!existingCols.has('totp_enabled')) {
+            await q('ALTER TABLE users ADD COLUMN IF NOT EXISTS totp_enabled BOOLEAN DEFAULT FALSE');
+        }
+        if (!existingCols.has('totp_recovery_codes')) {
+            await q('ALTER TABLE users ADD COLUMN IF NOT EXISTS totp_recovery_codes TEXT DEFAULT NULL');
         }
     }
 

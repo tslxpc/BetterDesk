@@ -422,6 +422,12 @@ sudo apt-get install -y build-essential libsqlite3-dev pkg-config libssl-dev git
 69. [x] **Users page 401 error (Issue #42)**: Route conflict in `rustdesk-api.routes.js`: `GET /api/users` handler for RustDesk desktop client (Bearer token auth) was intercepting panel requests (session cookie auth), returning 401. Fixed by detecting absent Bearer token and calling `next('route')` to allow panel routes to handle the request.
 70. [x] **Peers route conflict (Issue #42)**: Same fix applied to `GET /api/peers` — fallthrough to panel routes when no Bearer token present.
 
+#### ALL-IN-ONE Scripts — Database Config Preservation (Phase 11) ✅ COMPLETED 2026-03-13
+71. [x] **PostgreSQL→SQLite switch on UPDATE**: `betterdesk.sh` and `betterdesk.ps1` were overwriting `.env` with default SQLite config during UPDATE/REPAIR, losing PostgreSQL DSN. Added `preserve_database_config()` / `Preserve-DatabaseConfig` functions that read existing `.env` before reinstall.
+72. [x] **betterdesk.sh fix**: Added `preserve_database_config()` after `detect_installation()` in `do_update()` and `do_repair()`. Reads `DB_TYPE` and `DATABASE_URL` from existing `.env`, sets `USE_POSTGRESQL` and `POSTGRESQL_URI` global vars.
+73. [x] **betterdesk.ps1 fix**: Added `Preserve-DatabaseConfig` PowerShell function with same logic. Called in `Do-Update` and `Do-Repair` before any reinstallation.
+74. [x] **Root cause**: `install_nodejs_console()` always created new `.env` based on `USE_POSTGRESQL` var which defaults to `false`. During UPDATE, this var was never set from existing config.
+
 ---
 
 ## 🔄 System Statusu v3.0
@@ -583,6 +589,10 @@ Pełna dokumentacja budowania: [BUILD_GUIDE.md](../docs/BUILD_GUIDE.md)
 16. ~~**GetPeer missing live status**~~ ✅ ROZWIĄZANE - `handleGetPeer` now returns `live_online` + `live_status` from memory map — Phase 8
 17. ~~**Hostname/Platform columns empty (Issue #37)**~~ ✅ ROZWIĄZANE - Go server was missing `/api/heartbeat`, `/api/sysinfo`, `/api/sysinfo_ver` endpoints. RustDesk client sends hostname/os/version via HTTP API to signal_port-2 (21114), but Go server had no handlers. Added all 3 endpoints + `UpdatePeerSysinfo` DB method — Phase 9
 18. ~~**Users page 401 error (Issue #42)**~~ ✅ ROZWIĄZANE - Route conflict in `rustdesk-api.routes.js`: `/api/users` and `/api/peers` handlers were blocking panel requests (expecting Bearer token). Fixed by adding `next('route')` fallthrough when no Bearer token present, allowing session-based panel requests to reach `users.routes.js` — Phase 10
+19. ~~**PostgreSQL→SQLite switch on UPDATE**~~ ✅ ROZWIĄZANE - `betterdesk.sh` and `betterdesk.ps1` were overwriting `.env` with default SQLite config during UPDATE/REPAIR. Added `preserve_database_config()` function to read existing DB config before reinstalling console — Phase 11
+20. ~~**Folders not working with PostgreSQL (Issue #48)**~~ ✅ ROZWIĄZANE - `folders.routes.js` and `users.routes.js` used SQLite-specific `result.lastInsertRowid` instead of `result.id`. Fixed for PostgreSQL compatibility — Phase 12
+21. ~~**TOTP column missing on upgrade (Issue #38)**~~ ✅ ROZWIĄZANE - Added automatic migration of `totp_secret`, `totp_enabled`, `totp_recovery_codes` columns to existing `users` table for both SQLite and PostgreSQL — Phase 12
+22. ~~**SELinux volume mount issues (Issue #31)**~~ ✅ ROZWIĄZANE - Added SELinux documentation to DOCKER_TROUBLESHOOTING.md with 4 solutions (named volumes, `:z` flag, chcon, setenforce) — Phase 12
 
 ---
 
@@ -672,4 +682,4 @@ All code changes MUST include a security review as part of the implementation pr
 
 ---
 
-*Ostatnia aktualizacja: 2026-03-08 (Users page 401 fix — Phase 10) przez GitHub Copilot*
+*Ostatnia aktualizacja: 2026-03-13 (PostgreSQL config preservation fix — Phase 11) przez GitHub Copilot*

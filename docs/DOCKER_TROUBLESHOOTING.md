@@ -196,6 +196,65 @@ docker compose up -d
 
 ---
 
+## Problem: Volume Mount Permission Denied (SELinux — AlmaLinux/RHEL/CentOS)
+
+### Symptom
+```
+Error: EACCES: permission denied, open '/opt/rustdesk/db_v2.sqlite3'
+Error: cannot open database file
+```
+
+Or containers fail to start with permission errors when using bind mounts.
+
+### Cause
+SELinux-enabled systems (AlmaLinux, RHEL, CentOS, Rocky Linux) require special volume mount options or SELinux context changes for bind mounts.
+
+### ✅ Solutions
+
+**Option 1: Use Named Volumes (recommended)**
+
+The default docker-compose.yml uses named volumes which work correctly with SELinux:
+```yaml
+volumes:
+  - rustdesk-data:/opt/rustdesk    # Named volume - SELinux compatible
+  - console-data:/app/data         # Named volume - SELinux compatible
+```
+
+**Option 2: Add `:z` flag for Bind Mounts**
+
+If you must use bind mounts (host paths), add the `:z` suffix:
+```yaml
+volumes:
+  - /opt/betterdesk:/opt/rustdesk:z     # :z makes it SELinux-compatible
+  - /opt/console-data:/app/data:z
+```
+
+**Option 3: Apply SELinux Context Manually**
+```bash
+# Apply container-compatible SELinux context to directories
+sudo chcon -Rt svirt_sandbox_file_t /path/to/data/directory
+
+# Example for BetterDesk
+sudo chcon -Rt svirt_sandbox_file_t /opt/betterdesk
+sudo chcon -Rt svirt_sandbox_file_t /opt/console-data
+```
+
+**Option 4: Temporarily Disable SELinux (not recommended for production)**
+```bash
+# Set SELinux to permissive mode temporarily
+sudo setenforce 0
+
+# Start containers
+docker compose up -d
+
+# Re-enable SELinux
+sudo setenforce 1
+```
+
+> **Note:** The `betterdesk-docker.sh` script automatically handles SELinux contexts for RHEL-based systems.
+
+---
+
 ## Problem: Missing Admin Login Credentials
 
 If you started BetterDesk Console using Docker Compose following "Option 2" and don't see admin login credentials in the logs, it means the **database migration was not automatically executed**.

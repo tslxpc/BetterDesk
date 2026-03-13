@@ -75,7 +75,7 @@ router.post('/api/folders', requireAuth, async (req, res) => {
         res.json({
             success: true,
             data: {
-                id: result.lastInsertRowid,
+                id: result.id,
                 name: name.trim(),
                 color: color || '#6366f1',
                 icon: icon || 'folder'

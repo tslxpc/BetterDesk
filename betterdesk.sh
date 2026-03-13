@@ -530,6 +530,27 @@ detect_installation() {
     fi
 }
 
+# Preserve database configuration from existing .env file
+# This MUST be called before install_nodejs_console() during UPDATE/REPAIR
+# to prevent switching from PostgreSQL to SQLite
+preserve_database_config() {
+    if [ -f "$CONSOLE_PATH/.env" ]; then
+        local existing_db_type existing_db_url
+        existing_db_type=$(grep -m1 '^DB_TYPE=' "$CONSOLE_PATH/.env" 2>/dev/null | cut -d= -f2 | tr -d '[:space:]')
+        existing_db_url=$(grep -m1 '^DATABASE_URL=' "$CONSOLE_PATH/.env" 2>/dev/null | cut -d= -f2-)
+        
+        if [ "$existing_db_type" = "postgres" ] && [ -n "$existing_db_url" ]; then
+            USE_POSTGRESQL="true"
+            POSTGRESQL_URI="$existing_db_url"
+            print_info "Preserving PostgreSQL configuration from existing .env"
+        elif [ "$existing_db_type" = "sqlite" ]; then
+            USE_POSTGRESQL="false"
+            POSTGRESQL_URI=""
+            print_info "Preserving SQLite configuration from existing .env"
+        fi
+    fi
+}
+
 detect_architecture() {
     ARCH=$(uname -m)
     case "$ARCH" in
@@ -2004,6 +2025,10 @@ do_update() {
         return
     fi
     
+    # CRITICAL: Preserve database configuration before reinstalling console
+    # This prevents PostgreSQL → SQLite switch during updates
+    preserve_database_config
+    
     print_info "Creating backup before update..."
     do_backup_silent
     
@@ -2038,6 +2063,11 @@ do_repair() {
     echo ""
     
     detect_installation
+    
+    # CRITICAL: Preserve database configuration before any repair operation
+    # This prevents PostgreSQL → SQLite switch when regenerating service files
+    preserve_database_config
+    
     print_status
     
     echo ""

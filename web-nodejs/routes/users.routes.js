@@ -110,7 +110,7 @@ router.post('/api/users', requireAuth, requireAdmin, passwordChangeLimiter, asyn
         res.json({
             success: true,
             data: {
-                id: result.lastInsertRowid,
+                id: result.id,
                 username,
                 role: userRole
             }

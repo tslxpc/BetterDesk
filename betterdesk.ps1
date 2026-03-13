@@ -340,6 +340,33 @@ function Detect-Installation {
     }
 }
 
+# Preserve database configuration from existing .env file
+# This MUST be called before Install-NodeJsConsole during UPDATE/REPAIR
+# to prevent switching from PostgreSQL to SQLite
+function Preserve-DatabaseConfig {
+    $envFile = Join-Path $script:CONSOLE_PATH ".env"
+    
+    if (Test-Path $envFile) {
+        # Read existing DB_TYPE
+        $dbTypeLine = Select-String -Path $envFile -Pattern '^DB_TYPE=' -SimpleMatch | Select-Object -First 1
+        $existingDbType = if ($dbTypeLine) { ($dbTypeLine.Line -split '=', 2)[1].Trim() } else { "" }
+        
+        # Read existing DATABASE_URL
+        $dbUrlLine = Select-String -Path $envFile -Pattern '^DATABASE_URL=' -SimpleMatch | Select-Object -First 1
+        $existingDbUrl = if ($dbUrlLine) { ($dbUrlLine.Line -split '=', 2)[1].Trim() } else { "" }
+        
+        if ($existingDbType -eq "postgres" -and $existingDbUrl) {
+            $script:USE_POSTGRESQL = $true
+            $script:POSTGRESQL_URI = $existingDbUrl
+            Print-Info "Preserving PostgreSQL configuration from existing .env"
+        } elseif ($existingDbType -eq "sqlite") {
+            $script:USE_POSTGRESQL = $false
+            $script:POSTGRESQL_URI = ""
+            Print-Info "Preserving SQLite configuration from existing .env"
+        }
+    }
+}
+
 function Auto-DetectPaths {
     $found = $false
     
@@ -2097,6 +2124,10 @@ function Do-Update {
         return
     }
     
+    # CRITICAL: Preserve database configuration before reinstalling console
+    # This prevents PostgreSQL → SQLite switch during updates
+    Preserve-DatabaseConfig
+    
     Print-Info "Creating backup before update..."
     Do-BackupSilent
     
@@ -2128,6 +2159,11 @@ function Do-Repair {
     Write-Host ""
     
     Detect-Installation
+    
+    # CRITICAL: Preserve database configuration before any repair operation
+    # This prevents PostgreSQL → SQLite switch when regenerating service files
+    Preserve-DatabaseConfig
+    
     Print-Status
     
     Write-Host ""

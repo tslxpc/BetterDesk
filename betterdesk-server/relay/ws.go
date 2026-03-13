@@ -83,6 +83,7 @@ func (s *Server) handleWSRelayUpgrade(w http.ResponseWriter, r *http.Request) {
 	// Read the first message — must be RequestRelay or HealthCheck
 	msg, err := wsc.ReadMessage()
 	if err != nil {
+		log.Printf("[relay] WS ReadMessage failed from %s: %v", r.RemoteAddr, err)
 		wsc.Close()
 		return
 	}
@@ -94,13 +95,16 @@ func (s *Server) handleWSRelayUpgrade(w http.ResponseWriter, r *http.Request) {
 				Hc: &pb.HealthCheck{Token: hc.Token},
 			},
 		}
-		wsc.WriteMessage(resp)
+		if err := wsc.WriteMessage(resp); err != nil {
+			log.Printf("[relay] WS health check response failed to %s: %v", r.RemoteAddr, err)
+		}
 		wsc.Close()
 		return
 	}
 
 	rr := msg.GetRequestRelay()
 	if rr == nil || rr.Uuid == "" {
+		log.Printf("[relay] WS missing or empty UUID from %s (rejecting)", r.RemoteAddr)
 		wsc.Close()
 		return
 	}

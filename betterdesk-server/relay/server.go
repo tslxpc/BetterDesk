@@ -150,6 +150,7 @@ func (s *Server) handleConn(conn net.Conn) {
 	// Read the relay request directly — no KeyExchange for relay
 	msg, err := codec.ReadRawProto(conn, config.RelayPairTimeout)
 	if err != nil {
+		log.Printf("[relay] ReadRawProto failed from %s: %v", conn.RemoteAddr(), err)
 		conn.Close()
 		return
 	}
@@ -163,7 +164,9 @@ func (s *Server) handleConn(conn net.Conn) {
 					Hc: &pb.HealthCheck{Token: hc.Token},
 				},
 			}
-			codec.WriteRawProto(conn, resp)
+			if err := codec.WriteRawProto(conn, resp); err != nil {
+				log.Printf("[relay] Health check response failed to %s: %v", conn.RemoteAddr(), err)
+			}
 		}
 		conn.Close()
 		return
@@ -171,6 +174,7 @@ func (s *Server) handleConn(conn net.Conn) {
 
 	uuid := rr.Uuid
 	if uuid == "" {
+		log.Printf("[relay] Empty UUID in RequestRelay from %s (rejecting)", conn.RemoteAddr())
 		conn.Close()
 		return
 	}
