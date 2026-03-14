@@ -1027,13 +1027,15 @@ function createSqliteAdapter(config) {
             openAuth().prepare('UPDATE users SET totp_secret = ? WHERE id = ?').run(secret, userId);
         },
         async enableTotp(userId, recoveryCodes) {
-            openAuth().prepare('UPDATE users SET totp_enabled = 1, totp_recovery_codes = ? WHERE id = ?').run(recoveryCodes, userId);
+            const codesJson = Array.isArray(recoveryCodes) ? JSON.stringify(recoveryCodes) : recoveryCodes;
+            openAuth().prepare('UPDATE users SET totp_enabled = 1, totp_recovery_codes = ? WHERE id = ?').run(codesJson, userId);
         },
         async disableTotp(userId) {
             openAuth().prepare('UPDATE users SET totp_enabled = 0, totp_secret = NULL, totp_recovery_codes = NULL WHERE id = ?').run(userId);
         },
         async useRecoveryCode(userId, updatedCodes) {
-            openAuth().prepare('UPDATE users SET totp_recovery_codes = ? WHERE id = ?').run(updatedCodes, userId);
+            const codesJson = Array.isArray(updatedCodes) ? JSON.stringify(updatedCodes) : updatedCodes;
+            openAuth().prepare('UPDATE users SET totp_recovery_codes = ? WHERE id = ?').run(codesJson, userId);
         },
 
         // ---- Access tokens ----
@@ -3257,9 +3259,9 @@ function createPostgresAdapter() {
         // ---- TOTP ----
 
         async saveTotpSecret(userId, secret) { await q('UPDATE users SET totp_secret = $1 WHERE id = $2', [secret, userId]); },
-        async enableTotp(userId, recoveryCodes) { await q('UPDATE users SET totp_enabled = TRUE, totp_recovery_codes = $1 WHERE id = $2', [recoveryCodes, userId]); },
+        async enableTotp(userId, recoveryCodes) { const codesJson = Array.isArray(recoveryCodes) ? JSON.stringify(recoveryCodes) : recoveryCodes; await q('UPDATE users SET totp_enabled = TRUE, totp_recovery_codes = $1 WHERE id = $2', [codesJson, userId]); },
         async disableTotp(userId) { await q('UPDATE users SET totp_enabled = FALSE, totp_secret = NULL, totp_recovery_codes = NULL WHERE id = $1', [userId]); },
-        async useRecoveryCode(userId, updatedCodes) { await q('UPDATE users SET totp_recovery_codes = $1 WHERE id = $2', [updatedCodes, userId]); },
+        async useRecoveryCode(userId, updatedCodes) { const codesJson = Array.isArray(updatedCodes) ? JSON.stringify(updatedCodes) : updatedCodes; await q('UPDATE users SET totp_recovery_codes = $1 WHERE id = $2', [codesJson, userId]); },
 
         // ---- Access tokens ----
 
