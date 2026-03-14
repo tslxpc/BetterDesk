@@ -1277,6 +1277,29 @@ function Install-Binaries {
     return $true
 }
 
+function Update-EnvForTLS {
+    param(
+        [string]$CertPath,
+        [string]$KeyPath
+    )
+    $envFile = Join-Path $script:CONSOLE_PATH ".env"
+    if (Test-Path $envFile) {
+        $content = Get-Content $envFile -Raw
+        $content = $content -replace 'HTTPS_ENABLED=.*', 'HTTPS_ENABLED=true'
+        $content = $content -replace 'SSL_CERT_PATH=.*', "SSL_CERT_PATH=$CertPath"
+        $content = $content -replace 'SSL_KEY_PATH=.*', "SSL_KEY_PATH=$KeyPath"
+        $content = $content -replace 'HBBS_API_URL=http://localhost', 'HBBS_API_URL=https://localhost'
+        $content = $content -replace 'BETTERDESK_API_URL=http://localhost', 'BETTERDESK_API_URL=https://localhost'
+        if ($content -match 'NODE_EXTRA_CA_CERTS=') {
+            $content = $content -replace 'NODE_EXTRA_CA_CERTS=.*', "NODE_EXTRA_CA_CERTS=$CertPath"
+        } else {
+            $content = $content.TrimEnd() + "`nNODE_EXTRA_CA_CERTS=$CertPath`n"
+        }
+        Set-Content -Path $envFile -Value $content -NoNewline
+        Print-Info "Updated .env with HTTPS configuration"
+    }
+}
+
 function Generate-SSLCertificates {
     Print-Step "Generating self-signed TLS certificates..."
     
@@ -1330,6 +1353,9 @@ function Generate-SSLCertificates {
         # Clean up certificate from store
         Remove-Item "Cert:\LocalMachine\My\$($cert.Thumbprint)" -ErrorAction SilentlyContinue
         
+        # Enable HTTPS in .env so Node.js console (port 5000 + 21121) uses TLS
+        Update-EnvForTLS -CertPath $certPath -KeyPath $keyPath
+        
         Print-Success "Self-signed TLS certificate generated"
         Print-Info "Certificate: $sslDir"
         Print-Info "SAN: DNS:localhost, IP:$serverIP, IP:127.0.0.1"
@@ -1350,6 +1376,7 @@ function Generate-SSLCertificates {
                     -addext "subjectAltName=IP:$serverIP,IP:127.0.0.1,DNS:localhost" 2>$null
                 
                 if ((Test-Path $certPath) -and (Test-Path $keyPath)) {
+                    Update-EnvForTLS -CertPath $certPath -KeyPath $keyPath
                     Print-Success "Self-signed TLS certificate generated (openssl)"
                     return $true
                 }
@@ -1522,6 +1549,12 @@ function Setup-Services {
             "SERVER_BACKEND=betterdesk",
             "PORT=5000"
         )
+        # Enable HTTPS on Node.js console when TLS certs are available
+        if ($apiScheme -eq "https" -and (Test-Path $certPath) -and (Test-Path $keyPath)) {
+            $envExtra += "HTTPS_ENABLED=true"
+            $envExtra += "SSL_CERT_PATH=$certPath"
+            $envExtra += "SSL_KEY_PATH=$keyPath"
+        }
         # Trust self-signed cert for localhost API communication
         if ($tlsIsSelfSigned -and (Test-Path $certPath)) {
             $envExtra += "NODE_EXTRA_CA_CERTS=$certPath"

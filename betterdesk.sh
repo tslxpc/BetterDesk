@@ -1646,6 +1646,22 @@ generate_ssl_certificates() {
             cp -f "$ssl_dir/betterdesk.crt" "$console_ssl/betterdesk.crt"
         ln -sf "$ssl_dir/betterdesk.key" "$console_ssl/betterdesk.key" 2>/dev/null || \
             cp -f "$ssl_dir/betterdesk.key" "$console_ssl/betterdesk.key"
+        
+        # Enable HTTPS in .env so Node.js console (port 5000 + 21121) uses TLS
+        local env_file="$CONSOLE_PATH/.env"
+        if [ -f "$env_file" ]; then
+            sed -i "s|^HTTPS_ENABLED=.*|HTTPS_ENABLED=true|" "$env_file"
+            sed -i "s|^SSL_CERT_PATH=.*|SSL_CERT_PATH=$ssl_dir/betterdesk.crt|" "$env_file"
+            sed -i "s|^SSL_KEY_PATH=.*|SSL_KEY_PATH=$ssl_dir/betterdesk.key|" "$env_file"
+            sed -i "s|^HBBS_API_URL=http://localhost|HBBS_API_URL=https://localhost|" "$env_file"
+            sed -i "s|^BETTERDESK_API_URL=http://localhost|BETTERDESK_API_URL=https://localhost|" "$env_file"
+            # Self-signed: Node.js needs to trust the CA
+            if grep -q '^NODE_EXTRA_CA_CERTS=' "$env_file" 2>/dev/null; then
+                sed -i "s|^NODE_EXTRA_CA_CERTS=.*|NODE_EXTRA_CA_CERTS=$ssl_dir/betterdesk.crt|" "$env_file"
+            else
+                echo "NODE_EXTRA_CA_CERTS=$ssl_dir/betterdesk.crt" >> "$env_file"
+            fi
+        fi
     fi
     
     print_success "Self-signed TLS certificate generated"
@@ -1785,8 +1801,14 @@ Environment=DB_PATH=$RUSTDESK_PATH/db_v2.sqlite3"
         
         # Use HTTPS API URL when TLS certificates are available
         local api_scheme="http"
+        local tls_env=""
         if [ -n "$tls_arg" ]; then
             api_scheme="https"
+            # Enable HTTPS on Node.js console (admin panel port 5443 + Client API port 21121)
+            # so that RustDesk desktop clients can connect via HTTPS to port 21121.
+            tls_env="Environment=HTTPS_ENABLED=true
+Environment=SSL_CERT_PATH=$ssl_dir/betterdesk.crt
+Environment=SSL_KEY_PATH=$ssl_dir/betterdesk.key"
         fi
         
         cat > /etc/systemd/system/betterdesk-console.service << EOF
@@ -1810,6 +1832,7 @@ Environment=HBBS_API_URL=$api_scheme://localhost:$API_PORT/api
 Environment=BETTERDESK_API_URL=$api_scheme://localhost:$API_PORT/api
 Environment=SERVER_BACKEND=betterdesk
 Environment=PORT=5000
+$tls_env
 $([ "$tls_is_selfsigned" = true ] && echo "Environment=NODE_EXTRA_CA_CERTS=$ssl_dir/betterdesk.crt" || true)
 Restart=always
 RestartSec=5
@@ -3576,6 +3599,14 @@ do_configure_ssl() {
         if [ -f "$svc_file" ]; then
             sed -i "s|Environment=HBBS_API_URL=http://localhost|Environment=HBBS_API_URL=https://localhost|" "$svc_file"
             sed -i "s|Environment=BETTERDESK_API_URL=http://localhost|Environment=BETTERDESK_API_URL=https://localhost|" "$svc_file"
+            # Sync HTTPS_ENABLED in systemd (overrides .env value)
+            if grep -q 'Environment=HTTPS_ENABLED=' "$svc_file"; then
+                sed -i "s|Environment=HTTPS_ENABLED=.*|Environment=HTTPS_ENABLED=true|" "$svc_file"
+            fi
+            # Sync SSL cert/key paths in systemd
+            if grep -q 'Environment=SSL_CERT_PATH=' "$svc_file"; then
+                sed -i "s|Environment=SSL_CERT_PATH=.*|Environment=SSL_CERT_PATH=$ssl_cert_path|" "$svc_file"
+            fi
             if [ -n "$ssl_cert_path" ] && [ -f "$ssl_cert_path" ]; then
                 if grep -q 'NODE_EXTRA_CA_CERTS' "$svc_file"; then
                     sed -i "s|Environment=NODE_EXTRA_CA_CERTS=.*|Environment=NODE_EXTRA_CA_CERTS=$ssl_cert_path|" "$svc_file"
@@ -3598,6 +3629,10 @@ do_configure_ssl() {
         if [ -f "$svc_file" ]; then
             sed -i "s|Environment=HBBS_API_URL=https://localhost|Environment=HBBS_API_URL=http://localhost|" "$svc_file"
             sed -i "s|Environment=BETTERDESK_API_URL=https://localhost|Environment=BETTERDESK_API_URL=http://localhost|" "$svc_file"
+            # Sync HTTPS_ENABLED=false in systemd
+            if grep -q 'Environment=HTTPS_ENABLED=' "$svc_file"; then
+                sed -i "s|Environment=HTTPS_ENABLED=.*|Environment=HTTPS_ENABLED=false|" "$svc_file"
+            fi
             sed -i '/Environment=NODE_EXTRA_CA_CERTS=/d' "$svc_file"
             systemctl daemon-reload 2>/dev/null || true
         fi

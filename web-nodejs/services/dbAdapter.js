@@ -973,6 +973,7 @@ function createSqliteAdapter(config) {
         async getPeerStats() {
             syncGoPeersSqlite();
             const db = openMain();
+            const total = db.prepare('SELECT COUNT(*) as c FROM peer WHERE is_deleted = 0').get().c;
             const online = db.prepare('SELECT COUNT(*) as c FROM peer WHERE is_deleted = 0 AND status_online = 1').get().c;
             const banned = db.prepare('SELECT COUNT(*) as c FROM peer WHERE is_deleted = 0 AND is_banned = 1').get().c;
             return { total, online, banned, offline: total - online };
