@@ -19,16 +19,16 @@
 # ============= Stage 1: Build Go server =============
 FROM golang:1.25-alpine AS go-builder
 
-RUN apk add --no-cache git gcc musl-dev sqlite-dev
+RUN apk add --no-cache git
 
 WORKDIR /src
 COPY betterdesk-server/go.mod betterdesk-server/go.sum ./
 RUN go mod download
 
 COPY betterdesk-server/ .
-RUN CGO_ENABLED=1 GOOS=linux go build \
-    -ldflags="-s -w -extldflags '-static'" \
-    -tags "sqlite_omit_load_extension netgo osusergo" \
+RUN CGO_ENABLED=0 GOOS=linux go build \
+    -ldflags="-s -w" \
+    -tags "netgo osusergo" \
     -o /betterdesk-server .
 
 # ============= Stage 2: Build Node.js console =============

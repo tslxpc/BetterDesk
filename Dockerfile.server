@@ -9,7 +9,7 @@
 # ---- Build stage ----
 FROM golang:1.25-alpine AS builder
 
-RUN apk add --no-cache git gcc musl-dev sqlite-dev
+RUN apk add --no-cache git
 
 WORKDIR /src
 
@@ -21,10 +21,10 @@ RUN go mod download
 # Copy full source
 COPY betterdesk-server/ .
 
-# Build static binary
-RUN CGO_ENABLED=1 GOOS=linux go build \
-    -ldflags="-s -w -extldflags '-static'" \
-    -tags "sqlite_omit_load_extension netgo osusergo" \
+# Build static binary (modernc.org/sqlite is pure Go — no CGO needed)
+RUN CGO_ENABLED=0 GOOS=linux go build \
+    -ldflags="-s -w" \
+    -tags "netgo osusergo" \
     -o /betterdesk-server .
 
 # ---- Runtime stage ----
@@ -66,4 +66,4 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=15s --retries=3 \
 USER betterdesk
 
 ENTRYPOINT ["/sbin/tini", "--"]
-CMD ["/usr/local/bin/betterdesk-server", "-mode", "all", "-db", "/opt/rustdesk/db_v2.sqlite3", "-key-file", "/opt/rustdesk/id_ed25519"]
+CMD ["/usr/local/bin/betterdesk-server", "-mode", "all", "-key-file", "/opt/rustdesk/id_ed25519"]

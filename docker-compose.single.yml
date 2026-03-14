@@ -2,17 +2,19 @@
 # ===========================================================
 #
 # All-in-one: Go server + Node.js console in a single container.
-# Optional PostgreSQL via profile: docker compose --profile postgres up -d
 #
-# Quick start:
-#   docker compose build
-#   docker compose up -d
+# Quick start (SQLite — default):
+#   docker compose -f docker-compose.single.yml up -d --build
 #
 # With PostgreSQL:
-#   docker compose --profile postgres up -d
+#   DB_TYPE=postgres DATABASE_URL=postgres://betterdesk:betterdesk@postgres:5432/betterdesk \
+#     docker compose -f docker-compose.single.yml --profile postgres up -d --build
 #
-# With Nginx reverse proxy:
-#   docker compose --profile nginx up -d
+#   Or create a .env file:
+#     DB_TYPE=postgres
+#     DATABASE_URL=postgres://betterdesk:betterdesk@postgres:5432/betterdesk
+#     PG_PASSWORD=betterdesk
+#   Then: docker compose -f docker-compose.single.yml --profile postgres up -d --build
 #
 # Access:
 #   Web Console: http://localhost:5000
@@ -57,9 +59,10 @@ services:
       - API_KEY_PATH=/opt/rustdesk/.api_key
       - SESSION_SECRET=${SESSION_SECRET:-}
       - DOCKER=true
-      # PostgreSQL (uncomment or use --profile postgres):
-      # - DB_TYPE=postgres
-      # - DATABASE_URL=postgres://betterdesk:${PG_PASSWORD:-betterdesk}@postgres:5432/betterdesk
+      # Database — defaults to SQLite; set via .env or command line for PostgreSQL
+      - DB_TYPE=${DB_TYPE:-sqlite}
+      - DATABASE_URL=${DATABASE_URL:-}
+      - DB_URL=${DATABASE_URL:-}
       # Admin credentials (first run only):
       # - ADMIN_USERNAME=admin
       # - ADMIN_PASSWORD=YourSecurePassword123

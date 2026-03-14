@@ -24,6 +24,21 @@ echo ""
 mkdir -p /opt/rustdesk /app/data /var/log/betterdesk 2>/dev/null || true
 chown -R betterdesk:betterdesk /opt/rustdesk /app/data /var/log/betterdesk 2>/dev/null || true
 
+# Determine database DSN for Go server
+# DB_URL env var is read by Go server's config.LoadEnv()
+if [ "${DB_TYPE}" = "postgres" ] || [ "${DB_TYPE}" = "postgresql" ]; then
+    if [ -n "${DATABASE_URL}" ]; then
+        export DB_URL="${DATABASE_URL}"
+        echo "Database:     PostgreSQL (${DATABASE_URL%%@*}@***)"
+    else
+        echo "WARNING: DB_TYPE=postgres but DATABASE_URL not set — falling back to SQLite"
+        export DB_URL="/opt/rustdesk/db_v2.sqlite3"
+    fi
+else
+    export DB_URL="${DB_PATH:-/opt/rustdesk/db_v2.sqlite3}"
+    echo "Database:     SQLite (${DB_URL})"
+fi
+
 # Wait for PostgreSQL if configured
 if [ "${DB_TYPE}" = "postgres" ] || [ "${DB_TYPE}" = "postgresql" ]; then
     if [ -n "${DATABASE_URL}" ]; then
