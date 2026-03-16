@@ -350,7 +350,7 @@ graceful_stop_services() {
     # New Go services (primary)
     local services=("betterdesk-console" "betterdesk-server")
     # Legacy services (for migration)
-    local legacy_services=("betterdesk" "rustdesksignal" "rustdeskrelay")
+    local legacy_services=("betterdesk" "rustdesksignal" "rustdeskrelay" "betterdesk-api" "betterdesk-go")
     
     # Stop current services
     for service in "${services[@]}"; do
@@ -1307,6 +1307,20 @@ migrate_sqlite_to_postgresql() {
         migrate_bin="/opt/betterdesk-go/migrate"
     fi
     
+    # Try to compile migration tool from source if not found or outdated
+    if [ -z "$migrate_bin" ] && command -v go &>/dev/null; then
+        local migrate_src="$SCRIPT_DIR/betterdesk-server/tools/migrate"
+        if [ -d "$migrate_src" ]; then
+            print_info "Compiling migration tool from source..."
+            if (cd "$SCRIPT_DIR/betterdesk-server" && go build -o "tools/migrate/migrate-linux-amd64" ./tools/migrate/) 2>&1; then
+                migrate_bin="$migrate_src/migrate-linux-amd64"
+                print_success "Migration tool compiled successfully"
+            else
+                print_warning "Failed to compile migration tool"
+            fi
+        fi
+    fi
+    
     if [ -z "$migrate_bin" ]; then
         print_warning "Migration binary not found, skipping automatic migration"
         print_info "You can migrate manually using: M -> 3 (SQLite → PostgreSQL)"
@@ -1314,6 +1328,15 @@ migrate_sqlite_to_postgresql() {
     fi
     
     chmod +x "$migrate_bin"
+    
+    # Verify binary supports -mode flag (in case of outdated binary)
+    if ! "$migrate_bin" -mode backup -src /dev/null 2>&1 | grep -qv "flag provided but not defined"; then
+        if "$migrate_bin" -mode backup -src /dev/null 2>&1 | grep -q "flag provided but not defined"; then
+            print_warning "Migration binary is outdated (missing -mode flag)"
+            print_info "Rebuild with: cd betterdesk-server && go build -o tools/migrate/migrate-linux-amd64 ./tools/migrate/"
+            return 0
+        fi
+    fi
     
     # Check if SQLite has data
     local peer_count
@@ -1742,8 +1765,8 @@ generate_ssl_certificates() {
             sed -i "s|^HTTPS_ENABLED=.*|HTTPS_ENABLED=true|" "$env_file"
             sed -i "s|^SSL_CERT_PATH=.*|SSL_CERT_PATH=$ssl_dir/betterdesk.crt|" "$env_file"
             sed -i "s|^SSL_KEY_PATH=.*|SSL_KEY_PATH=$ssl_dir/betterdesk.key|" "$env_file"
-            sed -i "s|^HBBS_API_URL=http://localhost|HBBS_API_URL=https://localhost|" "$env_file"
-            sed -i "s|^BETTERDESK_API_URL=http://localhost|BETTERDESK_API_URL=https://localhost|" "$env_file"
+            # Note: Do NOT change API URLs to https:// here for self-signed certs
+            # API TLS is only enabled with --tls-api (proper certs), not for self-signed
             # Self-signed: Node.js needs to trust the CA
             if grep -q '^NODE_EXTRA_CA_CERTS=' "$env_file" 2>/dev/null; then
                 sed -i "s|^NODE_EXTRA_CA_CERTS=.*|NODE_EXTRA_CA_CERTS=$ssl_dir/betterdesk.crt|" "$env_file"
@@ -1829,13 +1852,13 @@ setup_services() {
         # Always enable TLS on signal/relay for client encryption
         tls_arg="-tls-cert $ssl_dir/betterdesk.crt -tls-key $ssl_dir/betterdesk.key -tls-signal -tls-relay"
         
-        # Only add -force-https when using proper (non-self-signed) certificates
-        # Self-signed certs on fresh installs would break Node.js ↔ Go API communication
+        # Only add -tls-api and -force-https when using proper (non-self-signed) certificates
+        # Self-signed certs: API stays HTTP (localhost only), signal/relay use TLS (client-facing)
         if [ "$tls_is_selfsigned" = false ]; then
-            tls_arg="$tls_arg -force-https"
-            print_info "TLS: Enabled with -force-https (proper certificate found)"
+            tls_arg="$tls_arg -tls-api -force-https"
+            print_info "TLS: Enabled everywhere including API (proper certificate found)"
         else
-            print_info "TLS: Enabled for signal/relay (self-signed cert, no -force-https)"
+            print_info "TLS: Enabled for signal/relay (self-signed cert, API stays HTTP)"
         fi
     else
         print_info "TLS: Disabled (no certificate found)"
@@ -1898,6 +1921,14 @@ EOF
         rm -f /etc/systemd/system/betterdesk-api.service
         print_info "Removed legacy betterdesk-api.service (Flask)"
     fi
+    
+    # Remove stale betterdesk-go.service (manual installs, wrong credentials)
+    if [ -f /etc/systemd/system/betterdesk-go.service ]; then
+        systemctl stop betterdesk-go 2>/dev/null || true
+        systemctl disable betterdesk-go 2>/dev/null || true
+        rm -f /etc/systemd/system/betterdesk-go.service
+        print_info "Removed stale betterdesk-go.service"
+    fi
 
     # Console service (Web Interface) - Node.js only
     if [ "$CONSOLE_TYPE" = "nodejs" ]; then
@@ -1911,11 +1942,14 @@ Environment=DATABASE_URL=$POSTGRESQL_URI"
 Environment=DB_PATH=$RUSTDESK_PATH/db_v2.sqlite3"
         fi
         
-        # Use HTTPS API URL when TLS certificates are available
+        # Use HTTPS API URL only when --tls-api is active (proper certs, not self-signed)
+        # Self-signed certs: API stays HTTP on localhost, signal/relay use TLS for clients
         local api_scheme="http"
         local tls_env=""
-        if [ -n "$tls_arg" ]; then
+        if echo "$tls_arg" | grep -q -- "tls-api"; then
             api_scheme="https"
+        fi
+        if [ -n "$tls_arg" ]; then
             # Enable HTTPS on Node.js console (admin panel port 5443 + Client API port 21121)
             # so that RustDesk desktop clients can connect via HTTPS to port 21121.
             tls_env="Environment=HTTPS_ENABLED=true
@@ -3395,10 +3429,10 @@ do_diagnostics() {
     
     local api_port="${API_PORT:-21114}"
     
-    # Detect if Go server uses TLS (check systemd service for tls-cert arg)
+    # Detect if Go server API uses TLS (check for --tls-api or --force-https in service args)
     local api_use_tls=false
     local api_scheme="http"
-    if systemctl cat betterdesk-server.service 2>/dev/null | grep -q '\-tls-cert'; then
+    if systemctl cat betterdesk-server.service 2>/dev/null | grep -qE '\-tls-api|\-force-https'; then
         api_use_tls=true
         api_scheme="https"
     fi
@@ -3520,8 +3554,8 @@ do_uninstall() {
     systemctl stop betterdesk-server betterdesk-console 2>/dev/null || true
     systemctl disable betterdesk-server betterdesk-console 2>/dev/null || true
     # Stop legacy Rust services if they exist
-    systemctl stop rustdesksignal rustdeskrelay betterdesk 2>/dev/null || true
-    systemctl disable rustdesksignal rustdeskrelay betterdesk 2>/dev/null || true
+    systemctl stop rustdesksignal rustdeskrelay betterdesk betterdesk-api betterdesk-go 2>/dev/null || true
+    systemctl disable rustdesksignal rustdeskrelay betterdesk betterdesk-api betterdesk-go 2>/dev/null || true
     
     print_step "Removing service files..."
     # Remove Go services
@@ -3531,6 +3565,8 @@ do_uninstall() {
     rm -f /etc/systemd/system/rustdesksignal.service
     rm -f /etc/systemd/system/rustdeskrelay.service
     rm -f /etc/systemd/system/betterdesk.service
+    rm -f /etc/systemd/system/betterdesk-api.service
+    rm -f /etc/systemd/system/betterdesk-go.service
     systemctl daemon-reload
     
     if confirm "Remove installation files ($RUSTDESK_PATH)?"; then
@@ -3698,18 +3734,28 @@ do_configure_ssl() {
     esac
     
     # ── Update API URLs in .env when SSL is enabled/disabled ──
-    # The Go server (betterdesk-server) also uses TLS on port 21114 when
-    # -tls-cert/-tls-key flags are set.  Node.js console must match the
-    # protocol; otherwise health-checks send HTTP to an HTTPS endpoint,
-    # flooding the Go server log with TLS handshake errors.
+    # API TLS (--tls-api) is only enabled for proper certs (Let's Encrypt, custom).
+    # Self-signed certs: API stays HTTP on localhost, only signal/relay use TLS.
     local env_file="$CONSOLE_PATH/.env"
     local api_port
     api_port=$(grep -oP '^HBBS_API_URL=https?://localhost:\K[0-9]+' "$env_file" 2>/dev/null || echo "$API_PORT")
     
+    # Determine if API TLS should be active (proper certs only, not self-signed)
+    local api_tls_active=false
+    if [ "${ssl_choice:-1}" = "1" ] || [ "${ssl_choice:-1}" = "2" ]; then
+        api_tls_active=true
+    fi
+    
     if [ "${ssl_choice:-1}" != "4" ]; then
-        # SSL enabled — switch API URLs to HTTPS
-        sed -i "s|^HBBS_API_URL=http://localhost|HBBS_API_URL=https://localhost|" "$env_file"
-        sed -i "s|^BETTERDESK_API_URL=http://localhost|BETTERDESK_API_URL=https://localhost|" "$env_file"
+        if [ "$api_tls_active" = true ]; then
+            # Proper cert — switch API URLs to HTTPS
+            sed -i "s|^HBBS_API_URL=http://localhost|HBBS_API_URL=https://localhost|" "$env_file"
+            sed -i "s|^BETTERDESK_API_URL=http://localhost|BETTERDESK_API_URL=https://localhost|" "$env_file"
+        else
+            # Self-signed — ensure API URLs stay HTTP
+            sed -i "s|^HBBS_API_URL=https://localhost|HBBS_API_URL=http://localhost|" "$env_file"
+            sed -i "s|^BETTERDESK_API_URL=https://localhost|BETTERDESK_API_URL=http://localhost|" "$env_file"
+        fi
         
         # For self-signed certs, Node.js needs NODE_EXTRA_CA_CERTS to trust the CA
         local ssl_cert_path
@@ -3726,8 +3772,13 @@ do_configure_ssl() {
         # Also update systemd service environment if it exists
         local svc_file="/etc/systemd/system/betterdesk-console.service"
         if [ -f "$svc_file" ]; then
-            sed -i "s|Environment=HBBS_API_URL=http://localhost|Environment=HBBS_API_URL=https://localhost|" "$svc_file"
-            sed -i "s|Environment=BETTERDESK_API_URL=http://localhost|Environment=BETTERDESK_API_URL=https://localhost|" "$svc_file"
+            if [ "$api_tls_active" = true ]; then
+                sed -i "s|Environment=HBBS_API_URL=http://localhost|Environment=HBBS_API_URL=https://localhost|" "$svc_file"
+                sed -i "s|Environment=BETTERDESK_API_URL=http://localhost|Environment=BETTERDESK_API_URL=https://localhost|" "$svc_file"
+            else
+                sed -i "s|Environment=HBBS_API_URL=https://localhost|Environment=HBBS_API_URL=http://localhost|" "$svc_file"
+                sed -i "s|Environment=BETTERDESK_API_URL=https://localhost|Environment=BETTERDESK_API_URL=http://localhost|" "$svc_file"
+            fi
             # Sync HTTPS_ENABLED in systemd (overrides .env value)
             if grep -q 'Environment=HTTPS_ENABLED=' "$svc_file"; then
                 sed -i "s|Environment=HTTPS_ENABLED=.*|Environment=HTTPS_ENABLED=true|" "$svc_file"
@@ -3746,7 +3797,26 @@ do_configure_ssl() {
             systemctl daemon-reload 2>/dev/null || true
         fi
         
-        print_info "API URLs updated to HTTPS in .env and systemd service"
+        # Update Go server service to add/remove --tls-api flag
+        local go_svc_file="/etc/systemd/system/betterdesk-server.service"
+        if [ -f "$go_svc_file" ]; then
+            if [ "$api_tls_active" = true ]; then
+                # Add -tls-api if not already present
+                if ! grep -q '\-tls-api' "$go_svc_file"; then
+                    sed -i 's/-tls-relay/-tls-relay -tls-api/' "$go_svc_file"
+                fi
+            else
+                # Remove -tls-api if present
+                sed -i 's/ -tls-api//' "$go_svc_file"
+            fi
+            systemctl daemon-reload 2>/dev/null || true
+        fi
+        
+        if [ "$api_tls_active" = true ]; then
+            print_info "API URLs updated to HTTPS in .env and systemd service"
+        else
+            print_info "Signal/relay TLS enabled, API stays HTTP (self-signed cert)"
+        fi
     else
         # SSL disabled — revert API URLs to HTTP
         sed -i "s|^HBBS_API_URL=https://localhost|HBBS_API_URL=http://localhost|" "$env_file"
@@ -3763,6 +3833,13 @@ do_configure_ssl() {
                 sed -i "s|Environment=HTTPS_ENABLED=.*|Environment=HTTPS_ENABLED=false|" "$svc_file"
             fi
             sed -i '/Environment=NODE_EXTRA_CA_CERTS=/d' "$svc_file"
+            systemctl daemon-reload 2>/dev/null || true
+        fi
+        
+        # Remove --tls-api from Go server service
+        local go_svc_file="/etc/systemd/system/betterdesk-server.service"
+        if [ -f "$go_svc_file" ]; then
+            sed -i 's/ -tls-api//' "$go_svc_file"
             systemctl daemon-reload 2>/dev/null || true
         fi
         

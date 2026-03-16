@@ -1336,7 +1336,8 @@ function Install-Binaries {
 function Update-EnvForTLS {
     param(
         [string]$CertPath,
-        [string]$KeyPath
+        [string]$KeyPath,
+        [bool]$UpdateApiUrls = $false
     )
     $envFile = Join-Path $script:CONSOLE_PATH ".env"
     if (Test-Path $envFile) {
@@ -1344,8 +1345,11 @@ function Update-EnvForTLS {
         $content = $content -replace 'HTTPS_ENABLED=.*', 'HTTPS_ENABLED=true'
         $content = $content -replace 'SSL_CERT_PATH=.*', "SSL_CERT_PATH=$CertPath"
         $content = $content -replace 'SSL_KEY_PATH=.*', "SSL_KEY_PATH=$KeyPath"
-        $content = $content -replace 'HBBS_API_URL=http://localhost', 'HBBS_API_URL=https://localhost'
-        $content = $content -replace 'BETTERDESK_API_URL=http://localhost', 'BETTERDESK_API_URL=https://localhost'
+        # Only update API URLs to HTTPS when --tls-api is active (proper certs, not self-signed)
+        if ($UpdateApiUrls) {
+            $content = $content -replace 'HBBS_API_URL=http://localhost', 'HBBS_API_URL=https://localhost'
+            $content = $content -replace 'BETTERDESK_API_URL=http://localhost', 'BETTERDESK_API_URL=https://localhost'
+        }
         if ($content -match 'NODE_EXTRA_CA_CERTS=') {
             $content = $content -replace 'NODE_EXTRA_CA_CERTS=.*', "NODE_EXTRA_CA_CERTS=$CertPath"
         } else {
@@ -1610,14 +1614,16 @@ function Setup-Services {
         
         # Always enable TLS on signal/relay for client encryption
         $serverArgs += " -tls-cert `"$certPath`" -tls-key `"$keyPath`" -tls-signal -tls-relay"
-        $apiScheme = "https"
         
-        # Only add -force-https for proper (non-self-signed) certificates
+        # Only add -tls-api and -force-https for proper (non-self-signed) certificates
+        # Self-signed certs: API stays HTTP (localhost only), signal/relay use TLS (client-facing)
         if (-not $tlsIsSelfSigned) {
-            $serverArgs += " -force-https"
-            Print-Info "TLS: Enabled with -force-https (proper certificate)"
+            $serverArgs += " -tls-api -force-https"
+            $apiScheme = "https"
+            Print-Info "TLS: Enabled everywhere including API (proper certificate)"
         } else {
-            Print-Info "TLS: Enabled for signal/relay (self-signed cert, no -force-https)"
+            $apiScheme = "http"
+            Print-Info "TLS: Enabled for signal/relay (self-signed cert, API stays HTTP)"
         }
     } else {
         Print-Info "TLS: Disabled (no certificate found)"
@@ -1751,10 +1757,10 @@ function Setup-ScheduledTasks {
         
         $serverArgs += " -tls-cert `"$certPath`" -tls-key `"$keyPath`" -tls-signal -tls-relay"
         if (-not $tlsIsSelfSigned) {
-            $serverArgs += " -force-https"
-            Print-Info "TLS: Enabled with -force-https"
+            $serverArgs += " -tls-api -force-https"
+            Print-Info "TLS: Enabled everywhere including API"
         } else {
-            Print-Info "TLS: Enabled for signal/relay (self-signed)"
+            Print-Info "TLS: Enabled for signal/relay (self-signed, API stays HTTP)"
         }
     }
     
@@ -3772,14 +3778,21 @@ function Do-ConfigureSSL {
     }
     
     # ── Update API URLs in .env when SSL is enabled/disabled ──
-    # The Go server uses TLS on port 21114 when -tls-cert/-tls-key flags are set.
-    # Node.js console must match the protocol to avoid TLS handshake errors.
+    # API TLS (--tls-api) is only enabled for proper certs (custom), not self-signed.
+    # Self-signed certs: API stays HTTP on localhost, only signal/relay use TLS.
     $envContent = Get-Content $envFile -Raw
+    $apiTlsActive = ($sslChoice -eq "1") # Only proper certs get API TLS
     
     if ($sslChoice -ne "3") {
-        # SSL enabled — switch API URLs to HTTPS
-        $envContent = $envContent -replace 'HBBS_API_URL=http://localhost', 'HBBS_API_URL=https://localhost'
-        $envContent = $envContent -replace 'BETTERDESK_API_URL=http://localhost', 'BETTERDESK_API_URL=https://localhost'
+        if ($apiTlsActive) {
+            # Proper cert — switch API URLs to HTTPS  
+            $envContent = $envContent -replace 'HBBS_API_URL=http://localhost', 'HBBS_API_URL=https://localhost'
+            $envContent = $envContent -replace 'BETTERDESK_API_URL=http://localhost', 'BETTERDESK_API_URL=https://localhost'
+        } else {
+            # Self-signed — ensure API URLs stay HTTP
+            $envContent = $envContent -replace 'HBBS_API_URL=https://localhost', 'HBBS_API_URL=http://localhost'
+            $envContent = $envContent -replace 'BETTERDESK_API_URL=https://localhost', 'BETTERDESK_API_URL=http://localhost'
+        }
         
         # For self-signed certs, Node.js needs NODE_EXTRA_CA_CERTS to trust the CA
         $sslCertValue = [regex]::Match($envContent, 'SSL_CERT_PATH=(.+)').Groups[1].Value.Trim()
@@ -3799,14 +3812,38 @@ function Do-ConfigureSSL {
             try {
                 $currentEnv = & nssm get $svcName AppEnvironmentExtra 2>$null
                 if ($currentEnv) {
-                    $currentEnv = $currentEnv -replace 'HBBS_API_URL=http://localhost', 'HBBS_API_URL=https://localhost'
-                    $currentEnv = $currentEnv -replace 'BETTERDESK_API_URL=http://localhost', 'BETTERDESK_API_URL=https://localhost'
+                    if ($apiTlsActive) {
+                        $currentEnv = $currentEnv -replace 'HBBS_API_URL=http://localhost', 'HBBS_API_URL=https://localhost'
+                        $currentEnv = $currentEnv -replace 'BETTERDESK_API_URL=http://localhost', 'BETTERDESK_API_URL=https://localhost'
+                    } else {
+                        $currentEnv = $currentEnv -replace 'HBBS_API_URL=https://localhost', 'HBBS_API_URL=http://localhost'
+                        $currentEnv = $currentEnv -replace 'BETTERDESK_API_URL=https://localhost', 'BETTERDESK_API_URL=http://localhost'
+                    }
                     & nssm set $svcName AppEnvironmentExtra $currentEnv 2>$null
+                }
+            } catch { }
+            
+            # Update Go server service to add/remove -tls-api flag
+            $goSvcName = $script:SERVER_SERVICE
+            try {
+                $goArgs = & nssm get $goSvcName AppParameters 2>$null
+                if ($goArgs) {
+                    if ($apiTlsActive -and $goArgs -notmatch '-tls-api') {
+                        $goArgs = $goArgs -replace '-tls-relay', '-tls-relay -tls-api'
+                        & nssm set $goSvcName AppParameters $goArgs 2>$null
+                    } elseif (-not $apiTlsActive) {
+                        $goArgs = $goArgs -replace ' -tls-api', ''
+                        & nssm set $goSvcName AppParameters $goArgs 2>$null
+                    }
                 }
             } catch { }
         }
         
-        Print-Info "API URLs updated to HTTPS"
+        if ($apiTlsActive) {
+            Print-Info "API URLs updated to HTTPS"
+        } else {
+            Print-Info "Signal/relay TLS enabled, API stays HTTP (self-signed cert)"
+        }
     } else {
         # SSL disabled — revert API URLs to HTTP
         $envContent = $envContent -replace 'HBBS_API_URL=https://localhost', 'HBBS_API_URL=http://localhost'

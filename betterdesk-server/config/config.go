@@ -73,9 +73,10 @@ type Config struct {
 	AllowedWSOrigins    string // Comma-separated allowed WebSocket origins (empty = allow all)
 	APIAllowedWSOrigins string // Comma-separated allowed WebSocket origins for HTTP API events endpoint
 
-	// TLS for signal/relay (Phase 3)
+	// TLS for signal/relay/api (Phase 3 + Phase 21)
 	TLSSignal bool // Enable TLS on TCP signal (:21116) and WS signal (:21118)
 	TLSRelay  bool // Enable TLS on TCP relay (:21117) and WS relay (:21119)
+	TLSApi    bool // Enable TLS on HTTP API (:21114) — opt-in, not automatic
 
 	// Dual Key System - Enrollment Mode
 	// "open" (default) - Accept all device registrations (backward compatible)
@@ -205,6 +206,9 @@ func (c *Config) LoadEnv() {
 	if strings.ToUpper(os.Getenv("TLS_RELAY")) == "Y" {
 		c.TLSRelay = true
 	}
+	if strings.ToUpper(os.Getenv("TLS_API")) == "Y" {
+		c.TLSApi = true
+	}
 	if v := os.Getenv("ENROLLMENT_MODE"); v != "" {
 		mode := strings.ToLower(v)
 		if mode == "open" || mode == "managed" || mode == "locked" {
@@ -315,4 +319,11 @@ func (c *Config) SignalTLSEnabled() bool {
 // TCP and WebSocket listeners. Requires both --tls-relay flag and valid cert/key.
 func (c *Config) RelayTLSEnabled() bool {
 	return c.TLSRelay && c.HasTLSCert()
+}
+
+// APITLSEnabled returns true if TLS should be used for the HTTP API server.
+// Requires --tls-api flag (or --force-https) and valid cert/key.
+// Unlike signal/relay, API TLS is opt-in to avoid breaking localhost communication.
+func (c *Config) APITLSEnabled() bool {
+	return (c.TLSApi || c.ForceHTTPS) && c.HasTLSCert()
 }

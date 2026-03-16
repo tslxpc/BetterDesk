@@ -54,13 +54,20 @@ func main() {
 	log.Printf("  WS Signal:  :%d (WebSocket)", cfg.SignalPort+2)
 	log.Printf("  Relay:      :%d (TCP)", cfg.RelayPort)
 	log.Printf("  WS Relay:   :%d (WebSocket)", cfg.RelayPort+2)
-	log.Printf("  API:        :%d (HTTP)", cfg.APIPort)
+	if cfg.APITLSEnabled() {
+		log.Printf("  API:        :%d (HTTPS)", cfg.APIPort)
+	} else {
+		log.Printf("  API:        :%d (HTTP)", cfg.APIPort)
+	}
 	log.Printf("  Database:   %s", cfg.DBPath)
 	if cfg.SignalTLSEnabled() {
 		log.Printf("  TLS Signal: ENABLED (dual-mode: plain+TLS)")
 	}
 	if cfg.RelayTLSEnabled() {
 		log.Printf("  TLS Relay:  ENABLED (dual-mode: plain+TLS)")
+	}
+	if cfg.APITLSEnabled() {
+		log.Printf("  TLS API:    ENABLED")
 	}
 	if cfg.HasTLSCert() {
 		log.Printf("  TLS Cert:   %s", cfg.TLSCertFile)
@@ -459,6 +466,7 @@ func parseFlags() *config.Config {
 	flag.StringVar(&cfg.InitAdminPass, "init-admin-pass", cfg.InitAdminPass, "Initial admin password (auto-generated if empty)")
 	flag.BoolVar(&cfg.TLSSignal, "tls-signal", cfg.TLSSignal, "Enable TLS on signal TCP/WS ports (requires --tls-cert and --tls-key)")
 	flag.BoolVar(&cfg.TLSRelay, "tls-relay", cfg.TLSRelay, "Enable TLS on relay TCP/WS ports (requires --tls-cert and --tls-key)")
+	flag.BoolVar(&cfg.TLSApi, "tls-api", cfg.TLSApi, "Enable TLS on HTTP API port (requires --tls-cert and --tls-key)")
 
 	showVersion := flag.Bool("version", false, "Show version and exit")
 	flag.Parse()

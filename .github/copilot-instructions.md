@@ -483,6 +483,17 @@ sudo apt-get install -y build-essential libsqlite3-dev pkg-config libssl-dev git
 112. [x] **PS1 NSSM env missing DB_TYPE/DATABASE_URL**: NSSM `AppEnvironmentExtra` for console service did not include database type variables. Added `DB_TYPE` and `DATABASE_URL` propagation for PostgreSQL mode.
 113. [x] **Docker: API key + auth.db regenerated on every update**: `create_compose_file()` unconditionally generated new API key, new admin password, and deleted auth.db from volume. Changed to preserve existing `.api_key` and `.admin_credentials` files; only wipe auth.db on fresh install.
 
+#### Go Server & Installers — API TLS Separation Fix (Phase 21) ✅ COMPLETED 2026-03-18
+114. [x] **Root cause: API auto-HTTPS breaking Node.js ↔ Go communication**: When `--tls-cert` and `--tls-key` flags were provided, `api/server.go` used `HasTLSCert()` to auto-enable HTTPS on API port 21114. Unlike signal (`--tls-signal`) and relay (`--tls-relay`) which had explicit opt-in flags, API TLS was automatic. With self-signed certs, Node.js sent `http://localhost:21114` to an HTTPS server → Go returned HTTP 400 ("client sent an HTTP request to an HTTPS server") → `getAllPeers` failed → 0 devices in panel.
+115. [x] **`--tls-api` flag added to Go server**: New `TLSApi bool` field in `config.Config`, `APITLSEnabled()` method (`TLSApi || ForceHTTPS) && HasTLSCert()`), `--tls-api` CLI flag, `TLS_API=Y` env var. `api/server.go` changed from `HasTLSCert()` to `APITLSEnabled()`. API now stays HTTP unless explicitly opted in. `--force-https` implies `--tls-api`. Startup log shows correct HTTP/HTTPS scheme.
+116. [x] **Installer scripts: self-signed → API stays HTTP**: `betterdesk.sh` and `betterdesk.ps1` now pass `-tls-api` only for proper certs (Let's Encrypt, custom), not for self-signed. `api_scheme` in systemd/NSSM env set to `http` for self-signed, `https` only when `-tls-api` active.
+117. [x] **SSL config menu updated**: Option C (SSL configuration) in both scripts now correctly adds/removes `-tls-api` from Go server service args. Self-signed: signal/relay TLS only, API HTTP. Proper cert: full TLS including API.
+118. [x] **.env API URL no longer blindly switched to https://**: Self-signed cert generation no longer changes `BETTERDESK_API_URL=http://` to `https://` in `.env`. Only SSL config with proper certs or explicit `--tls-api` triggers HTTPS API URLs.
+119. [x] **Diagnostics updated**: `betterdesk.sh` diagnostics now checks for `--tls-api` or `--force-https` in service args (not just `--tls-cert`) to determine API scheme.
+120. [x] **Stale `betterdesk-go.service` cleanup**: Added removal of `betterdesk-go.service` (from manual installs with wrong credentials) to `setup_services()` legacy cleanup, `legacy_services` array, and uninstall section.
+121. [x] **Migration tool auto-compilation**: `migrate_sqlite_to_postgresql()` now tries to compile migration tool from source when Go is available and binary is not found. Also validates binary supports `-mode` flag (detects outdated binaries).
+122. [x] **Migration tool rebuilt**: `tools/migrate/migrate-linux-amd64` rebuilt with current source code supporting `-mode`, `-src`, `-dst`, `-node-auth` flags.
+
 ---
 
 ## 🔄 System Statusu v3.0
@@ -748,4 +759,4 @@ All code changes MUST include a security review as part of the implementation pr
 
 ---
 
-*Ostatnia aktualizacja: 2026-03-18 (ALL-IN-ONE Scripts — Installer Stability Fix — Phase 20) przez GitHub Copilot*
+*Ostatnia aktualizacja: 2026-03-18 (Go Server & Installers — API TLS Separation Fix — Phase 21) przez GitHub Copilot*

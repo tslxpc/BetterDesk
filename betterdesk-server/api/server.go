@@ -213,8 +213,8 @@ func (s *Server) Start(ctx context.Context) error {
 		},
 	}
 
-	// Enable TLS if certificate and key are configured
-	useTLS := s.cfg.HasTLSCert()
+	// Enable TLS only if explicitly opted in via --tls-api or --force-https
+	useTLS := s.cfg.APITLSEnabled()
 	if useTLS {
 		tlsCfg, err := config.LoadTLSConfig(s.cfg.TLSCertFile, s.cfg.TLSKeyFile)
 		if err != nil {
