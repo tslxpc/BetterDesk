@@ -92,53 +92,102 @@
         removeAddButton();
     }
 
+    /** Refresh all widget data by restarting their update timers. */
+    function refreshAll() {
+        stopAllTimers();
+        _widgets.forEach(function (w) {
+            startWidgetTimer(w);
+        });
+    }
+
     // ============ Wallpaper ============
+
+    var STORAGE_WALL_FIT = 'bd_widget_wallpaper_fit';
 
     function loadWallpaper() {
         var saved = localStorage.getItem(STORAGE_WALL);
-        setWallpaper(saved || '/wallpapers/1.png');
+        var fit = localStorage.getItem(STORAGE_WALL_FIT) || 'cover';
+        applyWallpaper(saved || '/wallpapers/1.png', fit, false);
     }
 
-    function setWallpaper(url) {
+    /**
+     * Apply wallpaper URL (or solid: prefix) with optional fit mode.
+     * @param {string} url - Image URL or 'solid:#rrggbb'
+     * @param {string} [fit] - 'cover' | 'contain' | 'stretch' | 'center'
+     * @param {boolean} [animate] - crossfade transition (default true)
+     */
+    function applyWallpaper(url, fit, animate) {
         _wallpaperPath = url;
+        fit = fit || 'cover';
+        if (animate === undefined) animate = true;
         var el = document.querySelector('.desktop-wallpaper');
         if (!el) return;
 
-        // Preload image before transitioning
+        var isSolid = url.indexOf('solid:') === 0;
+
+        if (isSolid) {
+            var color = url.substring(6);
+            el.style.backgroundImage = 'none';
+            el.style.backgroundColor = color;
+            el.style.backgroundSize = '';
+            el.style.backgroundPosition = '';
+            localStorage.setItem(STORAGE_WALL, url);
+            localStorage.setItem(STORAGE_WALL_FIT, fit);
+            return;
+        }
+
+        var sizeMap = { cover: 'cover', contain: 'contain', stretch: '100% 100%', center: 'auto' };
+        var posMap  = { cover: 'center', contain: 'center', stretch: 'center', center: 'center' };
+        var bgSize = sizeMap[fit] || 'cover';
+        var bgPos  = posMap[fit]  || 'center';
+
+        if (!animate) {
+            el.style.backgroundColor = '';
+            el.style.backgroundImage = 'url("' + url + '")';
+            el.style.backgroundSize = bgSize;
+            el.style.backgroundPosition = bgPos;
+            localStorage.setItem(STORAGE_WALL, url);
+            localStorage.setItem(STORAGE_WALL_FIT, fit);
+            return;
+        }
+
         var img = new Image();
         img.onload = function() {
-            // Create new wallpaper layer for crossfade
             var newLayer = document.createElement('div');
             newLayer.className = 'desktop-wallpaper-new';
             newLayer.style.backgroundImage = 'url("' + url + '")';
-            newLayer.style.backgroundSize = 'cover';
-            newLayer.style.backgroundPosition = 'center';
+            newLayer.style.backgroundSize = bgSize;
+            newLayer.style.backgroundPosition = bgPos;
             el.appendChild(newLayer);
 
-            // Trigger crossfade animation
             requestAnimationFrame(function() {
                 newLayer.classList.add('fade-in');
             });
 
-            // After transition, update main layer and remove new layer
             setTimeout(function() {
+                el.style.backgroundColor = '';
                 el.style.backgroundImage = 'url("' + url + '")';
-                el.style.backgroundSize = 'cover';
-                el.style.backgroundPosition = 'center';
-                if (newLayer.parentElement) {
-                    newLayer.remove();
-                }
-            }, 600); // Match CSS transition duration
+                el.style.backgroundSize = bgSize;
+                el.style.backgroundPosition = bgPos;
+                if (newLayer.parentElement) newLayer.remove();
+            }, 600);
         };
         img.onerror = function() {
-            // Fallback: set directly without transition
+            el.style.backgroundColor = '';
             el.style.backgroundImage = 'url("' + url + '")';
-            el.style.backgroundSize = 'cover';
-            el.style.backgroundPosition = 'center';
+            el.style.backgroundSize = bgSize;
+            el.style.backgroundPosition = bgPos;
         };
         img.src = url;
 
         localStorage.setItem(STORAGE_WALL, url);
+        localStorage.setItem(STORAGE_WALL_FIT, fit);
+    }
+
+    /** Legacy wrapper — keeps external API backward-compatible. */
+    function setWallpaper(url) {
+        var fit = localStorage.getItem(STORAGE_WALL_FIT) || 'cover';
+        applyWallpaper(url, fit, true);
     }
 
     // ============ Layout Persistence ============
@@ -839,33 +888,119 @@
         if (_wallpicker) return;
         _wallpicker = true;
 
+        var currentFit = localStorage.getItem(STORAGE_WALL_FIT) || 'cover';
+        var isSolid = _wallpaperPath && _wallpaperPath.indexOf('solid:') === 0;
+        var currentColor = isSolid ? _wallpaperPath.substring(6) : '#1a1a2e';
+
         var overlay = document.createElement('div');
         overlay.className = 'wallpaper-picker-overlay';
         overlay.id = 'wallpaper-picker-overlay';
+
+        // Predefined solid colors
+        var solidColors = [
+            '#0d1117', '#161b22', '#1a1a2e', '#0f3460',
+            '#16213e', '#1b2838', '#2d3436', '#1e272e',
+            '#2c3e50', '#34495e', '#1c1c1c', '#212121',
+            '#263238', '#37474f', '#102027', '#004d40',
+            '#1b5e20', '#b71c1c', '#4a148c', '#311b92'
+        ];
 
         var html = '<div class="wallpaper-picker">' +
             '<div class="wallpaper-picker-header">' +
                 '<h3>' + esc(t('desktop.wallpaper')) + '</h3>' +
                 '<button class="wallpaper-picker-close"><span class="material-icons">close</span></button>' +
             '</div>' +
-            '<div class="wallpaper-grid" id="wallpaper-grid"></div></div>';
+            '<div class="wallpaper-picker-tabs">' +
+                '<button class="wp-tab active" data-tab="images">' +
+                    '<span class="material-icons">image</span> ' + esc(t('desktop.wp_images')) +
+                '</button>' +
+                '<button class="wp-tab" data-tab="colors">' +
+                    '<span class="material-icons">palette</span> ' + esc(t('desktop.wp_colors')) +
+                '</button>' +
+            '</div>' +
+            '<div class="wallpaper-picker-body">' +
+                '<div class="wp-panel" id="wp-panel-images">' +
+                    '<div class="wallpaper-grid" id="wallpaper-grid"></div>' +
+                '</div>' +
+                '<div class="wp-panel" id="wp-panel-colors" style="display:none">' +
+                    '<div class="wp-color-grid">' +
+                        solidColors.map(function(c) {
+                            var sel = (isSolid && currentColor === c) ? ' active' : '';
+                            return '<button class="wp-color-swatch' + sel + '" data-color="' + c + '" ' +
+                                'style="background:' + c + '" title="' + c + '"></button>';
+                        }).join('') +
+                    '</div>' +
+                    '<div class="wp-custom-color">' +
+                        '<label>' + esc(t('desktop.wp_custom_color')) + '</label>' +
+                        '<input type="color" id="wp-custom-color-input" value="' + esc(currentColor) + '">' +
+                    '</div>' +
+                '</div>' +
+            '</div>' +
+            '<div class="wallpaper-picker-footer">' +
+                '<div class="wp-fit-selector">' +
+                    '<label>' + esc(t('desktop.wp_fit_style')) + '</label>' +
+                    '<select id="wp-fit-select">' +
+                        '<option value="cover"' + (currentFit === 'cover' ? ' selected' : '') + '>' + esc(t('desktop.wp_fill')) + '</option>' +
+                        '<option value="contain"' + (currentFit === 'contain' ? ' selected' : '') + '>' + esc(t('desktop.wp_fit')) + '</option>' +
+                        '<option value="stretch"' + (currentFit === 'stretch' ? ' selected' : '') + '>' + esc(t('desktop.wp_stretch')) + '</option>' +
+                        '<option value="center"' + (currentFit === 'center' ? ' selected' : '') + '>' + esc(t('desktop.wp_center')) + '</option>' +
+                    '</select>' +
+                '</div>' +
+            '</div>' +
+        '</div>';
         overlay.innerHTML = html;
         var shell = document.getElementById('desktop-shell');
         (shell || document.body).appendChild(overlay);
 
+        // Close handlers
         overlay.querySelector('.wallpaper-picker-close').addEventListener('click', closeWallpaperPicker);
         overlay.addEventListener('click', function (e) {
             if (e.target === overlay) closeWallpaperPicker();
         });
 
-        var grid = overlay.querySelector('#wallpaper-grid');
+        // Tab switching
+        overlay.querySelectorAll('.wp-tab').forEach(function(tab) {
+            tab.addEventListener('click', function() {
+                overlay.querySelectorAll('.wp-tab').forEach(function(t) { t.classList.remove('active'); });
+                tab.classList.add('active');
+                var target = tab.dataset.tab;
+                overlay.querySelectorAll('.wp-panel').forEach(function(p) { p.style.display = 'none'; });
+                var panel = document.getElementById('wp-panel-' + target);
+                if (panel) panel.style.display = '';
+            });
+        });
 
-        // Build all placeholder divs in a single fragment (lightweight, no images yet)
+        // Fit mode change — apply immediately if a wallpaper is already set
+        var fitSelect = overlay.querySelector('#wp-fit-select');
+        fitSelect.addEventListener('change', function() {
+            if (_wallpaperPath) {
+                applyWallpaper(_wallpaperPath, fitSelect.value, false);
+            }
+        });
+
+        // Solid color swatches
+        overlay.querySelectorAll('.wp-color-swatch').forEach(function(swatch) {
+            swatch.addEventListener('click', function() {
+                overlay.querySelectorAll('.wp-color-swatch.active').forEach(function(a) { a.classList.remove('active'); });
+                swatch.classList.add('active');
+                applyWallpaper('solid:' + swatch.dataset.color, fitSelect.value, false);
+            });
+        });
+
+        // Custom color input
+        var customColor = overlay.querySelector('#wp-custom-color-input');
+        customColor.addEventListener('input', function() {
+            overlay.querySelectorAll('.wp-color-swatch.active').forEach(function(a) { a.classList.remove('active'); });
+            applyWallpaper('solid:' + customColor.value, fitSelect.value, false);
+        });
+
+        // Image grid
+        var grid = overlay.querySelector('#wallpaper-grid');
         var frag = document.createDocumentFragment();
         for (var i = 1; i <= WALLPAPER_COUNT; i++) {
             var wallPath = '/wallpapers/' + i + '.png';
             var thumbPath = '/wallpapers/thumbs/' + i + '.webp';
-            var active = (_wallpaperPath === wallPath) ? ' active' : '';
+            var active = (!isSolid && _wallpaperPath === wallPath) ? ' active' : '';
             var thumb = document.createElement('div');
             thumb.className = 'wallpaper-thumb' + active;
             thumb.dataset.path = wallPath;
@@ -876,13 +1011,13 @@
         }
         grid.appendChild(frag);
 
-        // Single click handler via event delegation (instead of 125 individual listeners)
+        // Single click handler via event delegation
         grid.addEventListener('click', function (e) {
             var el = e.target.closest('.wallpaper-thumb');
             if (!el || !el.dataset.path) return;
             grid.querySelectorAll('.wallpaper-thumb.active').forEach(function (a) { a.classList.remove('active'); });
             el.classList.add('active');
-            setWallpaper(el.dataset.path);
+            applyWallpaper(el.dataset.path, fitSelect.value, true);
             closeWallpaperPicker();
         });
 
@@ -909,7 +1044,6 @@
                 _pickerObserver.observe(el);
             });
         } else {
-            // Fallback: native lazy loading (no IntersectionObserver)
             grid.querySelectorAll('.wallpaper-thumb').forEach(function (el) {
                 var ph = el.querySelector('.wallpaper-thumb-placeholder');
                 if (!ph) return;
@@ -921,6 +1055,12 @@
                 img.decoding = 'async';
                 el.replaceChild(img, ph);
             });
+        }
+
+        // If currently on solid color, auto-switch to colors tab
+        if (isSolid) {
+            var colorsTab = overlay.querySelector('.wp-tab[data-tab="colors"]');
+            if (colorsTab) colorsTab.click();
         }
     }
 
@@ -1251,7 +1391,8 @@
         openPicker: openPicker,
         getWidgets: function () { return _widgets; },
         removeAddButton: removeAddButton,
-        renderAddButton: renderAddButton
+        renderAddButton: renderAddButton,
+        refreshAll: refreshAll
     };
 
 })();

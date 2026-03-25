@@ -13,10 +13,13 @@
     <!-- Stylesheets -->
     <link rel="stylesheet" href="/css/main.css?v=<%= cacheVersion %>">
     <link rel="stylesheet" href="/css/theme.css?v=<%= cacheVersion %>">
+    <link rel="stylesheet" href="/css/transitions.css?v=<%= cacheVersion %>">
     <% if (!embed) { %>
     <link rel="stylesheet" href="/css/desktop-mode.css?v=<%= cacheVersion %>">
     <link rel="stylesheet" href="/css/desktop-widgets.css?v=<%= cacheVersion %>">
     <link rel="stylesheet" href="/css/tutorial.css?v=<%= cacheVersion %>">
+    <% } else { %>
+    <link rel="stylesheet" href="/css/desktop-widget-overrides.css?v=<%= cacheVersion %>">
     <% } %>
     <% if (typeof pageStyles !== 'undefined' && pageStyles.length) { %>
         <% pageStyles.forEach(style => { %>
@@ -56,21 +59,20 @@
         <div class="desktop-icons" id="desktop-icons"></div>
         <div class="desktop-windows" id="desktop-windows"></div>
         <div class="desktop-taskbar" id="desktop-taskbar">
-            <div class="taskbar-start">
-                <button class="taskbar-start-btn" id="taskbar-start-btn" title="<%= appName %>">
-                    <span class="material-icons">grid_view</span>
-                </button>
-            </div>
             <div class="taskbar-apps" id="taskbar-apps"></div>
             <div class="taskbar-right">
-                <button class="taskbar-btn" id="taskbar-wallpaper-btn" title="<%= _('desktop.wallpaper') %>">
-                    <span class="material-icons">wallpaper</span>
-                </button>
                 <button class="taskbar-btn taskbar-console-btn" id="taskbar-console-btn" title="<%= _('desktop.exit_desktop') %>">
                     <span class="material-icons">view_sidebar</span>
                 </button>
                 <div class="taskbar-clock" id="taskbar-clock"></div>
             </div>
+        </div>
+        <!-- Desktop right-click context menu -->
+        <div class="desktop-context-menu" id="desktop-context-menu" style="display:none">
+            <button class="ctx-item" data-action="wallpaper"><span class="material-icons">wallpaper</span><%= _('desktop.wallpaper') %></button>
+            <button class="ctx-item" data-action="refresh"><span class="material-icons">refresh</span><%= _('desktop.refresh') || 'Refresh' %></button>
+            <div class="ctx-divider"></div>
+            <button class="ctx-item" data-action="exit"><span class="material-icons">view_sidebar</span><%= _('desktop.exit_desktop') %></button>
         </div>
     </div>
     <% } %>

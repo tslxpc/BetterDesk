@@ -111,7 +111,12 @@
                 <span class="material-icons">business</span>
                 <span class="sidebar-link-text"><%= _('nav.tenants') %></span>
             </a>
-            
+
+            <a href="/organizations" class="sidebar-link <%= currentPage === 'organizations' ? 'active' : '' %>">
+                <span class="material-icons">corporate_fare</span>
+                <span class="sidebar-link-text"><%= _('nav.organizations') %></span>
+            </a>
+
             <a href="/dataguard" class="sidebar-link <%= currentPage === 'dataguard' ? 'active' : '' %>">
                 <span class="material-icons">shield</span>
                 <span class="sidebar-link-text"><%= _('nav.dataguard') %></span>

@@ -1,0 +1,255 @@
+/* BetterDesk Console — Organizations Page Styles */
+
+.org-page { padding: 0; }
+
+.org-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 24px;
+}
+
+.org-title {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+.org-title h1 {
+    font-size: 1.5rem;
+    font-weight: 700;
+    margin: 0;
+}
+
+.org-count {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 28px;
+    height: 28px;
+    padding: 0 8px;
+    background: var(--bd-accent, #4f6ef7);
+    color: #fff;
+    border-radius: 14px;
+    font-size: 0.8rem;
+    font-weight: 600;
+}
+
+/* Organization cards */
+.org-list { display: flex; flex-direction: column; gap: 8px; }
+
+.org-card {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    padding: 16px 20px;
+    background: var(--card-bg, #fff);
+    border: 1px solid var(--border-color, #e2e5ea);
+    border-radius: 8px;
+    transition: border-color 0.15s, box-shadow 0.15s;
+}
+.org-card:hover {
+    border-color: var(--bd-accent, #4f6ef7);
+    box-shadow: 0 2px 8px rgba(79, 110, 247, 0.08);
+}
+
+.org-card-info { display: flex; align-items: center; gap: 12px; flex: 1; }
+
+.org-card-icon {
+    width: 40px;
+    height: 40px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--bd-accent, #4f6ef7);
+    color: #fff;
+    border-radius: 10px;
+    font-size: 1.2rem;
+}
+
+.org-card-text { display: flex; flex-direction: column; gap: 2px; }
+.org-card-name {
+    font-weight: 600;
+    color: var(--text-primary, #1a1a2e);
+    text-decoration: none;
+}
+.org-card-name:hover { text-decoration: underline; }
+.org-card-slug {
+    font-size: 0.8rem;
+    color: var(--text-muted, #9ca3af);
+    font-family: 'JetBrains Mono', monospace;
+}
+
+.org-card-meta { font-size: 0.8rem; color: var(--text-muted, #9ca3af); }
+.org-card-actions { display: flex; gap: 4px; }
+
+/* Organization detail page */
+.org-detail-page { padding: 0; }
+
+.org-detail-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 24px;
+}
+
+.org-detail-info h1 {
+    font-size: 1.5rem;
+    font-weight: 700;
+    margin: 0;
+}
+
+.org-detail-slug {
+    display: block;
+    font-size: 0.85rem;
+    color: var(--text-muted, #9ca3af);
+    font-family: 'JetBrains Mono', monospace;
+}
+
+.org-detail-actions { display: flex; gap: 8px; }
+
+/* Tabs */
+.org-tabs {
+    display: flex;
+    gap: 4px;
+    margin-bottom: 24px;
+    border-bottom: 1px solid var(--border-color, #e2e5ea);
+    padding-bottom: 0;
+}
+
+.org-tab {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 10px 16px;
+    background: none;
+    border: none;
+    border-bottom: 2px solid transparent;
+    cursor: pointer;
+    color: var(--text-secondary, #6b7280);
+    font-size: 0.9rem;
+    transition: color 0.15s, border-color 0.15s;
+}
+.org-tab:hover { color: var(--text-primary, #1a1a2e); }
+.org-tab.active {
+    color: var(--bd-accent, #4f6ef7);
+    border-bottom-color: var(--bd-accent, #4f6ef7);
+    font-weight: 600;
+}
+
+.tab-count {
+    display: inline-flex;
+    min-width: 20px;
+    height: 20px;
+    align-items: center;
+    justify-content: center;
+    background: var(--bg-hover, #eef0f4);
+    border-radius: 10px;
+    font-size: 0.75rem;
+    font-weight: 600;
+    padding: 0 6px;
+}
+
+.org-tab.active .tab-count {
+    background: var(--bd-accent, #4f6ef7);
+    color: #fff;
+}
+
+/* Section header */
+.org-section-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 16px;
+}
+
+.org-section-header h2 {
+    font-size: 1.15rem;
+    font-weight: 600;
+    margin: 0;
+}
+
+/* Role badges */
+.role-badge {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 4px;
+    font-size: 0.75rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.02em;
+}
+.role-owner { background: #f59e0b20; color: #d97706; }
+.role-admin { background: #ef444420; color: #dc2626; }
+.role-operator { background: #4f6ef720; color: #4f6ef7; }
+.role-user { background: #10b98120; color: #059669; }
+
+/* Settings */
+.org-settings-form {
+    max-width: 500px;
+    margin-bottom: 32px;
+}
+
+.org-settings-raw {
+    margin-top: 24px;
+}
+
+.org-settings-raw h3 {
+    font-size: 1rem;
+    font-weight: 600;
+    margin-bottom: 12px;
+}
+
+/* Empty state */
+.empty-state {
+    text-align: center;
+    padding: 60px 20px;
+    color: var(--text-muted, #9ca3af);
+}
+
+/* Modal */
+.modal-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.5);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 1000;
+}
+
+.modal-card {
+    background: var(--card-bg, #fff);
+    border-radius: 12px;
+    width: 100%;
+    max-width: 480px;
+    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.2);
+}
+
+.modal-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 20px 24px 0;
+}
+
+.modal-header h3 { margin: 0; font-size: 1.1rem; font-weight: 700; }
+
+.modal-close {
+    background: none;
+    border: none;
+    font-size: 1.5rem;
+    cursor: pointer;
+    color: var(--text-muted, #9ca3af);
+    padding: 0;
+    line-height: 1;
+}
+
+.modal-body { padding: 20px 24px; }
+
+.modal-footer {
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+    padding: 0 24px 20px;
+}

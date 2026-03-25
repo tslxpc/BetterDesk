@@ -39,6 +39,27 @@
     let isFoldableDevice = false;
     let devicePosture = 'unknown'; // 'continuous', 'folded', 'folded-over'
 
+    // ============ Window Bounds Persistence ============
+
+    /**
+     * Save window position + size for a given app so it can be restored
+     * when the user reopens the same app in a later session.
+     */
+    function saveWindowBounds(appId, x, y, width, height) {
+        try {
+            var all = JSON.parse(localStorage.getItem(STORAGE_WINS_KEY) || '{}');
+            all[appId] = { x: x, y: y, w: width, h: height };
+            localStorage.setItem(STORAGE_WINS_KEY, JSON.stringify(all));
+        } catch (_) { /* quota exceeded — ignore */ }
+    }
+
+    function loadWindowBounds(appId) {
+        try {
+            var all = JSON.parse(localStorage.getItem(STORAGE_WINS_KEY) || '{}');
+            return all[appId] || null;
+        } catch (_) { return null; }
+    }
+
     // ============ Apps Definition ============
 
     function getApps() {
@@ -209,17 +230,15 @@
             consoleBtn.addEventListener('click', function() { deactivate(); });
         }
 
-        // Taskbar start button
-        var startBtn = document.getElementById('taskbar-start-btn');
-        if (startBtn) {
-            startBtn.addEventListener('click', function() { openStartMenu(); });
-        }
-
-        // Taskbar wallpaper button
-        var wallBtn = document.getElementById('taskbar-wallpaper-btn');
-        if (wallBtn) {
-            wallBtn.addEventListener('click', function() {
-                if (window.DesktopWidgets) window.DesktopWidgets.openWallpaperPicker();
+        // Desktop context menu (right-click on desktop background)
+        var shell = document.getElementById('desktop-shell');
+        if (shell) {
+            shell.addEventListener('contextmenu', function(e) {
+                // Only trigger on desktop background, not on windows/widgets
+                if (e.target.closest('.desktop-window') || e.target.closest('.desktop-taskbar') ||
+                    e.target.closest('.desktop-widget') || e.target.closest('.desktop-icon')) return;
+                e.preventDefault();
+                showContextMenu(e.clientX, e.clientY);
             });
         }
 
@@ -229,13 +248,17 @@
 
         // Responsive: deactivate if viewport shrinks below breakpoint
         // and re-clamp windows that may be offscreen after resize
-        window.addEventListener('resize', Utils.debounce(function() {
+        var onResize = Utils.debounce(function() {
             if (active && window.innerWidth < BREAKPOINT) {
                 deactivate(true);
                 return;
             }
             if (active) clampAllWindows();
-        }, 200));
+        }, 200);
+        window.addEventListener('resize', onResize);
+        if (window.visualViewport) {
+            window.visualViewport.addEventListener('resize', onResize);
+        }
     }
 
     // ============ Activate / Deactivate ============
@@ -417,6 +440,62 @@
         }, 10);
     }
 
+    // ============ Desktop Context Menu ============
+
+    function showContextMenu(x, y) {
+        var menu = document.getElementById('desktop-context-menu');
+        if (!menu) return;
+
+        // Position menu, ensuring it stays within viewport
+        var area = getDesktopArea();
+        var mw = 200, mh = 160; // approximate menu size
+        var posX = Math.min(x, area.width - mw);
+        var posY = Math.min(y, area.y + area.height - mh);
+
+        menu.style.left = posX + 'px';
+        menu.style.top = posY + 'px';
+        menu.style.display = 'block';
+
+        function closeCtx(e) {
+            if (!menu.contains(e.target)) {
+                menu.style.display = 'none';
+                document.removeEventListener('click', closeCtx);
+            }
+        }
+        setTimeout(function() {
+            document.addEventListener('click', closeCtx);
+        }, 10);
+
+        // Context menu actions
+        menu.querySelectorAll('.ctx-item').forEach(function(item) {
+            item.onclick = function() {
+                menu.style.display = 'none';
+                var action = item.getAttribute('data-action');
+                if (action === 'wallpaper' && window.DesktopWidgets) {
+                    window.DesktopWidgets.openWallpaperPicker();
+                } else if (action === 'refresh') {
+                    if (window.DesktopWidgets) window.DesktopWidgets.refreshAll();
+                } else if (action === 'exit') {
+                    deactivate();
+                }
+            };
+        });
+    }
+
+    // ============ Taskbar Auto-Hide ============
+
+    function updateTaskbarVisibility() {
+        var taskbar = document.getElementById('desktop-taskbar');
+        if (!taskbar) return;
+
+        // Show taskbar only in windows mode or when there are open windows
+        if (currentMode === 'widgets' && windows.size === 0) {
+            taskbar.classList.add('taskbar-hidden');
+        } else {
+            taskbar.classList.remove('taskbar-hidden');
+        }
+    }
+
     // ============ Window Management ============
 
     function openApp(app) {
@@ -441,12 +520,23 @@
     function createWindow(app) {
         var id = 'win-' + Date.now() + '-' + Math.random().toString(36).substr(2, 5);
 
-        // Calculate position (cascading)
+        // Try to restore saved position + size for this app
+        var saved = loadWindowBounds(app.id);
         var area = getDesktopArea();
-        var width = Math.min(960, area.width - 80);
-        var height = Math.min(640, area.height - 80);
-        var x = area.x + 60 + (cascadeIndex * CASCADE_OFFSET) % (area.width - width - 60);
-        var y = area.y + 40 + (cascadeIndex * CASCADE_OFFSET) % (area.height - height - 40);
+        var width, height, x, y;
+
+        if (saved && saved.w > 0 && saved.h > 0) {
+            width  = Math.min(saved.w, area.width);
+            height = Math.min(saved.h, area.height);
+            x = Math.max(area.x, Math.min(saved.x, area.x + area.width - 80));
+            y = Math.max(area.y, Math.min(saved.y, area.y + area.height - 32));
+        } else {
+            // Default cascading position
+            width  = Math.min(960, area.width - 80);
+            height = Math.min(640, area.height - 80);
+            x = area.x + 60 + (cascadeIndex * CASCADE_OFFSET) % (area.width - width - 60);
+            y = area.y + 40 + (cascadeIndex * CASCADE_OFFSET) % (area.height - height - 40);
+        }
         cascadeIndex++;
 
         var win = {
@@ -570,6 +660,12 @@
     }
 
     function closeWindow(id) {
+        var win = windows.get(id);
+        // Persist position before removing
+        if (win && !win.maximized) {
+            saveWindowBounds(win.appId, win.x, win.y, win.width, win.height);
+        }
+
         var el = document.getElementById(id);
         if (!el) {
             windows.delete(id);
@@ -754,15 +850,14 @@
             var win = windows.get(dragState.winId);
             if (!win) return;
 
-            var vw = window.innerWidth;
-            var vh = window.innerHeight;
+            var area = getDesktopArea();
             var newX = dragState.origX + dx;
             var newY = dragState.origY + dy;
 
             // Clamp: keep at least 80px of title bar visible horizontally
-            newX = Math.max(-win.width + 80, Math.min(newX, vw - 80));
-            // Clamp: don't drag above viewport or below into taskbar
-            newY = Math.max(0, Math.min(newY, vh - TASKBAR_HEIGHT - 32));
+            newX = Math.max(-win.width + 80, Math.min(newX, area.width - 80));
+            // Clamp: stay within desktop area (above taskbar, below topnav)
+            newY = Math.max(area.y, Math.min(newY, area.y + area.height - 32));
 
             win.x = newX;
             win.y = newY;
@@ -783,11 +878,10 @@
             var dir = resizeState.dir;
             var newX = win.x, newY = win.y;
             var newW = win.width, newH = win.height;
-            var vh = window.innerHeight;
-            var vw = window.innerWidth;
+            var area = getDesktopArea();
 
             if (dir.indexOf('e') !== -1) {
-                newW = Math.max(MIN_WIDTH, Math.min(resizeState.origW + dx, vw - newX));
+                newW = Math.max(MIN_WIDTH, Math.min(resizeState.origW + dx, area.width - newX));
             }
             if (dir.indexOf('w') !== -1) {
                 var dw = resizeState.origW - dx;
@@ -797,7 +891,7 @@
                 }
             }
             if (dir.indexOf('s') !== -1) {
-                newH = Math.max(MIN_HEIGHT, Math.min(resizeState.origH + dy, vh - TASKBAR_HEIGHT - newY));
+                newH = Math.max(MIN_HEIGHT, Math.min(resizeState.origH + dy, area.y + area.height - newY));
             }
             if (dir === 'n' || dir === 'ne' || dir === 'nw') {
                 var dh = resizeState.origH - dy;
@@ -823,6 +917,18 @@
     }
 
     function handleMouseUp() {
+        if (dragState) {
+            var win = windows.get(dragState.winId);
+            if (win && !win.maximized) {
+                saveWindowBounds(win.appId, win.x, win.y, win.width, win.height);
+            }
+        }
+        if (resizeState) {
+            var win = windows.get(resizeState.winId);
+            if (win && !win.maximized) {
+                saveWindowBounds(win.appId, win.x, win.y, win.width, win.height);
+            }
+        }
         if (dragState || resizeState) {
             enableIframePointerEvents();
             document.body.style.cursor = '';
@@ -835,25 +941,42 @@
      * Re-clamp all windows within viewport bounds (e.g. after browser resize).
      */
     function clampAllWindows() {
-        var vw = window.innerWidth;
-        var vh = window.innerHeight;
+        var area = getDesktopArea();
         windows.forEach(function(win) {
-            if (win.maximized) return;
-            var changed = false;
-            // Keep at least 80px visible horizontally
-            var clampedX = Math.max(-win.width + 80, Math.min(win.x, vw - 80));
-            var clampedY = Math.max(0, Math.min(win.y, vh - TASKBAR_HEIGHT - 32));
+            var el = document.getElementById(win.id);
+            if (!el) return;
+
+            if (win.maximized) {
+                // Re-maximize to new area bounds
+                win.x = area.x;
+                win.y = area.y;
+                win.width = area.width;
+                win.height = area.height;
+                el.style.left = area.x + 'px';
+                el.style.top = area.y + 'px';
+                el.style.width = area.width + 'px';
+                el.style.height = area.height + 'px';
+                return;
+            }
+
+            // Keep at least 80px visible horizontally, stay within area vertically
+            var clampedX = Math.max(-win.width + 80, Math.min(win.x, area.width - 80));
+            var clampedY = Math.max(area.y, Math.min(win.y, area.y + area.height - 32));
             if (clampedX !== win.x || clampedY !== win.y) {
                 win.x = clampedX;
                 win.y = clampedY;
-                changed = true;
+                el.style.left = win.x + 'px';
+                el.style.top = win.y + 'px';
             }
-            if (changed) {
-                var el = document.getElementById(win.id);
-                if (el) {
-                    el.style.left = win.x + 'px';
-                    el.style.top = win.y + 'px';
-                }
+
+            // Shrink window if it exceeds available area
+            if (win.width > area.width) {
+                win.width = area.width;
+                el.style.width = win.width + 'px';
+            }
+            if (win.y + win.height > area.y + area.height) {
+                win.height = Math.max(MIN_HEIGHT, area.y + area.height - win.y);
+                el.style.height = win.height + 'px';
             }
         });
     }
@@ -930,6 +1053,8 @@
 
             container.appendChild(btn);
         });
+
+        updateTaskbarVisibility();
     }
 
     function clearTaskbar() {
@@ -965,13 +1090,27 @@
     // ============ Helpers ============
 
     function getDesktopArea() {
+        // Use visualViewport for accurate available space (excludes on-screen keyboards,
+        // browser chrome, etc.). Falls back to window.innerWidth/Height.
+        var vp = window.visualViewport;
+        var vpWidth = vp ? vp.width : window.innerWidth;
+        var vpHeight = vp ? vp.height : window.innerHeight;
+
         // In widgets mode, taskbar is hidden — full height minus topnav (42px)
         var bottomOffset = (currentMode === 'widgets') ? 0 : TASKBAR_HEIGHT;
+
+        // Respect CSS safe-area-inset-bottom (accounts for system UI overlap)
+        var safeBottom = 0;
+        try {
+            var cs = getComputedStyle(document.documentElement);
+            safeBottom = parseInt(cs.getPropertyValue('--desktop-safe-bottom'), 10) || 0;
+        } catch (e) { /* ignore */ }
+
         return {
             x: 0,
             y: 42,
-            width: window.innerWidth,
-            height: window.innerHeight - 42 - bottomOffset
+            width: vpWidth,
+            height: vpHeight - 42 - bottomOffset - safeBottom
         };
     }
 

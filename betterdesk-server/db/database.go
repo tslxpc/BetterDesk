@@ -139,6 +139,68 @@ type ChatContact struct {
 	AvatarColor string `json:"avatar_color"`
 }
 
+// Organization represents a customer/tenant entity.
+type Organization struct {
+	ID        string    `json:"id"`
+	Name      string    `json:"name"`
+	Slug      string    `json:"slug"`
+	LogoURL   string    `json:"logo_url,omitempty"`
+	Settings  string    `json:"settings,omitempty"` // JSON blob for org-level settings
+	CreatedAt time.Time `json:"created_at"`
+}
+
+// OrgUser represents a user account within an organization.
+type OrgUser struct {
+	ID           string     `json:"id"`
+	OrgID        string     `json:"org_id"`
+	Username     string     `json:"username"`
+	DisplayName  string     `json:"display_name,omitempty"`
+	Email        string     `json:"email,omitempty"`
+	PasswordHash string     `json:"-"`
+	Role         string     `json:"role"` // owner, admin, operator, user
+	TOTPSecret   string     `json:"-"`
+	AvatarURL    string     `json:"avatar_url,omitempty"`
+	LastLogin    *time.Time `json:"last_login,omitempty"`
+	CreatedAt    time.Time  `json:"created_at"`
+}
+
+// OrgDevice binds a device to an organization with metadata.
+type OrgDevice struct {
+	OrgID          string `json:"org_id"`
+	DeviceID       string `json:"device_id"`
+	AssignedUserID string `json:"assigned_user_id,omitempty"`
+	Department     string `json:"department,omitempty"`
+	Location       string `json:"location,omitempty"`
+	Building       string `json:"building,omitempty"`
+	Tags           string `json:"tags,omitempty"`
+}
+
+// OrgInvitation represents a pending invitation to join an organization.
+type OrgInvitation struct {
+	ID        string     `json:"id"`
+	OrgID     string     `json:"org_id"`
+	Token     string     `json:"token"`
+	Email     string     `json:"email,omitempty"`
+	Role      string     `json:"role"` // default: "user"
+	ExpiresAt time.Time  `json:"expires_at"`
+	UsedAt    *time.Time `json:"used_at,omitempty"`
+}
+
+// OrgSetting stores a single key-value pair scoped to an organization.
+type OrgSetting struct {
+	OrgID string `json:"org_id"`
+	Key   string `json:"key"`
+	Value string `json:"value"`
+}
+
+// OrgRole constants
+const (
+	OrgRoleOwner    = "owner"
+	OrgRoleAdmin    = "admin"
+	OrgRoleOperator = "operator"
+	OrgRoleUser     = "user"
+)
+
 // Database is the interface for all database operations.
 // Designed to support SQLite (now) and PostgreSQL (future) as drop-in implementations.
 type Database interface {
@@ -241,4 +303,41 @@ type Database interface {
 	ListChatGroups(memberID string) ([]*ChatGroup, error) // Groups containing memberID
 	UpdateChatGroup(g *ChatGroup) error
 	DeleteChatGroup(id string) error
+
+	// Organizations
+	CreateOrganization(o *Organization) error
+	GetOrganization(id string) (*Organization, error)
+	GetOrganizationBySlug(slug string) (*Organization, error)
+	ListOrganizations() ([]*Organization, error)
+	UpdateOrganization(o *Organization) error
+	DeleteOrganization(id string) error
+
+	// Org Users
+	CreateOrgUser(u *OrgUser) error
+	GetOrgUser(id string) (*OrgUser, error)
+	GetOrgUserByUsername(orgID, username string) (*OrgUser, error)
+	ListOrgUsers(orgID string) ([]*OrgUser, error)
+	UpdateOrgUser(u *OrgUser) error
+	DeleteOrgUser(id string) error
+	UpdateOrgUserLogin(id string) error
+
+	// Org Devices
+	AssignDeviceToOrg(d *OrgDevice) error
+	UnassignDeviceFromOrg(orgID, deviceID string) error
+	GetOrgDevice(orgID, deviceID string) (*OrgDevice, error)
+	ListOrgDevices(orgID string) ([]*OrgDevice, error)
+	UpdateOrgDevice(d *OrgDevice) error
+
+	// Org Invitations
+	CreateOrgInvitation(inv *OrgInvitation) error
+	GetOrgInvitationByToken(token string) (*OrgInvitation, error)
+	ListOrgInvitations(orgID string) ([]*OrgInvitation, error)
+	UseOrgInvitation(token string) error
+	DeleteOrgInvitation(id string) error
+
+	// Org Settings
+	GetOrgSetting(orgID, key string) (string, error)
+	SetOrgSetting(orgID, key, value string) error
+	DeleteOrgSetting(orgID, key string) error
+	ListOrgSettings(orgID string) ([]*OrgSetting, error)
 }

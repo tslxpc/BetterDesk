@@ -205,6 +205,70 @@ router.post('/api/settings/branding/import', requireAuth, requireAdmin, async (r
 });
 
 /**
+ * GET /api/settings/themes - List available theme presets
+ */
+router.get('/api/settings/themes', requireAuth, (req, res) => {
+    try {
+        const fs = require('fs');
+        const path = require('path');
+        const themesDir = path.join(__dirname, '..', 'themes');
+        const themes = [];
+
+        if (fs.existsSync(themesDir)) {
+            for (const file of fs.readdirSync(themesDir)) {
+                if (!file.endsWith('.json')) continue;
+                try {
+                    const data = JSON.parse(fs.readFileSync(path.join(themesDir, file), 'utf8'));
+                    if (data.type === 'betterdesk-theme' && data.branding) {
+                        themes.push({
+                            id: file.replace('.json', ''),
+                            name: data.branding.appName || file.replace('.json', ''),
+                            description: data.branding.appDescription || '',
+                            colors: data.branding.colors || {}
+                        });
+                    }
+                } catch { /* skip invalid files */ }
+            }
+        }
+
+        res.json({ success: true, data: themes });
+    } catch (err) {
+        console.error('List themes error:', err);
+        res.status(500).json({ success: false, error: 'Failed to list themes' });
+    }
+});
+
+/**
+ * POST /api/settings/themes/:id/apply - Apply a built-in theme preset (admin only)
+ */
+router.post('/api/settings/themes/:id/apply', requireAuth, requireAdmin, async (req, res) => {
+    try {
+        const fs = require('fs');
+        const path = require('path');
+        const themeFile = path.join(__dirname, '..', 'themes', req.params.id + '.json');
+
+        if (!fs.existsSync(themeFile)) {
+            return res.status(404).json({ success: false, error: 'Theme not found' });
+        }
+
+        const preset = JSON.parse(fs.readFileSync(themeFile, 'utf8'));
+        const success = await brandingService.importPreset(preset);
+
+        if (!success) {
+            return res.status(400).json({ success: false, error: 'Invalid theme format' });
+        }
+
+        const db = require('../services/database');
+        await db.logAction(req.session?.userId, 'theme_apply', `Applied theme: ${req.params.id}`, req.ip);
+
+        res.json({ success: true, message: `Theme "${req.params.id}" applied` });
+    } catch (err) {
+        console.error('Apply theme error:', err);
+        res.status(500).json({ success: false, error: 'Failed to apply theme' });
+    }
+});
+
+/**
  * GET /css/theme.css - Dynamic CSS theme overrides (no auth required, cached)
  */
 router.get('/css/theme.css', (req, res) => {

@@ -684,6 +684,7 @@ func (s *Server) authMiddleware(next http.Handler) http.Handler {
 			path == "/api/login" || path == "/api/login-options" || path == "/api/logout" ||
 			path == "/api/heartbeat" || path == "/api/sysinfo" || path == "/api/sysinfo_ver" ||
 			path == "/api/branding" ||
+			path == "/api/org/login" ||
 			path == "/api/devices/register" || path == "/api/devices/register/status" {
 			next.ServeHTTP(w, r)
 			return

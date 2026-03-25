@@ -162,6 +162,25 @@ func (s *Server) Start(ctx context.Context) error {
 	mux.HandleFunc("PUT /api/chat/groups/", s.handleChatUpdateGroup)
 	mux.HandleFunc("DELETE /api/chat/groups/", s.handleChatDeleteGroup)
 
+	// Organizations (v3.0.0)
+	mux.HandleFunc("POST /api/org", s.requireRole(auth.RoleAdmin, s.handleCreateOrg))
+	mux.HandleFunc("GET /api/org", s.handleListOrgs)
+	mux.HandleFunc("GET /api/org/{id}", s.handleGetOrg)
+	mux.HandleFunc("PUT /api/org/{id}", s.requireRole(auth.RoleAdmin, s.handleUpdateOrg))
+	mux.HandleFunc("DELETE /api/org/{id}", s.requireRole(auth.RoleAdmin, s.handleDeleteOrg))
+	mux.HandleFunc("GET /api/org/{id}/users", s.handleListOrgUsers)
+	mux.HandleFunc("POST /api/org/{id}/users", s.requireRole(auth.RoleAdmin, s.handleCreateOrgUser))
+	mux.HandleFunc("PUT /api/org/{id}/users/{uid}", s.requireRole(auth.RoleAdmin, s.handleUpdateOrgUser))
+	mux.HandleFunc("DELETE /api/org/{id}/users/{uid}", s.requireRole(auth.RoleAdmin, s.handleDeleteOrgUser))
+	mux.HandleFunc("POST /api/org/{id}/invite", s.requireRole(auth.RoleAdmin, s.handleCreateOrgInvitation))
+	mux.HandleFunc("GET /api/org/{id}/invitations", s.requireRole(auth.RoleAdmin, s.handleListOrgInvitations))
+	mux.HandleFunc("POST /api/org/{id}/devices", s.requireRole(auth.RoleOperator, s.handleAssignOrgDevice))
+	mux.HandleFunc("GET /api/org/{id}/devices", s.handleListOrgDevices)
+	mux.HandleFunc("DELETE /api/org/{id}/devices/{did}", s.requireRole(auth.RoleOperator, s.handleUnassignOrgDevice))
+	mux.HandleFunc("GET /api/org/{id}/settings", s.handleListOrgSettings)
+	mux.HandleFunc("PUT /api/org/{id}/settings", s.requireRole(auth.RoleAdmin, s.handleSetOrgSetting))
+	mux.HandleFunc("POST /api/org/login", s.handleOrgLogin) // public — no auth required
+
 	// Audit
 	mux.HandleFunc("GET /api/audit/events", s.handleAuditEvents)
 

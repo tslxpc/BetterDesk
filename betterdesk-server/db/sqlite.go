@@ -178,6 +178,68 @@ func (s *SQLiteDB) Migrate() error {
 			created_by TEXT DEFAULT '',
 			created_at TEXT DEFAULT (datetime('now'))
 		)`,
+
+		// Organizations (v3.0.0)
+		`CREATE TABLE IF NOT EXISTS organizations (
+			id TEXT PRIMARY KEY,
+			name TEXT NOT NULL,
+			slug TEXT UNIQUE NOT NULL,
+			logo_url TEXT DEFAULT '',
+			settings TEXT DEFAULT '{}',
+			created_at TEXT DEFAULT (datetime('now'))
+		)`,
+		`CREATE UNIQUE INDEX IF NOT EXISTS idx_organizations_slug ON organizations(slug)`,
+
+		// Organization users (v3.0.0)
+		`CREATE TABLE IF NOT EXISTS org_users (
+			id TEXT PRIMARY KEY,
+			org_id TEXT NOT NULL REFERENCES organizations(id),
+			username TEXT NOT NULL,
+			display_name TEXT DEFAULT '',
+			email TEXT DEFAULT '',
+			password_hash TEXT NOT NULL,
+			role TEXT DEFAULT 'user',
+			totp_secret TEXT DEFAULT '',
+			avatar_url TEXT DEFAULT '',
+			last_login TEXT DEFAULT NULL,
+			created_at TEXT DEFAULT (datetime('now')),
+			UNIQUE(org_id, username)
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_org_users_org ON org_users(org_id)`,
+
+		// Organization devices (v3.0.0)
+		`CREATE TABLE IF NOT EXISTS org_devices (
+			org_id TEXT NOT NULL REFERENCES organizations(id),
+			device_id TEXT NOT NULL,
+			assigned_user_id TEXT DEFAULT '',
+			department TEXT DEFAULT '',
+			location TEXT DEFAULT '',
+			building TEXT DEFAULT '',
+			tags TEXT DEFAULT '',
+			PRIMARY KEY(org_id, device_id)
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_org_devices_org ON org_devices(org_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_org_devices_device ON org_devices(device_id)`,
+
+		// Organization invitations (v3.0.0)
+		`CREATE TABLE IF NOT EXISTS org_invitations (
+			id TEXT PRIMARY KEY,
+			org_id TEXT NOT NULL REFERENCES organizations(id),
+			token TEXT UNIQUE NOT NULL,
+			email TEXT DEFAULT '',
+			role TEXT DEFAULT 'user',
+			expires_at TEXT NOT NULL,
+			used_at TEXT DEFAULT NULL
+		)`,
+		`CREATE UNIQUE INDEX IF NOT EXISTS idx_org_invitations_token ON org_invitations(token)`,
+
+		// Organization settings (v3.0.0)
+		`CREATE TABLE IF NOT EXISTS org_settings (
+			org_id TEXT NOT NULL REFERENCES organizations(id),
+			key TEXT NOT NULL,
+			value TEXT DEFAULT '',
+			PRIMARY KEY(org_id, key)
+		)`,
 	}
 
 	for _, stmt := range statements {

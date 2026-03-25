@@ -196,6 +196,66 @@ func (pg *PostgresDB) Migrate() error {
 			created_by TEXT NOT NULL DEFAULT '',
 			created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 		)`,
+
+		// Organizations (v3.0.0)
+		`CREATE TABLE IF NOT EXISTS organizations (
+			id         TEXT PRIMARY KEY,
+			name       TEXT NOT NULL,
+			slug       TEXT UNIQUE NOT NULL,
+			logo_url   TEXT NOT NULL DEFAULT '',
+			settings   JSONB NOT NULL DEFAULT '{}',
+			created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+		)`,
+
+		// Organization users (v3.0.0)
+		`CREATE TABLE IF NOT EXISTS org_users (
+			id            TEXT PRIMARY KEY,
+			org_id        TEXT NOT NULL REFERENCES organizations(id),
+			username      TEXT NOT NULL,
+			display_name  TEXT NOT NULL DEFAULT '',
+			email         TEXT NOT NULL DEFAULT '',
+			password_hash TEXT NOT NULL,
+			role          TEXT NOT NULL DEFAULT 'user',
+			totp_secret   TEXT NOT NULL DEFAULT '',
+			avatar_url    TEXT NOT NULL DEFAULT '',
+			last_login    TIMESTAMPTZ DEFAULT NULL,
+			created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+			UNIQUE(org_id, username)
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_org_users_org ON org_users(org_id)`,
+
+		// Organization devices (v3.0.0)
+		`CREATE TABLE IF NOT EXISTS org_devices (
+			org_id           TEXT NOT NULL REFERENCES organizations(id),
+			device_id        TEXT NOT NULL,
+			assigned_user_id TEXT NOT NULL DEFAULT '',
+			department       TEXT NOT NULL DEFAULT '',
+			location         TEXT NOT NULL DEFAULT '',
+			building         TEXT NOT NULL DEFAULT '',
+			tags             TEXT NOT NULL DEFAULT '',
+			PRIMARY KEY(org_id, device_id)
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_org_devices_org ON org_devices(org_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_org_devices_device ON org_devices(device_id)`,
+
+		// Organization invitations (v3.0.0)
+		`CREATE TABLE IF NOT EXISTS org_invitations (
+			id         TEXT PRIMARY KEY,
+			org_id     TEXT NOT NULL REFERENCES organizations(id),
+			token      TEXT UNIQUE NOT NULL,
+			email      TEXT NOT NULL DEFAULT '',
+			role       TEXT NOT NULL DEFAULT 'user',
+			expires_at TIMESTAMPTZ NOT NULL,
+			used_at    TIMESTAMPTZ DEFAULT NULL
+		)`,
+
+		// Organization settings (v3.0.0)
+		`CREATE TABLE IF NOT EXISTS org_settings (
+			org_id TEXT NOT NULL REFERENCES organizations(id),
+			key    TEXT NOT NULL,
+			value  TEXT NOT NULL DEFAULT '',
+			PRIMARY KEY(org_id, key)
+		)`,
 	}
 
 	for _, stmt := range statements {

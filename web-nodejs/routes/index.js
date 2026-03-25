@@ -31,6 +31,7 @@ const cdapRoutes = require('./cdap.routes');
 const tokensRoutes = require('./tokens.routes');
 const pagesRoutes = require('./pages.routes');
 const desktopRoutes = require('./desktop.routes');
+const organizationsRoutes = require('./organizations.routes');
 
 /**
  * Middleware to require JSON Content-Type for POST/PATCH/PUT requests to API routes.
@@ -100,5 +101,6 @@ router.use('/', pagesRoutes);                          // page routes: /inventor
 router.use('/', cdapRoutes);                            // admin-facing: /cdap/devices/:id, /api/cdap/*
 router.use('/', tokensRoutes);                          // admin-facing: /tokens, /api/panel/tokens/*
 router.use('/api/desktop', desktopRoutes);               // admin-facing: /api/desktop/layout, /api/desktop/wallpapers
+router.use('/', organizationsRoutes);                    // admin-facing: /organizations, /api/panel/org/*
 
 module.exports = router;
