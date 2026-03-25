@@ -504,11 +504,14 @@
     flex: 1;
     overflow: hidden;
     min-height: 0;
+    position: relative;
 }
 
 .wp-panel {
-    height: 100%;
+    position: absolute;
+    inset: 0;
     overflow-y: auto;
+    overflow-x: hidden;
 }
 
 .wp-panel::-webkit-scrollbar {
@@ -634,7 +637,6 @@
     grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
     gap: 12px;
     padding: 16px 20px;
-    contain: layout style;
 }
 
 .wallpaper-thumb {

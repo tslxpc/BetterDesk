@@ -666,8 +666,8 @@
         if (_canvas) {
             return { w: _canvas.offsetWidth, h: _canvas.offsetHeight };
         }
-        // Account for topnav (42px), sidebar (42px), taskbar (48px)
-        return { w: window.innerWidth - 42, h: window.innerHeight - 42 - 48 };
+        // Account for topnav (42px), sidebar (48px)
+        return { w: window.innerWidth - 48, h: window.innerHeight - 42 };
     }
 
     function findOpenPosition(w, h, area) {
@@ -1304,20 +1304,10 @@
             '<button class="sidebar-icon" data-action="add-widget" title="' + esc(t('desktop.add_widget') || 'Add Widget') + '"><span class="material-icons">add_circle</span></button>' +
             '<button class="sidebar-icon" data-action="wallpaper" title="Wallpaper"><span class="material-icons">wallpaper</span></button>' +
             '<div class="sidebar-sep"></div>' +
-            '<button class="sidebar-icon" data-route="/registrations" title="' + esc(t('registrations.title') || 'Registrations') + '"><span class="material-icons">how_to_reg</span></button>' +
-            '<button class="sidebar-icon" data-route="/generator" title="' + esc(t('generator.title') || 'Generator') + '"><span class="material-icons">build</span></button>' +
-            '<button class="sidebar-icon" data-route="/users" title="' + esc(t('users.title') || 'Users') + '"><span class="material-icons">group</span></button>' +
-            '<button class="sidebar-icon" data-route="/tenants" title="' + esc(t('tenants.title') || 'Tenants') + '"><span class="material-icons">apartment</span></button>' +
-            '<div class="sidebar-sep"></div>' +
-            '<button class="sidebar-icon" data-route="/inventory" title="' + esc(t('inventory.title') || 'Inventory') + '"><span class="material-icons">inventory_2</span></button>' +
-            '<button class="sidebar-icon" data-route="/tickets" title="' + esc(t('tickets.title') || 'Helpdesk') + '"><span class="material-icons">support_agent</span></button>' +
-            '<button class="sidebar-icon" data-route="/automation" title="' + esc(t('automation.title') || 'Automation') + '"><span class="material-icons">smart_toy</span></button>' +
-            '<button class="sidebar-icon" data-route="/activity" title="' + esc(t('activity.title') || 'Activity') + '"><span class="material-icons">timeline</span></button>' +
-            '<button class="sidebar-icon" data-route="/reports" title="' + esc(t('reports.title') || 'Reports') + '"><span class="material-icons">assessment</span></button>' +
-            '<button class="sidebar-icon" data-route="/dataguard" title="' + esc(t('dataguard.title') || 'DataGuard') + '"><span class="material-icons">security</span></button>' +
+            '<button class="sidebar-icon" data-action="edit" title="Edit Layout"><span class="material-icons">edit</span></button>' +
+            '<button class="sidebar-icon" data-action="reset" title="Reset Layout"><span class="material-icons">restart_alt</span></button>' +
             '<div class="sidebar-spacer"></div>' +
-            '<button class="sidebar-icon" data-action="help" title="Help"><span class="material-icons">help_outline</span></button>' +
-            '<button class="sidebar-icon" data-route="/settings" title="Profile"><span class="material-icons">account_circle</span></button>';
+            '<button class="sidebar-icon" data-action="help" title="Help"><span class="material-icons">help_outline</span></button>';
         var shell = document.getElementById('desktop-shell');
         if (shell) shell.appendChild(sb);
         sb.querySelectorAll('.sidebar-icon').forEach(function (icon) {
@@ -1331,6 +1321,16 @@
                 } else if (action === 'home') {
                     // Scroll widgets to top/left
                     if (_canvas) _canvas.scrollTo(0, 0);
+                } else if (action === 'edit') {
+                    document.body.classList.toggle('widget-edit-mode');
+                    icon.classList.toggle('active', document.body.classList.contains('widget-edit-mode'));
+                } else if (action === 'reset') {
+                    if (confirm('Reset widget layout to default?')) {
+                        localStorage.removeItem(STORAGE_LAYOUT);
+                        localStorage.removeItem(STORAGE_LAYOUT_VER);
+                        destroy();
+                        init();
+                    }
                 } else if (action === 'help') {
                     // Open docs in float window
                     if (window.DesktopMode && typeof window.DesktopMode.openAppByRoute === 'function') {

@@ -224,12 +224,6 @@
             btn.addEventListener('click', function() { toggle(); });
         }
 
-        // Taskbar console button
-        var consoleBtn = document.getElementById('taskbar-console-btn');
-        if (consoleBtn) {
-            consoleBtn.addEventListener('click', function() { deactivate(); });
-        }
-
         // Desktop context menu (right-click on desktop background)
         var shell = document.getElementById('desktop-shell');
         if (shell) {
@@ -277,7 +271,6 @@
         }
 
         renderDesktopIcons();
-        startClock();
 
         // Restore saved mode or default to widgets
         currentMode = localStorage.getItem(STORAGE_MODE) || 'widgets';
@@ -304,7 +297,6 @@
         cascadeIndex = 0;
 
         document.body.classList.remove('desktop-active', 'desktop-entering', 'desktop-mode-widgets', 'desktop-mode-windows');
-        stopClock();
         clearDesktopIcons();
         clearTaskbar();
 
@@ -353,91 +345,6 @@
     function clearDesktopIcons() {
         var container = document.getElementById('desktop-icons');
         if (container) container.innerHTML = '';
-    }
-
-    // ============ Start Menu ============
-
-    function openStartMenu() {
-        // Simple: open a small overlay with app list near taskbar
-        var existing = document.getElementById('desktop-start-menu');
-        if (existing) {
-            existing.remove();
-            return;
-        }
-
-        var apps = getApps();
-        var menu = document.createElement('div');
-        menu.id = 'desktop-start-menu';
-        menu.style.cssText =
-            'position:fixed;bottom:52px;left:8px;z-index:9999;' +
-            'background:rgba(13,17,23,0.92);backdrop-filter:blur(20px);' +
-            'border:1px solid rgba(48,54,61,0.6);border-radius:10px;' +
-            'padding:8px;min-width:220px;' +
-            'animation:windowOpen 0.2s cubic-bezier(0.34,1.56,0.64,1) forwards;';
-
-        apps.forEach(function(app) {
-            var item = document.createElement('div');
-            item.style.cssText =
-                'display:flex;align-items:center;gap:10px;padding:8px 12px;' +
-                'border-radius:6px;cursor:pointer;color:var(--text-primary,#e6edf3);' +
-                'font-size:13px;transition:background 0.12s ease;';
-
-            item.innerHTML =
-                '<span class="material-icons" style="font-size:20px;color:' + app.color + '">' +
-                    app.icon +
-                '</span>' +
-                '<span>' + escapeHtml(app.name) + '</span>';
-
-            item.addEventListener('mouseenter', function() {
-                item.style.background = 'rgba(255,255,255,0.08)';
-            });
-            item.addEventListener('mouseleave', function() {
-                item.style.background = 'transparent';
-            });
-            item.addEventListener('click', function() {
-                menu.remove();
-                openApp(app);
-            });
-
-            menu.appendChild(item);
-        });
-
-        // Close button
-        var closeItem = document.createElement('div');
-        closeItem.style.cssText =
-            'display:flex;align-items:center;gap:10px;padding:8px 12px;' +
-            'border-radius:6px;cursor:pointer;color:var(--accent-red,#da3633);' +
-            'font-size:13px;transition:background 0.12s ease;margin-top:4px;' +
-            'border-top:1px solid rgba(48,54,61,0.4);padding-top:12px;';
-        var t = typeof _ === 'function' ? _ : function(k) { return k; };
-        closeItem.innerHTML =
-            '<span class="material-icons" style="font-size:20px">view_sidebar</span>' +
-            '<span>' + escapeHtml(t('desktop.console_mode')) + '</span>';
-        closeItem.addEventListener('mouseenter', function() {
-            closeItem.style.background = 'rgba(255,255,255,0.08)';
-        });
-        closeItem.addEventListener('mouseleave', function() {
-            closeItem.style.background = 'transparent';
-        });
-        closeItem.addEventListener('click', function() {
-            menu.remove();
-            deactivate();
-        });
-        menu.appendChild(closeItem);
-
-        document.body.appendChild(menu);
-
-        // Close on outside click
-        setTimeout(function() {
-            function closeMenu(e) {
-                if (!menu.contains(e.target) && e.target.id !== 'taskbar-start-btn' &&
-                    !e.target.closest('#taskbar-start-btn')) {
-                    menu.remove();
-                    document.removeEventListener('click', closeMenu);
-                }
-            }
-            document.addEventListener('click', closeMenu);
-        }, 10);
     }
 
     // ============ Desktop Context Menu ============
@@ -1060,31 +967,6 @@
     function clearTaskbar() {
         var container = document.getElementById('taskbar-apps');
         if (container) container.innerHTML = '';
-    }
-
-    // ============ Clock ============
-
-    var clockInterval = null;
-
-    function startClock() {
-        updateClock();
-        clockInterval = setInterval(updateClock, 1000);
-    }
-
-    function stopClock() {
-        if (clockInterval) {
-            clearInterval(clockInterval);
-            clockInterval = null;
-        }
-    }
-
-    function updateClock() {
-        var el = document.getElementById('taskbar-clock');
-        if (!el) return;
-        var now = new Date();
-        var h = String(now.getHours()).padStart(2, '0');
-        var m = String(now.getMinutes()).padStart(2, '0');
-        el.textContent = h + ':' + m;
     }
 
     // ============ Helpers ============
