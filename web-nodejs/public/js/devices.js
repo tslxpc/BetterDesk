@@ -298,6 +298,10 @@
                                 <span class="material-icons">computer</span>
                                 <span>${_('actions.connect')}</span>
                             </button>
+                            <button class="kebab-menu-item" data-action="remote-viewer" data-id="${eid}">
+                                <span class="material-icons">screen_share</span>
+                                <span>${_('actions.remote_viewer') || 'Remote Viewer'}</span>
+                            </button>
                             <div class="kebab-divider"></div>
                             <button class="kebab-menu-item info" data-action="details" data-id="${eid}">
                                 <span class="material-icons">info</span>
@@ -387,7 +391,11 @@
             case 'connect-desktop':
                 connectDesktopClient(deviceId);
                 break;
-                
+
+            case 'remote-viewer':
+                window.open(`/remote-desktop/${encodeURIComponent(deviceId)}`, '_blank');
+                break;
+
             case 'details':
                 if (typeof DeviceDetail !== 'undefined') {
                     DeviceDetail.open(deviceId);

@@ -172,6 +172,30 @@ func (pg *PostgresDB) Migrate() error {
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_peer_metrics_peer_id ON peer_metrics(peer_id)`,
 		`CREATE INDEX IF NOT EXISTS idx_peer_metrics_created_at ON peer_metrics(created_at)`,
+
+		// Chat messages
+		`CREATE TABLE IF NOT EXISTS chat_messages (
+			id              BIGSERIAL PRIMARY KEY,
+			conversation_id TEXT NOT NULL,
+			from_id         TEXT NOT NULL,
+			from_name       TEXT NOT NULL DEFAULT '',
+			to_id           TEXT NOT NULL DEFAULT '',
+			text            TEXT NOT NULL,
+			read            BOOLEAN NOT NULL DEFAULT FALSE,
+			created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_chat_messages_conv ON chat_messages(conversation_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_chat_messages_from ON chat_messages(from_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_chat_messages_created ON chat_messages(created_at)`,
+
+		// Chat groups
+		`CREATE TABLE IF NOT EXISTS chat_groups (
+			id         TEXT PRIMARY KEY,
+			name       TEXT NOT NULL,
+			members    TEXT NOT NULL DEFAULT '',
+			created_by TEXT NOT NULL DEFAULT '',
+			created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+		)`,
 	}
 
 	for _, stmt := range statements {
@@ -1101,6 +1125,148 @@ func (pg *PostgresDB) CleanupOldMetrics(maxAge time.Duration) (int64, error) {
 		return 0, err
 	}
 	return result.RowsAffected(), nil
+}
+
+// ── Chat Messages ─────────────────────────────────────────────────────
+
+func (pg *PostgresDB) SaveChatMessage(msg *ChatMessage) (int64, error) {
+	var id int64
+	err := pg.pool.QueryRow(pg.ctx,
+		`INSERT INTO chat_messages (conversation_id, from_id, from_name, to_id, text, read)
+		 VALUES ($1, $2, $3, $4, $5, $6) RETURNING id`,
+		msg.ConversationID, msg.FromID, msg.FromName, msg.ToID, msg.Text, msg.Read,
+	).Scan(&id)
+	return id, err
+}
+
+func (pg *PostgresDB) GetChatHistory(conversationID string, limit int) ([]*ChatMessage, error) {
+	if limit <= 0 || limit > 500 {
+		limit = 100
+	}
+	rows, err := pg.pool.Query(pg.ctx,
+		`SELECT id, conversation_id, from_id, from_name, to_id, text, read, created_at
+		 FROM chat_messages WHERE conversation_id = $1
+		 ORDER BY id DESC LIMIT $2`, conversationID, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var msgs []*ChatMessage
+	for rows.Next() {
+		var m ChatMessage
+		if err := rows.Scan(&m.ID, &m.ConversationID, &m.FromID, &m.FromName, &m.ToID, &m.Text, &m.Read, &m.CreatedAt); err != nil {
+			return nil, err
+		}
+		msgs = append(msgs, &m)
+	}
+	for i, j := 0, len(msgs)-1; i < j; i, j = i+1, j-1 {
+		msgs[i], msgs[j] = msgs[j], msgs[i]
+	}
+	return msgs, nil
+}
+
+func (pg *PostgresDB) GetChatHistoryBefore(conversationID string, beforeID int64, limit int) ([]*ChatMessage, error) {
+	if limit <= 0 || limit > 500 {
+		limit = 100
+	}
+	rows, err := pg.pool.Query(pg.ctx,
+		`SELECT id, conversation_id, from_id, from_name, to_id, text, read, created_at
+		 FROM chat_messages WHERE conversation_id = $1 AND id < $2
+		 ORDER BY id DESC LIMIT $3`, conversationID, beforeID, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var msgs []*ChatMessage
+	for rows.Next() {
+		var m ChatMessage
+		if err := rows.Scan(&m.ID, &m.ConversationID, &m.FromID, &m.FromName, &m.ToID, &m.Text, &m.Read, &m.CreatedAt); err != nil {
+			return nil, err
+		}
+		msgs = append(msgs, &m)
+	}
+	for i, j := 0, len(msgs)-1; i < j; i, j = i+1, j-1 {
+		msgs[i], msgs[j] = msgs[j], msgs[i]
+	}
+	return msgs, nil
+}
+
+func (pg *PostgresDB) MarkChatRead(conversationID, readerID string) error {
+	_, err := pg.pool.Exec(pg.ctx,
+		`UPDATE chat_messages SET read = TRUE
+		 WHERE conversation_id = $1 AND from_id != $2 AND read = FALSE`,
+		conversationID, readerID)
+	return err
+}
+
+func (pg *PostgresDB) GetUnreadCount(deviceID string) (int, error) {
+	var count int
+	err := pg.pool.QueryRow(pg.ctx,
+		`SELECT COUNT(*) FROM chat_messages
+		 WHERE (conversation_id = $1 OR to_id = $1) AND from_id != $1 AND read = FALSE`,
+		deviceID).Scan(&count)
+	return count, err
+}
+
+func (pg *PostgresDB) DeleteChatHistory(conversationID string) error {
+	_, err := pg.pool.Exec(pg.ctx,
+		`DELETE FROM chat_messages WHERE conversation_id = $1`, conversationID)
+	return err
+}
+
+// ── Chat Groups ───────────────────────────────────────────────────────
+
+func (pg *PostgresDB) CreateChatGroup(g *ChatGroup) error {
+	_, err := pg.pool.Exec(pg.ctx,
+		`INSERT INTO chat_groups (id, name, members, created_by) VALUES ($1, $2, $3, $4)`,
+		g.ID, g.Name, g.Members, g.CreatedBy)
+	return err
+}
+
+func (pg *PostgresDB) GetChatGroup(id string) (*ChatGroup, error) {
+	var g ChatGroup
+	err := pg.pool.QueryRow(pg.ctx,
+		`SELECT id, name, members, created_by, created_at FROM chat_groups WHERE id = $1`, id,
+	).Scan(&g.ID, &g.Name, &g.Members, &g.CreatedBy, &g.CreatedAt)
+	if err != nil {
+		return nil, err
+	}
+	return &g, nil
+}
+
+func (pg *PostgresDB) ListChatGroups(memberID string) ([]*ChatGroup, error) {
+	pattern := "%" + memberID + "%"
+	rows, err := pg.pool.Query(pg.ctx,
+		`SELECT id, name, members, created_by, created_at FROM chat_groups WHERE members LIKE $1`, pattern)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var groups []*ChatGroup
+	for rows.Next() {
+		var g ChatGroup
+		if err := rows.Scan(&g.ID, &g.Name, &g.Members, &g.CreatedBy, &g.CreatedAt); err != nil {
+			return nil, err
+		}
+		groups = append(groups, &g)
+	}
+	return groups, nil
+}
+
+func (pg *PostgresDB) UpdateChatGroup(g *ChatGroup) error {
+	_, err := pg.pool.Exec(pg.ctx,
+		`UPDATE chat_groups SET name = $1, members = $2 WHERE id = $3`,
+		g.Name, g.Members, g.ID)
+	return err
+}
+
+func (pg *PostgresDB) DeleteChatGroup(id string) error {
+	_, err := pg.pool.Exec(pg.ctx,
+		`DELETE FROM chat_groups WHERE id = $1`, id)
+	return err
 }
 
 // ── LISTEN/NOTIFY ─────────────────────────────────────────────────────

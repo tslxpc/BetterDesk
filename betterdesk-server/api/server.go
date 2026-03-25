@@ -151,6 +151,17 @@ func (s *Server) Start(ctx context.Context) error {
 	mux.HandleFunc("PUT /api/peers/{id}/tags", s.handleSetPeerTags)
 	mux.HandleFunc("GET /api/tags/{tag}/peers", s.handlePeersByTag)
 
+	// Chat
+	mux.HandleFunc("GET /api/chat/history/", s.handleChatHistory)
+	mux.HandleFunc("POST /api/chat/messages", s.handleChatSendMessage)
+	mux.HandleFunc("POST /api/chat/read", s.handleChatMarkRead)
+	mux.HandleFunc("GET /api/chat/unread/", s.handleChatUnread)
+	mux.HandleFunc("GET /api/chat/contacts/", s.handleChatContacts)
+	mux.HandleFunc("POST /api/chat/groups", s.handleChatCreateGroup)
+	mux.HandleFunc("GET /api/chat/groups/", s.handleChatListGroups)
+	mux.HandleFunc("PUT /api/chat/groups/", s.handleChatUpdateGroup)
+	mux.HandleFunc("DELETE /api/chat/groups/", s.handleChatDeleteGroup)
+
 	// Audit
 	mux.HandleFunc("GET /api/audit/events", s.handleAuditEvents)
 
@@ -253,16 +264,24 @@ func (s *Server) Start(ctx context.Context) error {
 	// CDAP audio stream WebSocket (operator+)
 	mux.HandleFunc("GET /api/cdap/devices/{id}/audio", s.requireRole(auth.RoleOperator, s.handleCDAPAudio))
 
+	// BetterDesk desktop client management WebSocket (no API key — device auth)
+	mux.HandleFunc("GET /ws/bd-mgmt/{device_id}", s.handleBdMgmt)
+	// Management REST endpoints (admin/operator only)
+	mux.HandleFunc("GET /api/bd/mgmt/{device_id}/status", s.handleBdMgmtStatus)
+	mux.HandleFunc("POST /api/bd/mgmt/{device_id}/send", s.requireRole(auth.RoleOperator, s.handleBdMgmtSend))
+	mux.HandleFunc("GET /api/bd/mgmt/connected", s.handleBdMgmtConnected)
+
 	// Prometheus metrics (public, no API key required)
 	mux.HandleFunc("GET /metrics", s.handleMetrics)
 
 	addr := fmt.Sprintf(":%d", s.cfg.APIPort)
 	s.httpSrv = &http.Server{
-		Addr:         addr,
-		Handler:      s.authMiddleware(mux),
-		ReadTimeout:  10 * time.Second,
-		WriteTimeout: 10 * time.Second,
-		IdleTimeout:  60 * time.Second,
+		Addr:        addr,
+		Handler:     s.authMiddleware(mux),
+		ReadTimeout: 10 * time.Second,
+		// No WriteTimeout — WebSocket connections need unlimited write time.
+		// Individual REST handlers are responsible for their own deadlines.
+		IdleTimeout: 120 * time.Second,
 		BaseContext: func(l net.Listener) context.Context {
 			return ctx
 		},

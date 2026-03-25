@@ -107,6 +107,38 @@ const (
 	TokenStatusExpired = "expired" // Past expiration date
 )
 
+// ChatMessage represents a persisted chat message between devices/operators.
+type ChatMessage struct {
+	ID             int64     `json:"id"`
+	ConversationID string    `json:"conversation_id"` // "operator", device_id, or group:<id>
+	FromID         string    `json:"from_id"`         // sender device_id or "operator:<name>"
+	FromName       string    `json:"from_name"`       // display name
+	ToID           string    `json:"to_id,omitempty"` // recipient device_id or group ID
+	Text           string    `json:"text"`
+	Read           bool      `json:"read"`
+	CreatedAt      time.Time `json:"created_at"`
+}
+
+// ChatGroup represents a multi-device chat group.
+type ChatGroup struct {
+	ID        string    `json:"id"`
+	Name      string    `json:"name"`
+	Members   string    `json:"members"`    // comma-separated device IDs
+	CreatedBy string    `json:"created_by"` // device_id or operator name
+	CreatedAt time.Time `json:"created_at"`
+}
+
+// ChatContact represents a peer visible for chat (derived from peers table).
+type ChatContact struct {
+	ID         string `json:"id"`
+	Name       string `json:"name"`
+	Hostname   string `json:"hostname"`
+	Online     bool   `json:"online"`
+	LastSeen   int64  `json:"last_seen"`
+	Unread     int    `json:"unread"`
+	AvatarColor string `json:"avatar_color"`
+}
+
 // Database is the interface for all database operations.
 // Designed to support SQLite (now) and PostgreSQL (future) as drop-in implementations.
 type Database interface {
@@ -194,4 +226,19 @@ type Database interface {
 	GetPeerMetrics(peerID string, limit int) ([]*PeerMetric, error)
 	GetLatestPeerMetric(peerID string) (*PeerMetric, error)
 	CleanupOldMetrics(maxAge time.Duration) (int64, error) // Delete metrics older than maxAge
+
+	// Chat Messages
+	SaveChatMessage(msg *ChatMessage) (int64, error)         // Returns inserted ID
+	GetChatHistory(conversationID string, limit int) ([]*ChatMessage, error)
+	GetChatHistoryBefore(conversationID string, beforeID int64, limit int) ([]*ChatMessage, error)
+	MarkChatRead(conversationID, readerID string) error       // Mark all messages as read for reader
+	GetUnreadCount(deviceID string) (int, error)              // Total unread messages for device
+	DeleteChatHistory(conversationID string) error
+
+	// Chat Groups
+	CreateChatGroup(g *ChatGroup) error
+	GetChatGroup(id string) (*ChatGroup, error)
+	ListChatGroups(memberID string) ([]*ChatGroup, error) // Groups containing memberID
+	UpdateChatGroup(g *ChatGroup) error
+	DeleteChatGroup(id string) error
 }

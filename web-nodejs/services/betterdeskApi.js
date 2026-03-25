@@ -758,5 +758,7 @@ module.exports = {
     getBranding: getBranding,
     saveBranding: saveBranding,
     // Helpers
-    normalisePeer
+    normalisePeer,
+    // Raw axios client (for services that need direct API access)
+    apiClient,
 };

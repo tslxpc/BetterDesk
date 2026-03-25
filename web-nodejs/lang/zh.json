@@ -332,6 +332,7 @@
     "copy": "复制",
     "connect": "连接",
     "connect_desktop": "通过桌面客户端连接",
+    "remote_viewer": "远程查看器",
     "details": "详情",
     "edit": "编辑",
     "delete": "删除",

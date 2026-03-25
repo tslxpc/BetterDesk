@@ -345,6 +345,7 @@
     "copy": "Copy",
     "connect": "Connect",
     "connect_desktop": "Connect via Desktop Client",
+    "remote_viewer": "Remote Viewer",
     "details": "Details",
     "edit": "Edit",
     "delete": "Delete",

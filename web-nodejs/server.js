@@ -26,6 +26,7 @@ const db = require('./services/database');
 const { initWsProxy } = require('./services/wsRelay');
 const { initBdRelay } = require('./services/bdRelay');
 const { initChatRelay } = require('./services/chatRelay');
+const { apiClient: goApiClient } = require('./services/betterdeskApi');
 const { initRemoteRelay } = require('./services/remoteRelay');
 const { initCdapTerminalProxy } = require('./services/cdapTerminalProxy');
 const { initCdapMediaProxies } = require('./services/cdapMediaProxy');
@@ -327,8 +328,8 @@ async function startServer() {
         // Initialize BetterDesk native relay (WebSocket)
         initBdRelay(server);
 
-        // Initialize Chat relay (WebSocket — agent ↔ operator)
-        initChatRelay(server, sessionMiddleware);
+        // Initialize Chat relay (WebSocket — agent ↔ operator, persistent via Go API)
+        initChatRelay(server, sessionMiddleware, goApiClient);
 
         // Initialize Remote Desktop relay (WebSocket — agent JPEG ↔ browser viewer)
         initRemoteRelay(server, sessionMiddleware);

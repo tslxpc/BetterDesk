@@ -154,6 +154,30 @@ func (s *SQLiteDB) Migrate() error {
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_peer_metrics_peer ON peer_metrics(peer_id)`,
 		`CREATE INDEX IF NOT EXISTS idx_peer_metrics_created ON peer_metrics(created_at)`,
+
+		// Chat messages table
+		`CREATE TABLE IF NOT EXISTS chat_messages (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			conversation_id TEXT NOT NULL,
+			from_id TEXT NOT NULL,
+			from_name TEXT DEFAULT '',
+			to_id TEXT DEFAULT '',
+			text TEXT NOT NULL,
+			read INTEGER DEFAULT 0,
+			created_at TEXT DEFAULT (datetime('now'))
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_chat_messages_conv ON chat_messages(conversation_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_chat_messages_from ON chat_messages(from_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_chat_messages_created ON chat_messages(created_at)`,
+
+		// Chat groups table
+		`CREATE TABLE IF NOT EXISTS chat_groups (
+			id TEXT PRIMARY KEY,
+			name TEXT NOT NULL,
+			members TEXT DEFAULT '',
+			created_by TEXT DEFAULT '',
+			created_at TEXT DEFAULT (datetime('now'))
+		)`,
 	}
 
 	for _, stmt := range statements {
@@ -1312,4 +1336,216 @@ func (s *SQLiteDB) CleanupOldMetrics(maxAge time.Duration) (int64, error) {
 		return 0, err
 	}
 	return result.RowsAffected()
+}
+
+// ---------------------------------------------------------------------------
+//  Chat Messages
+// ---------------------------------------------------------------------------
+
+// SaveChatMessage inserts a new chat message and returns its ID.
+func (s *SQLiteDB) SaveChatMessage(msg *ChatMessage) (int64, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	result, err := s.db.Exec(
+		`INSERT INTO chat_messages (conversation_id, from_id, from_name, to_id, text, read)
+		 VALUES (?, ?, ?, ?, ?, ?)`,
+		msg.ConversationID, msg.FromID, msg.FromName, msg.ToID, msg.Text, msg.Read,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.LastInsertId()
+}
+
+// GetChatHistory returns the most recent messages for a conversation.
+func (s *SQLiteDB) GetChatHistory(conversationID string, limit int) ([]*ChatMessage, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	if limit <= 0 || limit > 500 {
+		limit = 100
+	}
+
+	rows, err := s.db.Query(
+		`SELECT id, conversation_id, from_id, from_name, to_id, text, read, created_at
+		 FROM chat_messages WHERE conversation_id = ?
+		 ORDER BY id DESC LIMIT ?`,
+		conversationID, limit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var msgs []*ChatMessage
+	for rows.Next() {
+		var m ChatMessage
+		var createdAt string
+		if err := rows.Scan(&m.ID, &m.ConversationID, &m.FromID, &m.FromName, &m.ToID, &m.Text, &m.Read, &createdAt); err != nil {
+			return nil, err
+		}
+		m.CreatedAt, _ = time.Parse("2006-01-02 15:04:05", createdAt)
+		msgs = append(msgs, &m)
+	}
+	// Reverse so oldest is first
+	for i, j := 0, len(msgs)-1; i < j; i, j = i+1, j-1 {
+		msgs[i], msgs[j] = msgs[j], msgs[i]
+	}
+	return msgs, nil
+}
+
+// GetChatHistoryBefore returns messages before a given ID (for pagination).
+func (s *SQLiteDB) GetChatHistoryBefore(conversationID string, beforeID int64, limit int) ([]*ChatMessage, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	if limit <= 0 || limit > 500 {
+		limit = 100
+	}
+
+	rows, err := s.db.Query(
+		`SELECT id, conversation_id, from_id, from_name, to_id, text, read, created_at
+		 FROM chat_messages WHERE conversation_id = ? AND id < ?
+		 ORDER BY id DESC LIMIT ?`,
+		conversationID, beforeID, limit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var msgs []*ChatMessage
+	for rows.Next() {
+		var m ChatMessage
+		var createdAt string
+		if err := rows.Scan(&m.ID, &m.ConversationID, &m.FromID, &m.FromName, &m.ToID, &m.Text, &m.Read, &createdAt); err != nil {
+			return nil, err
+		}
+		m.CreatedAt, _ = time.Parse("2006-01-02 15:04:05", createdAt)
+		msgs = append(msgs, &m)
+	}
+	for i, j := 0, len(msgs)-1; i < j; i, j = i+1, j-1 {
+		msgs[i], msgs[j] = msgs[j], msgs[i]
+	}
+	return msgs, nil
+}
+
+// MarkChatRead marks all messages in a conversation as read for a given reader.
+func (s *SQLiteDB) MarkChatRead(conversationID, readerID string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	_, err := s.db.Exec(
+		`UPDATE chat_messages SET read = 1
+		 WHERE conversation_id = ? AND from_id != ? AND read = 0`,
+		conversationID, readerID,
+	)
+	return err
+}
+
+// GetUnreadCount returns total unread messages for a device across all conversations.
+func (s *SQLiteDB) GetUnreadCount(deviceID string) (int, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	var count int
+	err := s.db.QueryRow(
+		`SELECT COUNT(*) FROM chat_messages
+		 WHERE (conversation_id = ? OR to_id = ?) AND from_id != ? AND read = 0`,
+		deviceID, deviceID, deviceID,
+	).Scan(&count)
+	return count, err
+}
+
+// DeleteChatHistory removes all messages for a conversation.
+func (s *SQLiteDB) DeleteChatHistory(conversationID string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	_, err := s.db.Exec(`DELETE FROM chat_messages WHERE conversation_id = ?`, conversationID)
+	return err
+}
+
+// ---------------------------------------------------------------------------
+//  Chat Groups
+// ---------------------------------------------------------------------------
+
+// CreateChatGroup inserts a new chat group.
+func (s *SQLiteDB) CreateChatGroup(g *ChatGroup) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	_, err := s.db.Exec(
+		`INSERT INTO chat_groups (id, name, members, created_by) VALUES (?, ?, ?, ?)`,
+		g.ID, g.Name, g.Members, g.CreatedBy,
+	)
+	return err
+}
+
+// GetChatGroup returns a chat group by ID.
+func (s *SQLiteDB) GetChatGroup(id string) (*ChatGroup, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	var g ChatGroup
+	var createdAt string
+	err := s.db.QueryRow(
+		`SELECT id, name, members, created_by, created_at FROM chat_groups WHERE id = ?`, id,
+	).Scan(&g.ID, &g.Name, &g.Members, &g.CreatedBy, &createdAt)
+	if err != nil {
+		return nil, err
+	}
+	g.CreatedAt, _ = time.Parse("2006-01-02 15:04:05", createdAt)
+	return &g, nil
+}
+
+// ListChatGroups returns all groups where memberID is in the members list.
+func (s *SQLiteDB) ListChatGroups(memberID string) ([]*ChatGroup, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	// Use LIKE with escaped wildcards for comma-separated member search
+	pattern := "%" + memberID + "%"
+	rows, err := s.db.Query(
+		`SELECT id, name, members, created_by, created_at FROM chat_groups
+		 WHERE members LIKE ?`, pattern,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var groups []*ChatGroup
+	for rows.Next() {
+		var g ChatGroup
+		var createdAt string
+		if err := rows.Scan(&g.ID, &g.Name, &g.Members, &g.CreatedBy, &createdAt); err != nil {
+			return nil, err
+		}
+		g.CreatedAt, _ = time.Parse("2006-01-02 15:04:05", createdAt)
+		groups = append(groups, &g)
+	}
+	return groups, nil
+}
+
+// UpdateChatGroup updates a chat group's name or members.
+func (s *SQLiteDB) UpdateChatGroup(g *ChatGroup) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	_, err := s.db.Exec(
+		`UPDATE chat_groups SET name = ?, members = ? WHERE id = ?`,
+		g.Name, g.Members, g.ID,
+	)
+	return err
+}
+
+// DeleteChatGroup removes a chat group.
+func (s *SQLiteDB) DeleteChatGroup(id string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	_, err := s.db.Exec(`DELETE FROM chat_groups WHERE id = ?`, id)
+	return err
 }

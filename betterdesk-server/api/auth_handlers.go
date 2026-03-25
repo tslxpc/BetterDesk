@@ -12,6 +12,7 @@ import (
 	"log"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/unitronix/betterdesk-server/audit"
@@ -673,6 +674,10 @@ func (s *Server) authMiddleware(next http.Handler) http.Handler {
 
 		// Public endpoints — no auth required
 		path := r.URL.Path
+		if strings.HasPrefix(path, "/ws/bd-mgmt/") {
+			next.ServeHTTP(w, r)
+			return
+		}
 		if path == "/api/health" || path == "/metrics" ||
 			path == "/api/auth/login" || path == "/api/auth/login/2fa" ||
 			path == "/api/server/pubkey" || path == "/api/server/stats" ||
