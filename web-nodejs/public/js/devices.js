@@ -78,6 +78,79 @@
             loadFolders();
             loadDevices();
         });
+
+        // Real-time device status push via WebSocket
+        initDeviceStatusWS();
+    }
+
+    /**
+     * Connect to WebSocket for real-time device status updates.
+     * Updates device status dots and badges without full page reload.
+     */
+    function initDeviceStatusWS() {
+        const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+        const wsUrl = `${proto}//${location.host}/ws/device-status`;
+        let ws = null;
+        let retryDelay = 3000;
+
+        function connect() {
+            ws = new WebSocket(wsUrl);
+
+            ws.onopen = () => {
+                retryDelay = 3000;
+            };
+
+            ws.onmessage = (event) => {
+                try {
+                    const data = JSON.parse(event.data);
+                    if (data.type === 'device_status') {
+                        updateDeviceStatusInPlace(data.device_id, data.status);
+                    }
+                } catch (_) {}
+            };
+
+            ws.onclose = () => {
+                setTimeout(connect, retryDelay);
+                retryDelay = Math.min(retryDelay * 2, 60000);
+            };
+
+            ws.onerror = () => {
+                ws.close();
+            };
+        }
+
+        connect();
+    }
+
+    /**
+     * Update a single device's status indicator without reloading the entire table.
+     */
+    function updateDeviceStatusInPlace(deviceId, status) {
+        const row = tableBody?.querySelector(`tr[data-id="${deviceId}"]`);
+        if (!row) return;
+
+        const dot = row.querySelector('.device-status-dot');
+        if (dot) {
+            dot.className = 'device-status-dot';
+            if (status === 'online' || status === 'ONLINE') {
+                dot.classList.add('online');
+                dot.title = 'Online';
+            } else if (status === 'offline' || status === 'OFFLINE') {
+                dot.classList.add('offline');
+                dot.title = 'Offline';
+            } else {
+                dot.classList.add(status.toLowerCase());
+                dot.title = status;
+            }
+        }
+
+        // Also update the device in our local state
+        const dev = allDevices.find(d => d.id === deviceId);
+        if (dev) {
+            dev.status = status;
+            dev.live_status = status;
+            dev.live_online = (status === 'online' || status === 'ONLINE');
+        }
     }
 
     /**

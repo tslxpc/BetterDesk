@@ -164,8 +164,20 @@ function handleAgentConnection(ws, deviceId) {
 
     // Send contacts
     loadContacts(deviceId).then(data => {
-        if (data && data.contacts) {
+        if (data && data.contacts && data.contacts.length > 0) {
             sendTo(ws, { type: 'contacts', contacts: data.contacts });
+        } else {
+            // Fallback: at least show operator support contact
+            sendTo(ws, { type: 'contacts', contacts: [{
+                id: 'operator',
+                name: 'Support',
+                hostname: '',
+                online: true,
+                last_seen: Date.now(),
+                unread: 0,
+                avatar_color: '#4f6ef7',
+                role: 'operator',
+            }] });
         }
     });
 
@@ -185,6 +197,13 @@ function handleAgentConnection(ws, deviceId) {
 
         switch (frame.type) {
             case 'hello':
+                // Acknowledge the hello so the client knows the connection is alive
+                sendTo(ws, {
+                    type: 'welcome',
+                    device_id: deviceId,
+                    server_time: Date.now(),
+                    capabilities: ['multi_conversation', 'contacts', 'groups', 'history'],
+                });
                 break;
 
             case 'message': {
@@ -213,8 +232,35 @@ function handleAgentConnection(ws, deviceId) {
 
             case 'get_contacts':
                 loadContacts(frame.device_id || deviceId).then(data => {
-                    if (data && data.contacts) {
+                    if (data && data.contacts && data.contacts.length > 0) {
                         sendTo(ws, { type: 'contacts', contacts: data.contacts });
+                    } else {
+                        // Fallback: return at least the operator contact and any connected agents
+                        const fallbackContacts = [{
+                            id: 'operator',
+                            name: 'Support',
+                            hostname: '',
+                            online: true,
+                            last_seen: Date.now(),
+                            unread: 0,
+                            avatar_color: '#4f6ef7',
+                            role: 'operator',
+                        }];
+                        // Add other connected agents as contacts
+                        for (const [did, room] of rooms) {
+                            if (did !== deviceId && room.agentWs && room.agentWs.readyState === WebSocket.OPEN) {
+                                fallbackContacts.push({
+                                    id: did,
+                                    name: did,
+                                    hostname: '',
+                                    online: true,
+                                    last_seen: Date.now(),
+                                    unread: 0,
+                                    avatar_color: '',
+                                });
+                            }
+                        }
+                        sendTo(ws, { type: 'contacts', contacts: fallbackContacts });
                     }
                 });
                 break;

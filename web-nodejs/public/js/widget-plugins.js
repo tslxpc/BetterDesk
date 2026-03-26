@@ -957,6 +957,738 @@
         }
     });
 
+    // 18. Weather
+    register('weather', {
+        name: t('desktop.widget_weather'),
+        icon: 'cloud',
+        color: '#58a6ff',
+        category: 'general',
+        description: 'Weather conditions from wttr.in',
+        defaultSize: { w: 280, h: 200 },
+        minSize: { w: 220, h: 160 },
+        _interval: null,
+        render: function (body) {
+            body.innerHTML = '<div class="widget-weather-loading" style="text-align:center;padding:20px">' +
+                '<span class="material-icons" style="font-size:32px;color:#58a6ff">cloud_queue</span>' +
+                '<div style="margin-top:8px;color:var(--text-secondary)">' + esc(t('common.loading')) + '</div></div>';
+            this._fetchWeather(body);
+            var self = this;
+            this._interval = setInterval(function () { self._fetchWeather(body); }, 600000);
+        },
+        update: function (body) { this._fetchWeather(body); },
+        destroy: function () { if (this._interval) { clearInterval(this._interval); this._interval = null; } },
+        _fetchWeather: function (body) {
+            var loc = (this.config && this.config.location) || '';
+            var url = 'https://wttr.in/' + encodeURIComponent(loc) + '?format=j1';
+            fetch(url).then(function (r) { return r.json(); }).then(function (data) {
+                var cur = data.current_condition && data.current_condition[0];
+                if (!cur) { body.innerHTML = '<div style="padding:16px;color:var(--text-secondary)">No data</div>'; return; }
+                var temp = cur.temp_C || '?';
+                var desc = (cur.weatherDesc && cur.weatherDesc[0] && cur.weatherDesc[0].value) || '';
+                var humidity = cur.humidity || '?';
+                var wind = cur.windspeedKmph || '?';
+                var icon = _weatherIcon(desc);
+                var area = (data.nearest_area && data.nearest_area[0] && data.nearest_area[0].areaName &&
+                    data.nearest_area[0].areaName[0] && data.nearest_area[0].areaName[0].value) || loc || 'Local';
+                body.innerHTML = '<div style="padding:12px">' +
+                    '<div style="display:flex;align-items:center;gap:12px">' +
+                    '<span class="material-icons" style="font-size:40px;color:#58a6ff">' + icon + '</span>' +
+                    '<div>' +
+                    '<div style="font-size:28px;font-weight:700">' + esc(temp) + '°C</div>' +
+                    '<div style="font-size:12px;color:var(--text-secondary)">' + esc(desc) + '</div>' +
+                    '</div></div>' +
+                    '<div style="margin-top:12px;font-size:12px;color:var(--text-secondary)">' + esc(area) + '</div>' +
+                    '<div style="display:flex;gap:16px;margin-top:8px;font-size:12px">' +
+                    '<span>💧 ' + esc(humidity) + '%</span>' +
+                    '<span>🌬️ ' + esc(wind) + ' km/h</span></div></div>';
+            }).catch(function () {
+                body.innerHTML = '<div style="padding:16px;color:var(--text-secondary)">Weather unavailable</div>';
+            });
+        },
+        configFields: [
+            { key: 'location', label: 'Location (city or coordinates)', type: 'text', placeholder: 'e.g. Warsaw or 52.23,21.01' }
+        ]
+    });
+
+    function _weatherIcon(desc) {
+        var d = (desc || '').toLowerCase();
+        if (d.includes('sun') || d.includes('clear')) return 'wb_sunny';
+        if (d.includes('cloud') && d.includes('part')) return 'partly_cloudy_day';
+        if (d.includes('cloud') || d.includes('overcast')) return 'cloud';
+        if (d.includes('rain') || d.includes('drizzle')) return 'water_drop';
+        if (d.includes('snow') || d.includes('sleet')) return 'ac_unit';
+        if (d.includes('thunder') || d.includes('storm')) return 'thunderstorm';
+        if (d.includes('fog') || d.includes('mist')) return 'foggy';
+        return 'cloud_queue';
+    }
+
+    // 19. World Clock
+    register('world-clock', {
+        name: t('desktop.widget_world_clock'),
+        icon: 'public',
+        color: '#d2a8ff',
+        category: 'general',
+        description: 'Multiple time zones display',
+        defaultSize: { w: 260, h: 200 },
+        minSize: { w: 200, h: 140 },
+        _interval: null,
+        render: function (body) {
+            var self = this;
+            this._renderClocks(body);
+            this._interval = setInterval(function () { self._renderClocks(body); }, 1000);
+        },
+        update: function (body) { this._renderClocks(body); },
+        destroy: function () { if (this._interval) { clearInterval(this._interval); this._interval = null; } },
+        _renderClocks: function (body) {
+            var zones = (this.config && this.config.zones) || 'America/New_York,Europe/London,Europe/Warsaw,Asia/Tokyo';
+            var list = zones.split(',').map(function (z) { return z.trim(); }).filter(Boolean);
+            var html = '<div style="padding:8px">';
+            list.forEach(function (tz) {
+                var label = tz.split('/').pop().replace(/_/g, ' ');
+                var time;
+                try {
+                    time = new Date().toLocaleTimeString('en-GB', { timeZone: tz, hour: '2-digit', minute: '2-digit', second: '2-digit' });
+                } catch (e) {
+                    time = '??:??';
+                }
+                html += '<div style="display:flex;justify-content:space-between;padding:4px 8px;border-bottom:1px solid rgba(255,255,255,0.05)">' +
+                    '<span style="font-size:13px;color:var(--text-secondary)">' + esc(label) + '</span>' +
+                    '<span style="font-size:14px;font-weight:600;font-variant-numeric:tabular-nums">' + esc(time) + '</span></div>';
+            });
+            html += '</div>';
+            body.innerHTML = html;
+        },
+        configFields: [
+            { key: 'zones', label: 'Time zones (comma-separated)', type: 'text', placeholder: 'America/New_York,Europe/Warsaw' }
+        ]
+    });
+
+    // 20. Bookmarks / Link Launcher
+    register('bookmarks', {
+        name: t('desktop.widget_bookmarks'),
+        icon: 'bookmarks',
+        color: '#f0883e',
+        category: 'tools',
+        description: 'Quick-access URL shortcuts',
+        defaultSize: { w: 280, h: 200 },
+        minSize: { w: 200, h: 120 },
+        render: function (body) {
+            var links = (this.config && this.config.links) || 'Grafana|http://localhost:3000,Portainer|http://localhost:9000,Router|http://192.168.1.1';
+            var items = links.split(',').map(function (l) {
+                var parts = l.trim().split('|');
+                return { name: parts[0] || 'Link', url: parts[1] || '#' };
+            });
+            var html = '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(100px,1fr));gap:8px;padding:10px">';
+            items.forEach(function (item) {
+                html += '<a href="' + esc(item.url) + '" target="_blank" rel="noopener" ' +
+                    'style="display:flex;flex-direction:column;align-items:center;gap:6px;padding:12px 8px;' +
+                    'border-radius:8px;background:rgba(255,255,255,0.03);text-decoration:none;color:inherit;' +
+                    'transition:background .15s" onmouseenter="this.style.background=\'rgba(255,255,255,0.08)\'" ' +
+                    'onmouseleave="this.style.background=\'rgba(255,255,255,0.03)\'">' +
+                    '<span class="material-icons" style="font-size:24px;color:#f0883e">link</span>' +
+                    '<span style="font-size:11px;text-align:center;word-break:break-word">' + esc(item.name) + '</span></a>';
+            });
+            html += '</div>';
+            body.innerHTML = html;
+        },
+        configFields: [
+            { key: 'links', label: 'Links (Name|URL, comma-separated)', type: 'text', placeholder: 'Grafana|http://localhost:3000' }
+        ]
+    });
+
+    // 21. User Sessions
+    register('user-sessions', {
+        name: t('desktop.widget_user_sessions'),
+        icon: 'group',
+        color: '#3fb950',
+        category: 'monitoring',
+        description: 'Currently logged-in operators',
+        defaultSize: { w: 300, h: 200 },
+        minSize: { w: 240, h: 140 },
+        _interval: null,
+        render: function (body) {
+            this._fetchSessions(body);
+            var self = this;
+            this._interval = setInterval(function () { self._fetchSessions(body); }, 15000);
+        },
+        update: function (body) { this._fetchSessions(body); },
+        destroy: function () { if (this._interval) { clearInterval(this._interval); this._interval = null; } },
+        _fetchSessions: function (body) {
+            apiGet('/api/users').then(function (res) {
+                var users = (res && res.data && res.data.users) || [];
+                if (!users.length) {
+                    body.innerHTML = '<div style="padding:16px;text-align:center;color:var(--text-secondary)">No active users</div>';
+                    return;
+                }
+                var html = '<div style="padding:8px">';
+                users.forEach(function (u) {
+                    var initial = (u.username || '?')[0].toUpperCase();
+                    var roleBadge = u.role === 'admin'
+                        ? '<span style="font-size:10px;padding:1px 6px;border-radius:4px;background:rgba(88,166,255,.15);color:#58a6ff">admin</span>'
+                        : '<span style="font-size:10px;padding:1px 6px;border-radius:4px;background:rgba(63,185,80,.15);color:#3fb950">operator</span>';
+                    html += '<div style="display:flex;align-items:center;gap:10px;padding:6px 8px;border-bottom:1px solid rgba(255,255,255,0.05)">' +
+                        '<div style="width:28px;height:28px;border-radius:50%;background:var(--primary);display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:600;color:white">' +
+                        esc(initial) + '</div>' +
+                        '<div style="flex:1"><div style="font-size:13px;font-weight:500">' + esc(u.username) + '</div></div>' +
+                        roleBadge + '</div>';
+                });
+                html += '</div>';
+                body.innerHTML = html;
+            }).catch(function () {
+                body.innerHTML = '<div style="padding:16px;color:var(--text-secondary)">Could not load users</div>';
+            });
+        }
+    });
+
+    // 22. Alert Feed
+    register('alert-feed', {
+        name: t('desktop.widget_alert_feed'),
+        icon: 'notifications_active',
+        color: '#f85149',
+        category: 'monitoring',
+        description: 'Security alerts and events',
+        defaultSize: { w: 340, h: 260 },
+        minSize: { w: 260, h: 180 },
+        _interval: null,
+        render: function (body) {
+            this._fetchAlerts(body);
+            var self = this;
+            this._interval = setInterval(function () { self._fetchAlerts(body); }, 30000);
+        },
+        update: function (body) { this._fetchAlerts(body); },
+        destroy: function () { if (this._interval) { clearInterval(this._interval); this._interval = null; } },
+        _fetchAlerts: function (body) {
+            apiGet('/api/audit-log?limit=10').then(function (res) {
+                var logs = (res && res.data && res.data.logs) || [];
+                if (!logs.length) {
+                    body.innerHTML = '<div style="padding:16px;text-align:center;color:var(--text-secondary)">' +
+                        '<span class="material-icons" style="font-size:28px">check_circle</span><div style="margin-top:4px">No recent alerts</div></div>';
+                    return;
+                }
+                var html = '<div style="padding:4px;max-height:220px;overflow-y:auto">';
+                logs.forEach(function (log) {
+                    var color = (log.action || '').includes('fail') || (log.action || '').includes('ban') ? '#f85149' :
+                        (log.action || '').includes('login') ? '#3fb950' : '#8b949e';
+                    var icon = (log.action || '').includes('ban') ? 'block' :
+                        (log.action || '').includes('fail') ? 'warning' :
+                        (log.action || '').includes('login') ? 'login' : 'info';
+                    html += '<div style="display:flex;gap:8px;padding:5px 8px;border-bottom:1px solid rgba(255,255,255,0.04);font-size:12px">' +
+                        '<span class="material-icons" style="font-size:16px;color:' + color + ';margin-top:1px">' + icon + '</span>' +
+                        '<div style="flex:1;min-width:0">' +
+                        '<div style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + esc(log.action || '') + '</div>' +
+                        '<div style="color:var(--text-tertiary);font-size:11px">' + esc(log.details || '') + '</div></div>' +
+                        '<div style="white-space:nowrap;color:var(--text-tertiary);font-size:10px">' + timeSince(log.created_at) + '</div></div>';
+                });
+                html += '</div>';
+                body.innerHTML = html;
+            }).catch(function () {
+                body.innerHTML = '<div style="padding:16px;color:var(--text-secondary)">Could not load alerts</div>';
+            });
+        }
+    });
+
+    // ============ 23. Calendar / Agenda ============
+
+    register('calendar', {
+        name: t('desktop.widget_calendar'),
+        icon: 'event',
+        color: '#d2a8ff',
+        category: 'general',
+        description: 'Simple calendar with local event entries',
+        defaultSize: { w: 320, h: 340 },
+        minSize: { w: 260, h: 260 },
+        _STORAGE_KEY: 'bd_widget_calendar_events',
+        render: function (body, config) {
+            this._month = new Date().getMonth();
+            this._year = new Date().getFullYear();
+            this._renderCalendar(body);
+        },
+        _loadEvents: function () {
+            try { return JSON.parse(localStorage.getItem(this._STORAGE_KEY) || '[]'); }
+            catch (e) { return []; }
+        },
+        _saveEvents: function (evts) {
+            localStorage.setItem(this._STORAGE_KEY, JSON.stringify(evts));
+        },
+        _renderCalendar: function (body) {
+            var self = this;
+            var year = this._year;
+            var month = this._month;
+            var today = new Date();
+            var first = new Date(year, month, 1);
+            var last = new Date(year, month + 1, 0);
+            var startDay = first.getDay() === 0 ? 6 : first.getDay() - 1;
+            var days = last.getDate();
+            var events = this._loadEvents();
+            var monthName = first.toLocaleDateString(undefined, { month: 'long', year: 'numeric' });
+
+            var html = '<div class="widget-cal">' +
+                '<div class="widget-cal-header">' +
+                '<button class="widget-cal-nav" data-dir="-1"><span class="material-icons">chevron_left</span></button>' +
+                '<span class="widget-cal-title">' + esc(monthName) + '</span>' +
+                '<button class="widget-cal-nav" data-dir="1"><span class="material-icons">chevron_right</span></button></div>' +
+                '<div class="widget-cal-grid">';
+            var dayNames = ['Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa', 'Su'];
+            dayNames.forEach(function (d) { html += '<div class="widget-cal-day-header">' + d + '</div>'; });
+            for (var i = 0; i < startDay; i++) html += '<div class="widget-cal-day empty"></div>';
+            for (var d = 1; d <= days; d++) {
+                var dateStr = year + '-' + String(month + 1).padStart(2, '0') + '-' + String(d).padStart(2, '0');
+                var isToday = d === today.getDate() && month === today.getMonth() && year === today.getFullYear();
+                var hasEvent = events.some(function (ev) { return ev.date === dateStr; });
+                html += '<div class="widget-cal-day' + (isToday ? ' today' : '') + (hasEvent ? ' has-event' : '') + '" data-date="' + dateStr + '">' + d + '</div>';
+            }
+            html += '</div>';
+            // Events list for today
+            var todayStr = today.getFullYear() + '-' + String(today.getMonth() + 1).padStart(2, '0') + '-' + String(today.getDate()).padStart(2, '0');
+            var todayEvts = events.filter(function (ev) { return ev.date === todayStr; });
+            html += '<div class="widget-cal-events">';
+            if (todayEvts.length) {
+                todayEvts.forEach(function (ev) {
+                    html += '<div class="widget-cal-event"><span class="material-icons" style="font-size:14px;color:#d2a8ff">event_note</span>' + esc(ev.title) + '</div>';
+                });
+            } else {
+                html += '<div class="widget-cal-no-events">' + t('desktop.label_no_events') + '</div>';
+            }
+            html += '</div></div>';
+            body.innerHTML = html;
+
+            // Navigation
+            body.querySelectorAll('.widget-cal-nav').forEach(function (btn) {
+                btn.addEventListener('click', function (e) {
+                    e.stopPropagation();
+                    var dir = parseInt(btn.dataset.dir, 10);
+                    self._month += dir;
+                    if (self._month > 11) { self._month = 0; self._year++; }
+                    if (self._month < 0) { self._month = 11; self._year--; }
+                    self._renderCalendar(body);
+                });
+            });
+            // Click day to add event
+            body.querySelectorAll('.widget-cal-day:not(.empty)').forEach(function (cell) {
+                cell.addEventListener('dblclick', function (e) {
+                    e.stopPropagation();
+                    var date = cell.dataset.date;
+                    var title = prompt(t('desktop.label_event_title') || 'Event title:');
+                    if (!title) return;
+                    var evts = self._loadEvents();
+                    evts.push({ date: date, title: title });
+                    self._saveEvents(evts);
+                    self._renderCalendar(body);
+                });
+            });
+        },
+        update: function (body) { this._renderCalendar(body); }
+    });
+
+    // ============ 24. System Process Monitor ============
+
+    register('process-monitor', {
+        name: t('desktop.widget_process_monitor'),
+        icon: 'memory',
+        color: '#f85149',
+        category: 'monitoring',
+        description: 'Top CPU/memory-consuming processes',
+        defaultSize: { w: 380, h: 300 },
+        minSize: { w: 300, h: 200 },
+        updateInterval: 10000,
+        render: function (body) {
+            body.innerHTML = '<div class="widget-proc"><div class="widget-proc-header">' +
+                '<span style="flex:2">Process</span><span style="flex:1;text-align:right">CPU</span><span style="flex:1;text-align:right">Mem</span></div>' +
+                '<div class="widget-proc-list"><div class="widget-loading" style="height:40px"></div></div></div>';
+            body.style.overflow = 'auto';
+        },
+        update: function (body) {
+            apiGet('/api/system/info').then(function (data) {
+                if (!data || !data.processes) return;
+                var list = body.querySelector('.widget-proc-list');
+                if (!list) return;
+                var procs = data.processes.slice(0, 15);
+                if (!procs.length) {
+                    list.innerHTML = '<div class="widget-empty"><span class="material-icons">memory</span><span>' + t('desktop.label_no_data') + '</span></div>';
+                    return;
+                }
+                var html = '';
+                procs.forEach(function (p) {
+                    var cpuCls = p.cpu > 80 ? 'danger' : (p.cpu > 50 ? 'warning' : '');
+                    html += '<div class="widget-proc-row">' +
+                        '<span class="widget-proc-name" title="' + esc(p.name) + '">' + esc(p.name) + '</span>' +
+                        '<span class="widget-proc-cpu ' + cpuCls + '">' + (p.cpu != null ? p.cpu.toFixed(1) + '%' : '-') + '</span>' +
+                        '<span class="widget-proc-mem">' + (p.mem != null ? p.mem.toFixed(1) + ' MB' : '-') + '</span></div>';
+                });
+                list.innerHTML = html;
+            }).catch(function () {
+                var list = body.querySelector('.widget-proc-list');
+                if (list) list.innerHTML = '<div class="widget-empty"><span class="material-icons">error</span><span>' + t('desktop.label_unavailable') + '</span></div>';
+            });
+        }
+    });
+
+    // ============ 25. Disk Usage Breakdown ============
+
+    register('disk-usage', {
+        name: t('desktop.widget_disk_usage'),
+        icon: 'storage',
+        color: '#f0883e',
+        category: 'monitoring',
+        description: 'Disk usage per partition',
+        defaultSize: { w: 320, h: 240 },
+        minSize: { w: 260, h: 180 },
+        updateInterval: 60000,
+        render: function (body) {
+            body.innerHTML = '<div class="widget-disk-list"><div class="widget-loading" style="height:40px"></div></div>';
+        },
+        update: function (body) {
+            apiGet('/api/system/info').then(function (data) {
+                if (!data || !data.disks) return;
+                var list = body.querySelector('.widget-disk-list');
+                if (!list) return;
+                if (!data.disks.length) {
+                    list.innerHTML = '<div class="widget-empty"><span class="material-icons">storage</span><span>' + t('desktop.label_no_data') + '</span></div>';
+                    return;
+                }
+                var html = '';
+                data.disks.forEach(function (d) {
+                    var pct = d.total > 0 ? Math.round((d.used / d.total) * 100) : 0;
+                    var cls = pct > 90 ? 'danger' : (pct > 75 ? 'warning' : '');
+                    var totalGB = (d.total / 1073741824).toFixed(1);
+                    var usedGB = (d.used / 1073741824).toFixed(1);
+                    html += '<div class="widget-disk-item">' +
+                        '<div class="widget-disk-info"><span class="widget-disk-mount">' + esc(d.mount || d.name) + '</span>' +
+                        '<span class="widget-disk-size">' + usedGB + ' / ' + totalGB + ' GB</span></div>' +
+                        '<div class="widget-disk-bar"><div class="widget-disk-fill ' + cls + '" style="width:' + pct + '%"></div></div>' +
+                        '<div class="widget-disk-pct">' + pct + '%</div></div>';
+                });
+                list.innerHTML = html;
+            }).catch(function () {
+                var list = body.querySelector('.widget-disk-list');
+                if (list) list.innerHTML = '<div class="widget-empty"><span class="material-icons">error</span><span>' + t('desktop.label_unavailable') + '</span></div>';
+            });
+        }
+    });
+
+    // ============ 26. Log Viewer ============
+
+    register('log-viewer', {
+        name: t('desktop.widget_log_viewer'),
+        icon: 'article',
+        color: '#8b949e',
+        category: 'monitoring',
+        description: 'Stream recent server log lines',
+        defaultSize: { w: 440, h: 300 },
+        minSize: { w: 320, h: 200 },
+        updateInterval: 10000,
+        render: function (body) {
+            body.innerHTML = '<div class="widget-log">' +
+                '<div class="widget-log-toolbar">' +
+                '<select class="widget-log-source">' +
+                '<option value="console">Console</option>' +
+                '<option value="go">Go Server</option>' +
+                '</select>' +
+                '<button class="widget-log-scroll-btn" title="Auto-scroll"><span class="material-icons">vertical_align_bottom</span></button></div>' +
+                '<div class="widget-log-lines"></div></div>';
+            body.style.overflow = 'hidden';
+            var scrollBtn = body.querySelector('.widget-log-scroll-btn');
+            body._autoScroll = true;
+            if (scrollBtn) {
+                scrollBtn.classList.add('active');
+                scrollBtn.addEventListener('click', function (e) {
+                    e.stopPropagation();
+                    body._autoScroll = !body._autoScroll;
+                    scrollBtn.classList.toggle('active', body._autoScroll);
+                });
+            }
+        },
+        update: function (body) {
+            var source = (body.querySelector('.widget-log-source') || {}).value || 'console';
+            apiGet('/api/logs/recent?source=' + source + '&limit=50').then(function (data) {
+                if (!data || !data.lines) return;
+                var container = body.querySelector('.widget-log-lines');
+                if (!container) return;
+                var html = '';
+                data.lines.forEach(function (line) {
+                    var cls = '';
+                    var lower = (line || '').toLowerCase();
+                    if (lower.includes('error') || lower.includes('fatal')) cls = 'error';
+                    else if (lower.includes('warn')) cls = 'warning';
+                    else if (lower.includes('info')) cls = 'info';
+                    html += '<div class="widget-log-line ' + cls + '">' + esc(line) + '</div>';
+                });
+                container.innerHTML = html;
+                if (body._autoScroll) container.scrollTop = container.scrollHeight;
+            }).catch(function () {
+                var container = body.querySelector('.widget-log-lines');
+                if (container) container.innerHTML = '<div class="widget-log-line error">Failed to load logs</div>';
+            });
+        }
+    });
+
+    // ============ 27. Speed Test ============
+
+    register('speed-test', {
+        name: t('desktop.widget_speed_test'),
+        icon: 'network_check',
+        color: '#3fb950',
+        category: 'tools',
+        description: 'Test download speed from server',
+        defaultSize: { w: 280, h: 220 },
+        minSize: { w: 220, h: 170 },
+        _testing: false,
+        render: function (body) {
+            var self = this;
+            body.innerHTML = '<div class="widget-speedtest">' +
+                '<div class="widget-speedtest-gauge">' + buildGaugeSVG(0) +
+                '<div class="widget-speedtest-value">-</div></div>' +
+                '<div class="widget-speedtest-label">' + t('desktop.label_download_speed') + '</div>' +
+                '<div class="widget-speedtest-stats">' +
+                '<div><span class="widget-speedtest-stat-label">' + t('desktop.label_latency') + '</span><span class="widget-speedtest-stat-val" data-st="latency">-</span></div>' +
+                '<div><span class="widget-speedtest-stat-label">' + t('desktop.label_server') + '</span><span class="widget-speedtest-stat-val" data-st="server">Local</span></div></div>' +
+                '<button class="widget-speedtest-btn">' + t('desktop.label_run_test') + '</button></div>';
+            body.querySelector('.widget-speedtest-btn').addEventListener('click', function (e) {
+                e.stopPropagation();
+                if (self._testing) return;
+                self._runTest(body);
+            });
+        },
+        _runTest: function (body) {
+            var self = this;
+            self._testing = true;
+            var btn = body.querySelector('.widget-speedtest-btn');
+            if (btn) btn.textContent = t('desktop.label_testing') || 'Testing...';
+            // Measure latency
+            var latencyStart = performance.now();
+            fetch('/api/stats', { cache: 'no-store' }).then(function () {
+                var latency = Math.round(performance.now() - latencyStart);
+                var latEl = body.querySelector('[data-st="latency"]');
+                if (latEl) latEl.textContent = latency + 'ms';
+                // Download speed test — download 1MB payload
+                var dlStart = performance.now();
+                var testUrl = '/api/speed-test?size=1048576&_=' + Date.now();
+                return fetch(testUrl, { cache: 'no-store' }).then(function (r) { return r.blob(); }).then(function (blob) {
+                    var dlTime = (performance.now() - dlStart) / 1000;
+                    var bytes = blob.size || 1048576;
+                    var speed = bytes / dlTime; // bytes/sec
+                    var mbps = (speed * 8) / 1000000;
+                    var pct = Math.min(100, (mbps / 100) * 100);
+                    // Update gauge
+                    var ring = body.querySelector('.widget-speedtest-gauge');
+                    if (ring) {
+                        var svg = ring.querySelector('svg');
+                        var tmp = document.createElement('div');
+                        tmp.innerHTML = buildGaugeSVG(pct);
+                        if (svg && tmp.firstChild) ring.replaceChild(tmp.firstChild, svg);
+                    }
+                    var val = body.querySelector('.widget-speedtest-value');
+                    if (val) val.textContent = mbps.toFixed(1) + ' Mbps';
+                    self._testing = false;
+                    if (btn) btn.textContent = t('desktop.label_run_test') || 'Run Test';
+                });
+            }).catch(function () {
+                self._testing = false;
+                if (btn) btn.textContent = t('desktop.label_run_test') || 'Run Test';
+            });
+        }
+    });
+
+    // ============ 28. Database Stats ============
+
+    register('database-stats', {
+        name: t('desktop.widget_database_stats'),
+        icon: 'table_view',
+        color: '#79c0ff',
+        category: 'monitoring',
+        description: 'Database size, tables, and row counts',
+        defaultSize: { w: 320, h: 260 },
+        minSize: { w: 260, h: 180 },
+        updateInterval: 60000,
+        render: function (body) {
+            body.innerHTML = '<div class="widget-dbstats"><div class="widget-loading" style="height:40px"></div></div>';
+        },
+        update: function (body) {
+            apiGet('/api/database/stats').then(function (data) {
+                if (!data) return;
+                var c = body.querySelector('.widget-dbstats');
+                if (!c) return;
+                var html = '<div class="widget-dbstats-header">' +
+                    '<span class="material-icons" style="color:#79c0ff;font-size:20px">table_view</span>' +
+                    '<span>' + esc(data.type || 'SQLite') + '</span>' +
+                    '<span class="widget-dbstats-size">' + esc(data.size || '-') + '</span></div>' +
+                    '<div class="widget-dbstats-table">' +
+                    '<div class="widget-dbstats-row header"><span>' + t('desktop.label_table') + '</span><span>' + t('desktop.label_rows') + '</span></div>';
+                if (data.tables && Array.isArray(data.tables)) {
+                    data.tables.forEach(function (tbl) {
+                        html += '<div class="widget-dbstats-row"><span>' + esc(tbl.name) + '</span><span>' + (tbl.count || 0) + '</span></div>';
+                    });
+                }
+                html += '</div>';
+                if (data.last_backup) {
+                    html += '<div class="widget-dbstats-footer">' + t('desktop.label_last_backup') + ': ' + esc(timeSince(data.last_backup)) + ' ago</div>';
+                }
+                c.innerHTML = html;
+            }).catch(function () {
+                var c = body.querySelector('.widget-dbstats');
+                if (c) c.innerHTML = '<div class="widget-empty"><span class="material-icons">error</span><span>' + t('desktop.label_unavailable') + '</span></div>';
+            });
+        }
+    });
+
+    // ============ 29. Docker Containers ============
+
+    register('docker-containers', {
+        name: t('desktop.widget_docker_containers'),
+        icon: 'view_in_ar',
+        color: '#2496ed',
+        category: 'monitoring',
+        description: 'Docker container status overview',
+        defaultSize: { w: 380, h: 280 },
+        minSize: { w: 300, h: 200 },
+        updateInterval: 15000,
+        render: function (body) {
+            body.innerHTML = '<div class="widget-docker"><div class="widget-loading" style="height:40px"></div></div>';
+            body.style.overflow = 'auto';
+        },
+        update: function (body) {
+            apiGet('/api/docker/containers').then(function (data) {
+                if (!data || !data.containers) return;
+                var c = body.querySelector('.widget-docker');
+                if (!c) return;
+                if (!data.containers.length) {
+                    c.innerHTML = '<div class="widget-empty"><span class="material-icons">view_in_ar</span><span>' + t('desktop.label_no_containers') + '</span></div>';
+                    return;
+                }
+                var html = '';
+                data.containers.forEach(function (ct) {
+                    var statusCls = ct.state === 'running' ? 'running' : (ct.state === 'exited' ? 'stopped' : 'other');
+                    var icon = ct.state === 'running' ? 'play_circle' : (ct.state === 'exited' ? 'stop_circle' : 'pending');
+                    html += '<div class="widget-docker-row ' + statusCls + '">' +
+                        '<span class="material-icons widget-docker-status">' + icon + '</span>' +
+                        '<div class="widget-docker-info">' +
+                        '<div class="widget-docker-name" title="' + esc(ct.name) + '">' + esc(ct.name) + '</div>' +
+                        '<div class="widget-docker-meta">' + esc(ct.image || '') +
+                        (ct.ports ? ' · ' + esc(ct.ports) : '') + '</div></div>' +
+                        '<div class="widget-docker-uptime">' + esc(ct.status || ct.state) + '</div></div>';
+                });
+                c.innerHTML = html;
+            }).catch(function () {
+                var c = body.querySelector('.widget-docker');
+                if (c) c.innerHTML = '<div class="widget-empty"><span class="material-icons">cloud_off</span><span>' + t('desktop.label_docker_unavailable') + '</span></div>';
+            });
+        }
+    });
+
+    // ============ 30. Custom Shell Command ============
+
+    register('shell-command', {
+        name: t('desktop.widget_shell_command'),
+        icon: 'terminal',
+        color: '#d29922',
+        category: 'tools',
+        description: 'Execute a predefined command and display output',
+        defaultSize: { w: 400, h: 260 },
+        minSize: { w: 300, h: 180 },
+        render: function (body, config) {
+            var cmd = config.command || '';
+            var interval = parseInt(config.refreshInterval, 10) || 30;
+            body.innerHTML = '<div class="widget-shell">' +
+                '<div class="widget-shell-header">' +
+                '<span class="material-icons" style="font-size:16px;color:#d29922">terminal</span>' +
+                '<span class="widget-shell-cmd" title="' + esc(cmd) + '">' + (cmd ? '$ ' + esc(cmd) : t('desktop.label_no_command')) + '</span>' +
+                '<button class="widget-shell-run" title="' + t('desktop.label_run') + '"><span class="material-icons">play_arrow</span></button></div>' +
+                '<pre class="widget-shell-output">' + t('desktop.label_no_output') + '</pre></div>';
+            var self = this;
+            body.querySelector('.widget-shell-run').addEventListener('click', function (e) {
+                e.stopPropagation();
+                self._exec(body, config);
+            });
+            if (cmd) {
+                this._exec(body, config);
+                body._shellTimer = setInterval(function () { self._exec(body, config); }, interval * 1000);
+            }
+        },
+        _exec: function (body, config) {
+            var cmd = config.command || '';
+            if (!cmd) return;
+            var output = body.querySelector('.widget-shell-output');
+            if (output) output.textContent = 'Running...';
+            fetch('/api/system/exec', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': (window.BetterDesk || {}).csrfToken || '' },
+                credentials: 'same-origin',
+                body: JSON.stringify({ command: cmd })
+            }).then(function (r) { return r.json(); }).then(function (data) {
+                if (output) output.textContent = data.output || data.error || 'No output';
+            }).catch(function (err) {
+                if (output) output.textContent = 'Error: ' + (err.message || 'Failed');
+            });
+        },
+        destroy: function (body) {
+            if (body && body._shellTimer) { clearInterval(body._shellTimer); body._shellTimer = null; }
+        },
+        configFields: [
+            { key: 'command', label: 'Command (admin only)', type: 'text', placeholder: 'uptime' },
+            { key: 'refreshInterval', label: 'Refresh interval (seconds)', type: 'text', placeholder: '30' }
+        ]
+    });
+
+    // ============ 31. Device Map ============
+
+    register('device-map', {
+        name: t('desktop.widget_device_map'),
+        icon: 'map',
+        color: '#3fb950',
+        category: 'devices',
+        description: 'Geographic map view of devices by IP',
+        defaultSize: { w: 460, h: 340 },
+        minSize: { w: 340, h: 240 },
+        updateInterval: 120000,
+        render: function (body) {
+            body.innerHTML = '<div class="widget-map">' +
+                '<div class="widget-map-canvas" style="position:relative;width:100%;height:100%;overflow:hidden">' +
+                '<img class="widget-map-img" src="https://upload.wikimedia.org/wikipedia/commons/thumb/e/ea/Equirectangular-projection.jpg/1280px-Equirectangular-projection.jpg" ' +
+                'alt="World Map" style="width:100%;height:100%;object-fit:cover;opacity:0.3;filter:grayscale(1) brightness(0.4)" crossorigin="anonymous">' +
+                '<div class="widget-map-pins"></div>' +
+                '<div class="widget-map-legend">' +
+                '<span class="widget-map-legend-item online"><span class="widget-map-legend-dot online"></span>' + t('desktop.label_online') + '</span>' +
+                '<span class="widget-map-legend-item offline"><span class="widget-map-legend-dot offline"></span>' + t('desktop.label_offline') + '</span></div></div></div>';
+        },
+        update: function (body) {
+            apiGet('/api/devices').then(function (data) {
+                var peers = (data && data.devices ? data.devices : (Array.isArray(data) ? data : []));
+                var pinsContainer = body.querySelector('.widget-map-pins');
+                if (!pinsContainer) return;
+                if (!peers.length) { pinsContainer.innerHTML = ''; return; }
+                // Group devices by IP and show approximate positions
+                var ipMap = {};
+                peers.forEach(function (p) {
+                    var ip = p.ip || p.socket_addr || '';
+                    if (ip.includes(':')) ip = ip.split(':')[0]; // Remove port
+                    if (!ip || ip === '127.0.0.1' || ip.startsWith('192.168.') || ip.startsWith('10.')) {
+                        ip = 'local';
+                    }
+                    if (!ipMap[ip]) ipMap[ip] = { ip: ip, devices: [], online: 0 };
+                    ipMap[ip].devices.push(p);
+                    if (p.live_online || p.online) ipMap[ip].online++;
+                });
+                // Simple hash-based positioning (deterministic for same IP)
+                var html = '';
+                var idx = 0;
+                Object.keys(ipMap).forEach(function (ip) {
+                    var group = ipMap[ip];
+                    var hash = 0;
+                    for (var i = 0; i < ip.length; i++) hash = ((hash << 5) - hash) + ip.charCodeAt(i);
+                    var x = 10 + Math.abs(hash % 80);
+                    var y = 10 + Math.abs((hash * 31) % 70);
+                    var online = group.online > 0;
+                    var count = group.devices.length;
+                    html += '<div class="widget-map-pin ' + (online ? 'online' : 'offline') + '" style="left:' + x + '%;top:' + y + '%" ' +
+                        'title="' + esc(ip) + ' — ' + count + ' device(s)">' +
+                        (count > 1 ? '<span class="widget-map-pin-count">' + count + '</span>' : '') + '</div>';
+                    idx++;
+                });
+                pinsContainer.innerHTML = html;
+            }).catch(function () {});
+        }
+    });
+
     // ============ Expose ============
 
     window.WidgetPlugins = {

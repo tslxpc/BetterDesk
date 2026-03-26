@@ -68,7 +68,7 @@ class RDRenderer {
     }
 
     /**
-     * Recalculate canvas size (call on window resize)
+     * Recalculate canvas size (call on window resize or fullscreen toggle)
      */
     resize() {
         const container = this.canvas.parentElement;
@@ -83,6 +83,11 @@ class RDRenderer {
         this.canvas.style.height = rect.height + 'px';
 
         this._updateTransform();
+
+        // Request a keyframe after resize to avoid blurry/corrupted frames
+        if (this.onResizeRefresh) {
+            this.onResizeRefresh();
+        }
     }
 
     /**

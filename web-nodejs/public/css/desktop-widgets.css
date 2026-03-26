@@ -25,30 +25,39 @@
 
 .desktop-widget {
     position: absolute;
-    border-radius: 12px;
-    background: rgba(13, 17, 23, 0.65);
-    backdrop-filter: blur(24px) saturate(1.4);
-    -webkit-backdrop-filter: blur(24px) saturate(1.4);
-    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 14px;
+    background: rgba(13, 17, 23, 0.55);
+    backdrop-filter: blur(28px) saturate(1.5);
+    -webkit-backdrop-filter: blur(28px) saturate(1.5);
+    border: 1px solid rgba(255, 255, 255, 0.1);
     box-shadow:
         0 4px 24px rgba(0, 0, 0, 0.35),
-        0 0 0 1px rgba(255, 255, 255, 0.04) inset;
+        0 0 0 1px rgba(255, 255, 255, 0.06) inset;
     color: #e6edf3;
     overflow: hidden;
-    transition: box-shadow 0.25s ease, border-color 0.25s ease;
+    transition: box-shadow 0.3s ease, border-color 0.3s ease, transform 0.2s ease;
     contain: layout style;
     will-change: transform;
     user-select: none;
     cursor: default;
 }
 
+.desktop-widget:hover {
+    border-color: rgba(255, 255, 255, 0.14);
+    box-shadow:
+        0 6px 32px rgba(0, 0, 0, 0.4),
+        0 0 0 1px rgba(255, 255, 255, 0.08) inset;
+    transform: translateY(-1px);
+}
+
 .desktop-widget.widget-focused {
-    border-color: rgba(88, 166, 255, 0.25);
+    border-color: rgba(88, 166, 255, 0.3);
     box-shadow:
         0 8px 40px rgba(0, 0, 0, 0.45),
-        0 0 0 1px rgba(88, 166, 255, 0.15) inset,
-        0 0 30px rgba(88, 166, 255, 0.05);
+        0 0 0 1px rgba(88, 166, 255, 0.2) inset,
+        0 0 40px rgba(88, 166, 255, 0.06);
     z-index: 10;
+    transform: translateY(-2px);
 }
 
 .desktop-widget.widget-dragging {
@@ -206,11 +215,11 @@
 }
 
 .desktop-widget.widget-entering {
-    animation: widgetAppear 0.35s cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
+    animation: widgetAppear 0.4s cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
 }
 
 .desktop-widget.widget-leaving {
-    animation: widgetRemove 0.25s ease-out forwards;
+    animation: widgetRemove 0.3s cubic-bezier(0.55, 0, 1, 0.45) forwards;
     pointer-events: none;
 }
 
@@ -414,6 +423,7 @@
 .wallpaper-picker {
     width: 90vw;
     max-width: 960px;
+    height: 80vh;
     max-height: 80vh;
     background: rgba(13, 17, 23, 0.97);
     backdrop-filter: blur(8px);
@@ -2012,3 +2022,412 @@
 .widget-stats-label { flex: 1; color: #c9d1d9; }
 .widget-stats-count { width: 60px; text-align: right; font-weight: 700; color: #e6edf3; font-family: monospace; }
 .widget-stats-pct { width: 50px; text-align: right; color: #8b949e; font-size: 11px; }
+
+/* ============ Light Theme ============ */
+
+.desktop-theme-light .desktop-widget {
+    background: rgba(255, 255, 255, 0.65);
+    border-color: rgba(0, 0, 0, 0.08);
+    color: #1f2328;
+    box-shadow:
+        0 4px 20px rgba(0, 0, 0, 0.1),
+        0 0 0 1px rgba(0, 0, 0, 0.04) inset;
+}
+
+.desktop-theme-light .desktop-widget:hover {
+    border-color: rgba(0, 0, 0, 0.12);
+    box-shadow:
+        0 6px 28px rgba(0, 0, 0, 0.14),
+        0 0 0 1px rgba(0, 0, 0, 0.06) inset;
+}
+
+.desktop-theme-light .desktop-widget.widget-focused {
+    border-color: rgba(9, 105, 218, 0.3);
+    box-shadow:
+        0 8px 36px rgba(0, 0, 0, 0.15),
+        0 0 0 1px rgba(9, 105, 218, 0.2) inset,
+        0 0 30px rgba(9, 105, 218, 0.06);
+}
+
+.desktop-theme-light .widget-header {
+    background: rgba(255, 255, 255, 0.8);
+    border-bottom-color: rgba(0, 0, 0, 0.06);
+}
+
+.desktop-theme-light .widget-header-title {
+    color: #1f2328;
+}
+
+.desktop-theme-light .widget-body {
+    color: #1f2328;
+}
+
+.desktop-theme-light .widget-stats-row {
+    border-bottom-color: rgba(0, 0, 0, 0.04);
+}
+
+.desktop-theme-light .widget-stats-row:hover {
+    background: rgba(0, 0, 0, 0.03);
+}
+
+.desktop-theme-light .widget-stats-label { color: #57606a; }
+.desktop-theme-light .widget-stats-count { color: #1f2328; }
+.desktop-theme-light .widget-stats-pct { color: #656d76; }
+
+.desktop-theme-light .widget-add-btn {
+    background: rgba(255, 255, 255, 0.75);
+    border-color: rgba(0, 0, 0, 0.1);
+    color: #57606a;
+}
+
+.desktop-theme-light .widget-picker {
+    background: rgba(255, 255, 255, 0.92);
+    border-color: rgba(0, 0, 0, 0.1);
+    box-shadow: 0 8px 40px rgba(0, 0, 0, 0.12);
+}
+
+.desktop-theme-light .widget-picker-item:hover {
+    background: rgba(0, 0, 0, 0.04);
+}
+
+.desktop-theme-light .gauge-bg { stroke: rgba(0, 0, 0, 0.08); }
+
+.desktop-theme-light .widget-snap-guide {
+    background: rgba(9, 105, 218, 0.1);
+    border-color: rgba(9, 105, 218, 0.3);
+}
+
+/* ============ Kebab Menu ============ */
+
+.widget-btn-kebab {
+    position: relative;
+}
+
+.widget-kebab-menu {
+    display: none;
+    position: absolute;
+    top: 100%;
+    right: 0;
+    width: 180px;
+    background: rgba(22, 27, 34, 0.95);
+    backdrop-filter: blur(20px);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 10px;
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+    z-index: 200;
+    padding: 4px 0;
+    animation: widgetAppear 0.2s ease forwards;
+}
+
+.widget-kebab-menu.open {
+    display: block;
+}
+
+.widget-kebab-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 14px;
+    font-size: 12px;
+    color: #c9d1d9;
+    cursor: pointer;
+    transition: background 0.12s;
+}
+
+.widget-kebab-item .material-icons {
+    font-size: 16px;
+    color: #8b949e;
+}
+
+.widget-kebab-item:hover {
+    background: rgba(255, 255, 255, 0.06);
+}
+
+.widget-kebab-item.danger { color: #f85149; }
+.widget-kebab-item.danger .material-icons { color: #f85149; }
+.widget-kebab-item.danger:hover { background: rgba(248, 81, 73, 0.12); }
+
+.widget-kebab-divider {
+    height: 1px;
+    background: rgba(255, 255, 255, 0.06);
+    margin: 4px 0;
+}
+
+/* ============ Calendar Widget ============ */
+
+.widget-cal { padding: 8px; }
+
+.widget-cal-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 8px;
+}
+
+.widget-cal-title {
+    font-size: 13px;
+    font-weight: 600;
+    color: #e6edf3;
+}
+
+.widget-cal-nav {
+    width: 28px; height: 28px;
+    border: none; background: rgba(255,255,255,0.06); border-radius: 6px;
+    color: #8b949e; cursor: pointer; display: flex; align-items: center; justify-content: center;
+    transition: background 0.15s;
+}
+.widget-cal-nav:hover { background: rgba(255,255,255,0.1); color: #e6edf3; }
+
+.widget-cal-grid {
+    display: grid;
+    grid-template-columns: repeat(7, 1fr);
+    gap: 2px;
+    text-align: center;
+}
+
+.widget-cal-day-header {
+    font-size: 10px;
+    font-weight: 600;
+    color: #8b949e;
+    padding: 2px 0;
+}
+
+.widget-cal-day {
+    font-size: 11px;
+    padding: 4px 2px;
+    border-radius: 4px;
+    cursor: pointer;
+    transition: background 0.12s;
+    color: #c9d1d9;
+}
+.widget-cal-day:hover { background: rgba(255,255,255,0.08); }
+.widget-cal-day.today { background: rgba(88,166,255,0.2); color: #58a6ff; font-weight: 700; }
+.widget-cal-day.has-event { position: relative; }
+.widget-cal-day.has-event::after {
+    content: '';
+    position: absolute;
+    bottom: 1px; left: 50%; transform: translateX(-50%);
+    width: 4px; height: 4px; border-radius: 50%;
+    background: #d2a8ff;
+}
+.widget-cal-day.empty { cursor: default; }
+
+.widget-cal-events { margin-top: 8px; border-top: 1px solid rgba(255,255,255,0.06); padding-top: 6px; }
+.widget-cal-event {
+    display: flex; align-items: center; gap: 6px;
+    font-size: 11px; color: #c9d1d9; padding: 3px 0;
+}
+.widget-cal-no-events { font-size: 11px; color: #8b949e; text-align: center; padding: 4px; }
+
+/* ============ Process Monitor Widget ============ */
+
+.widget-proc { padding: 4px; }
+.widget-proc-header {
+    display: flex; padding: 4px 8px; font-size: 10px; font-weight: 600;
+    color: #8b949e; border-bottom: 1px solid rgba(255,255,255,0.06);
+}
+.widget-proc-list { max-height: calc(100% - 28px); overflow-y: auto; }
+.widget-proc-row {
+    display: flex; padding: 4px 8px; font-size: 11px;
+    border-bottom: 1px solid rgba(255,255,255,0.03);
+}
+.widget-proc-name { flex: 2; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #c9d1d9; }
+.widget-proc-cpu { flex: 1; text-align: right; color: #3fb950; }
+.widget-proc-cpu.warning { color: #d29922; }
+.widget-proc-cpu.danger { color: #f85149; }
+.widget-proc-mem { flex: 1; text-align: right; color: #79c0ff; }
+
+/* ============ Disk Usage Widget ============ */
+
+.widget-disk-list { padding: 8px; }
+.widget-disk-item { margin-bottom: 10px; }
+.widget-disk-info { display: flex; justify-content: space-between; font-size: 11px; margin-bottom: 4px; }
+.widget-disk-mount { color: #e6edf3; font-weight: 500; }
+.widget-disk-size { color: #8b949e; }
+.widget-disk-bar {
+    height: 6px; border-radius: 3px;
+    background: rgba(255,255,255,0.06); overflow: hidden;
+}
+.widget-disk-fill {
+    height: 100%; border-radius: 3px;
+    background: linear-gradient(90deg, #3fb950, #58a6ff);
+    transition: width 0.5s ease;
+}
+.widget-disk-fill.warning { background: linear-gradient(90deg, #d29922, #f0883e); }
+.widget-disk-fill.danger { background: linear-gradient(90deg, #f85149, #da3633); }
+.widget-disk-pct { font-size: 10px; color: #8b949e; text-align: right; margin-top: 2px; }
+
+/* ============ Log Viewer Widget ============ */
+
+.widget-log { display: flex; flex-direction: column; height: 100%; }
+.widget-log-toolbar {
+    display: flex; gap: 8px; padding: 4px 8px; align-items: center;
+    border-bottom: 1px solid rgba(255,255,255,0.06);
+}
+.widget-log-source {
+    font-size: 11px; padding: 2px 6px; border-radius: 4px;
+    background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.1);
+    color: #c9d1d9; outline: none;
+}
+.widget-log-scroll-btn {
+    width: 24px; height: 24px; border: none;
+    background: rgba(255,255,255,0.04); border-radius: 4px;
+    color: #8b949e; cursor: pointer; display: flex; align-items: center; justify-content: center;
+}
+.widget-log-scroll-btn.active { color: #58a6ff; background: rgba(88,166,255,0.1); }
+.widget-log-lines {
+    flex: 1; overflow-y: auto; padding: 4px; font-family: 'Fira Code', monospace;
+    font-size: 10px; line-height: 1.6;
+}
+.widget-log-line { padding: 1px 4px; white-space: pre-wrap; word-break: break-all; }
+.widget-log-line.error { color: #f85149; }
+.widget-log-line.warning { color: #d29922; }
+.widget-log-line.info { color: #c9d1d9; }
+
+/* ============ Speed Test Widget ============ */
+
+.widget-speedtest { display: flex; flex-direction: column; align-items: center; padding: 12px; gap: 8px; }
+.widget-speedtest-gauge { position: relative; width: 100px; height: 100px; }
+.widget-speedtest-value {
+    position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+    font-size: 16px; font-weight: 700; color: #e6edf3;
+}
+.widget-speedtest-label { font-size: 11px; color: #8b949e; }
+.widget-speedtest-stats {
+    display: flex; gap: 16px; font-size: 11px;
+}
+.widget-speedtest-stat-label { color: #8b949e; margin-right: 4px; }
+.widget-speedtest-stat-val { color: #c9d1d9; font-weight: 500; }
+.widget-speedtest-btn {
+    margin-top: 4px; padding: 6px 20px; border: none;
+    background: rgba(88,166,255,0.15); color: #58a6ff; border-radius: 6px;
+    font-size: 12px; font-weight: 500; cursor: pointer; transition: background 0.15s;
+}
+.widget-speedtest-btn:hover { background: rgba(88,166,255,0.25); }
+
+/* ============ Database Stats Widget ============ */
+
+.widget-dbstats { padding: 8px; }
+.widget-dbstats-header {
+    display: flex; align-items: center; gap: 8px; margin-bottom: 10px;
+    font-size: 13px; font-weight: 600; color: #e6edf3;
+}
+.widget-dbstats-size { margin-left: auto; font-size: 11px; color: #8b949e; font-weight: 400; }
+.widget-dbstats-table { font-size: 11px; }
+.widget-dbstats-row {
+    display: flex; justify-content: space-between; padding: 4px 8px;
+    border-bottom: 1px solid rgba(255,255,255,0.04);
+}
+.widget-dbstats-row.header { color: #8b949e; font-weight: 600; font-size: 10px; }
+.widget-dbstats-row span:last-child { color: #79c0ff; font-weight: 500; }
+.widget-dbstats-footer { font-size: 10px; color: #8b949e; margin-top: 8px; text-align: center; }
+
+/* ============ Docker Containers Widget ============ */
+
+.widget-docker { padding: 4px; }
+.widget-docker-row {
+    display: flex; align-items: center; gap: 8px; padding: 6px 8px;
+    border-bottom: 1px solid rgba(255,255,255,0.04);
+}
+.widget-docker-status { font-size: 18px; flex-shrink: 0; }
+.widget-docker-row.running .widget-docker-status { color: #3fb950; }
+.widget-docker-row.stopped .widget-docker-status { color: #f85149; }
+.widget-docker-row.other .widget-docker-status { color: #d29922; }
+.widget-docker-info { flex: 1; min-width: 0; }
+.widget-docker-name {
+    font-size: 12px; font-weight: 500; color: #e6edf3;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.widget-docker-meta { font-size: 10px; color: #8b949e; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.widget-docker-uptime { font-size: 10px; color: #8b949e; white-space: nowrap; }
+
+/* ============ Shell Command Widget ============ */
+
+.widget-shell { display: flex; flex-direction: column; height: 100%; }
+.widget-shell-header {
+    display: flex; align-items: center; gap: 6px; padding: 6px 8px;
+    border-bottom: 1px solid rgba(255,255,255,0.06);
+}
+.widget-shell-cmd {
+    flex: 1; font-size: 11px; color: #3fb950; font-family: 'Fira Code', monospace;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.widget-shell-run {
+    width: 24px; height: 24px; border: none;
+    background: rgba(63,185,80,0.1); border-radius: 4px;
+    color: #3fb950; cursor: pointer; display: flex; align-items: center; justify-content: center;
+}
+.widget-shell-run:hover { background: rgba(63,185,80,0.2); }
+.widget-shell-output {
+    flex: 1; margin: 0; padding: 6px 8px; overflow: auto;
+    font-family: 'Fira Code', monospace; font-size: 10px; line-height: 1.5;
+    color: #c9d1d9; background: rgba(0,0,0,0.15); white-space: pre-wrap; word-break: break-all;
+}
+
+/* ============ Device Map Widget ============ */
+
+.widget-map { position: relative; width: 100%; height: 100%; }
+.widget-map-canvas { position: relative; width: 100%; height: 100%; }
+.widget-map-pins { position: absolute; inset: 0; pointer-events: none; }
+.widget-map-pin {
+    position: absolute; width: 12px; height: 12px; border-radius: 50%;
+    transform: translate(-50%, -50%); pointer-events: auto; cursor: pointer;
+    transition: transform 0.2s;
+}
+.widget-map-pin.online { background: #3fb950; box-shadow: 0 0 6px rgba(63,185,80,0.5); }
+.widget-map-pin.offline { background: #f85149; box-shadow: 0 0 6px rgba(248,81,73,0.3); }
+.widget-map-pin:hover { transform: translate(-50%, -50%) scale(1.4); }
+.widget-map-pin-count {
+    position: absolute; top: -8px; right: -8px;
+    font-size: 9px; font-weight: 700; color: white;
+    background: #58a6ff; border-radius: 6px; padding: 0 4px; min-width: 14px; text-align: center;
+}
+.widget-map-legend {
+    position: absolute; bottom: 6px; right: 8px;
+    display: flex; gap: 10px; font-size: 10px; color: #8b949e;
+}
+.widget-map-legend-dot {
+    display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 3px; vertical-align: middle;
+}
+.widget-map-legend-dot.online { background: #3fb950; }
+.widget-map-legend-dot.offline { background: #f85149; }
+
+/* ============ Responsive Desktop Mode ============ */
+
+@media (max-width: 1440px) {
+    .widget-canvas { inset: 42px 0 48px 42px; }
+}
+
+@media (max-width: 1024px) {
+    .widget-canvas { inset: 42px 0 48px 0; } /* hide sidebar on tablets */
+    .desktop-widget { min-width: 160px; }
+    .widget-picker { width: 320px; }
+}
+
+@media (max-width: 768px) {
+    .widget-canvas { inset: 42px 0 48px 0; }
+    .desktop-widget {
+        border-radius: 10px;
+        min-width: 140px;
+    }
+    .widget-header { padding: 5px 8px 3px; min-height: 26px; }
+    .widget-header-icon { width: 20px; height: 20px; font-size: 12px; }
+    .widget-header-title { font-size: 10px; }
+    .widget-body { padding: 2px 8px 6px; }
+    .widget-picker { width: 280px; max-height: 440px; bottom: 56px; right: 8px; }
+    .widget-add-btn { width: 40px; height: 40px; bottom: 56px; right: 8px; font-size: 20px; }
+}
+
+@media (max-width: 480px) {
+    .widget-canvas { inset: 38px 0 44px 0; }
+    .desktop-widget {
+        border-radius: 8px;
+        backdrop-filter: blur(16px);
+    }
+    .widget-header-actions { opacity: 1; } /* always show on mobile */
+    .widget-picker {
+        position: fixed; inset: auto 0 44px 0; width: 100%;
+        border-radius: 16px 16px 0 0; max-height: 60vh;
+    }
+    .widget-add-btn { bottom: 52px; right: 8px; width: 36px; height: 36px; }
+}

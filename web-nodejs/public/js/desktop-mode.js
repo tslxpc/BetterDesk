@@ -20,6 +20,7 @@
     const STORAGE_WINS_KEY = 'betterdesk_desktop_wins';
     const CASCADE_OFFSET = 32;
     const STORAGE_FOLDABLE_AUTO = 'betterdesk_foldable_auto'; // Auto-switch on unfold
+    const STORAGE_THEME = 'betterdesk_desktop_theme'; // 'dark', 'light', 'auto'
 
     // ============ State ============
 
@@ -30,6 +31,7 @@
     let cascadeIndex = 0;
     let dragState = null;
     let resizeState = null;
+    let currentTheme = localStorage.getItem(STORAGE_THEME) || 'auto';
 
     // Widget mode: 'windows' or 'widgets'
     let currentMode = 'widgets'; // Default to widgets mode
@@ -269,6 +271,9 @@
                 document.body.classList.remove('desktop-entering');
             }, 350);
         }
+
+        // Apply theme
+        applyTheme(currentTheme);
 
         renderDesktopIcons();
 
@@ -1083,6 +1088,40 @@
         openApp(found);
     }
 
+    // ============ Theme System ============
+
+    function applyTheme(theme) {
+        currentTheme = theme;
+        localStorage.setItem(STORAGE_THEME, theme);
+
+        var root = document.documentElement;
+        root.classList.remove('desktop-theme-dark', 'desktop-theme-light');
+
+        var resolved = theme;
+        if (theme === 'auto') {
+            resolved = window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark';
+        }
+
+        root.classList.add('desktop-theme-' + resolved);
+    }
+
+    function cycleTheme() {
+        var order = ['dark', 'light', 'auto'];
+        var idx = order.indexOf(currentTheme);
+        var next = order[(idx + 1) % order.length];
+        applyTheme(next);
+        return next;
+    }
+
+    // Listen for system theme changes when in auto mode
+    if (window.matchMedia) {
+        window.matchMedia('(prefers-color-scheme: light)').addEventListener('change', function () {
+            if (currentTheme === 'auto' && active) {
+                applyTheme('auto');
+            }
+        });
+    }
+
     // ============ Public API ============
 
     window.DesktopMode = {
@@ -1094,6 +1133,10 @@
         switchMode: switchMode,
         getMode: function() { return currentMode; },
         openAppByRoute: openAppByRoute,
+        // Theme API
+        setTheme: applyTheme,
+        cycleTheme: cycleTheme,
+        getTheme: function() { return currentTheme; },
         // Foldable device API
         isFoldable: function() { return isFoldableDevice; },
         getDevicePosture: function() { return devicePosture; },

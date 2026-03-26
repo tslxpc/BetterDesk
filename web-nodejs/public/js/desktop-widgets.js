@@ -9,9 +9,10 @@
 
     // ============ Constants ============
 
-    var GRID = 10;
+    var GRID = 20;
     var MIN_W = 160;
     var MIN_H = 120;
+    var EDGE_SNAP_THRESHOLD = 15;  // px — magnetic edge snapping distance
     var STORAGE_LAYOUT  = 'bd_widget_layout';
     var STORAGE_WALL    = 'bd_widget_wallpaper';
     var LAYOUT_VERSION  = 3;
@@ -19,6 +20,8 @@
     var WALLPAPER_COUNT = 125;
     var UPDATE_INTERVAL = 30000;      // 30 s default widget data refresh
     var SAVE_DEBOUNCE   = 600;
+    var _showGrid = false;
+    var _gridOverlay = null;
 
     // ============ State ============
 
@@ -39,6 +42,58 @@
 
     function snap(val) { return Math.round(val / GRID) * GRID; }
 
+    /** Snap value to edge if within threshold */
+    function edgeSnap(val, edges) {
+        for (var i = 0; i < edges.length; i++) {
+            if (Math.abs(val - edges[i]) <= EDGE_SNAP_THRESHOLD) return edges[i];
+        }
+        return snap(val);
+    }
+
+    /** Get snap edges from other widgets */
+    function getSnapEdges(excludeId) {
+        var edges = { x: [0], y: [0] };
+        var area = getCanvasArea();
+        edges.x.push(area.w);
+        edges.y.push(area.h);
+        _widgets.forEach(function (w) {
+            if (w.id === excludeId) return;
+            edges.x.push(w.x, w.x + w.w);
+            edges.y.push(w.y, w.y + w.h);
+        });
+        return edges;
+    }
+
+    /** Toggle visual grid overlay */
+    function toggleGridOverlay() {
+        _showGrid = !_showGrid;
+        if (_showGrid) {
+            showGridOverlay();
+        } else {
+            hideGridOverlay();
+        }
+    }
+
+    function showGridOverlay() {
+        if (_gridOverlay) return;
+        if (!_canvas) return;
+        _gridOverlay = document.createElement('div');
+        _gridOverlay.className = 'widget-grid-overlay';
+        _gridOverlay.style.cssText = 'position:absolute;inset:0;pointer-events:none;z-index:0;' +
+            'background-image:radial-gradient(circle,rgba(88,166,255,0.15) 1px,transparent 1px);' +
+            'background-size:' + GRID + 'px ' + GRID + 'px;opacity:0;transition:opacity .3s';
+        _canvas.appendChild(_gridOverlay);
+        requestAnimationFrame(function () { if (_gridOverlay) _gridOverlay.style.opacity = '1'; });
+    }
+
+    function hideGridOverlay() {
+        if (!_gridOverlay) return;
+        _gridOverlay.style.opacity = '0';
+        var el = _gridOverlay;
+        setTimeout(function () { if (el.parentNode) el.parentNode.removeChild(el); }, 300);
+        _gridOverlay = null;
+    }
+
     function uid() {
         return 'w-' + Date.now().toString(36) + Math.random().toString(36).substr(2, 5);
     }
@@ -50,6 +105,17 @@
         d.textContent = s || '';
         return d.innerHTML;
     }
+
+    /** Close all open kebab menus except optionally the one inside excludeEl */
+    function _closeAllKebabMenus(excludeEl) {
+        document.querySelectorAll('.widget-kebab-menu.open').forEach(function (m) {
+            if (excludeEl && excludeEl.contains(m)) return;
+            m.classList.remove('open');
+        });
+    }
+
+    // Global click closes any open kebab menu
+    document.addEventListener('click', function () { _closeAllKebabMenus(); });
 
     // ============ Initialization ============
 
@@ -345,12 +411,15 @@
                 '</div>' +
                 '<div class="widget-header-title">' + esc(plugin.name || w.type) + '</div>' +
                 '<div class="widget-header-actions">' +
-                    '<button class="widget-btn-config" title="' + esc(t('desktop.configure')) + '">' +
-                        '<span class="material-icons">settings</span>' +
+                    '<button class="widget-btn-kebab" title="Options">' +
+                        '<span class="material-icons">more_vert</span>' +
                     '</button>' +
-                    '<button class="widget-btn-remove" title="' + esc(t('desktop.remove_widget')) + '">' +
-                        '<span class="material-icons">close</span>' +
-                    '</button>' +
+                    '<div class="widget-kebab-menu">' +
+                        '<div class="widget-kebab-item" data-action="config"><span class="material-icons">settings</span>' + esc(t('desktop.configure')) + '</div>' +
+                        '<div class="widget-kebab-item" data-action="refresh"><span class="material-icons">refresh</span>' + esc(t('desktop.refresh')) + '</div>' +
+                        '<div class="widget-kebab-divider"></div>' +
+                        '<div class="widget-kebab-item danger" data-action="remove"><span class="material-icons">delete</span>' + esc(t('desktop.remove_widget')) + '</div>' +
+                    '</div>' +
                 '</div>' +
             '</div>' +
             '<div class="widget-body"></div>' +
@@ -372,14 +441,31 @@
             startDrag(w.id, e);
         }, { passive: false });
 
-        // Action buttons
-        el.querySelector('.widget-btn-remove').addEventListener('click', function (e) {
+        // Kebab menu toggle
+        var kebabBtn = el.querySelector('.widget-btn-kebab');
+        var kebabMenu = el.querySelector('.widget-kebab-menu');
+        kebabBtn.addEventListener('click', function (e) {
             e.stopPropagation();
-            removeWidget(w.id);
+            _closeAllKebabMenus(el);
+            kebabMenu.classList.toggle('open');
         });
-        el.querySelector('.widget-btn-config').addEventListener('click', function (e) {
-            e.stopPropagation();
-            openWidgetConfig(w.id);
+
+        // Kebab menu actions
+        el.querySelectorAll('.widget-kebab-item').forEach(function (item) {
+            item.addEventListener('click', function (e) {
+                e.stopPropagation();
+                kebabMenu.classList.remove('open');
+                var action = item.dataset.action;
+                if (action === 'remove') removeWidget(w.id);
+                else if (action === 'config') openWidgetConfig(w.id);
+                else if (action === 'refresh') {
+                    var p = getPlugin(w.id);
+                    if (p && p.update) {
+                        var b = document.getElementById(w.id);
+                        if (b) try { p.update(b.querySelector('.widget-body')); } catch (_) {}
+                    }
+                }
+            });
         });
 
         // Resize handles
@@ -511,8 +597,11 @@
         if (!w) return;
 
         var area = getCanvasArea();
-        w.x = clamp(snap(s.origX + (cx - s.startX)), 0, area.w - w.w);
-        w.y = clamp(snap(s.origY + (cy - s.startY)), 0, area.h - w.h);
+        var edges = getSnapEdges(s.id);
+        var rawX = s.origX + (cx - s.startX);
+        var rawY = s.origY + (cy - s.startY);
+        w.x = clamp(edgeSnap(rawX, edges.x), 0, area.w - w.w);
+        w.y = clamp(edgeSnap(rawY, edges.y), 0, area.h - w.h);
 
         var el = document.getElementById(s.id);
         if (el) {
@@ -1021,6 +1110,24 @@
             closeWallpaperPicker();
         });
 
+        // Helper: create thumbnail <img> with fallback to full PNG on error
+        function createThumbImg(el) {
+            var img = document.createElement('img');
+            img.onload = function () { img.classList.add('loaded'); };
+            img.onerror = function () {
+                if (img.src !== el.dataset.path) {
+                    img.src = el.dataset.path;
+                } else {
+                    img.classList.add('loaded');
+                }
+            };
+            img.src = el.dataset.thumb;
+            img.alt = 'Wallpaper ' + el.dataset.idx;
+            img.loading = 'lazy';
+            img.decoding = 'async';
+            return img;
+        }
+
         // Lazy-load WebP thumbnails via IntersectionObserver
         if ('IntersectionObserver' in window) {
             _pickerObserver = new IntersectionObserver(function (entries) {
@@ -1029,13 +1136,7 @@
                     var el = entry.target;
                     var ph = el.querySelector('.wallpaper-thumb-placeholder');
                     if (!ph) { _pickerObserver.unobserve(el); return; }
-                    var img = document.createElement('img');
-                    img.onload = function () { img.classList.add('loaded'); };
-                    img.src = el.dataset.thumb;
-                    img.alt = 'Wallpaper ' + el.dataset.idx;
-                    img.loading = 'lazy';
-                    img.decoding = 'async';
-                    el.replaceChild(img, ph);
+                    el.replaceChild(createThumbImg(el), ph);
                     _pickerObserver.unobserve(el);
                 });
             }, { root: grid, rootMargin: '300px' });
@@ -1047,13 +1148,7 @@
             grid.querySelectorAll('.wallpaper-thumb').forEach(function (el) {
                 var ph = el.querySelector('.wallpaper-thumb-placeholder');
                 if (!ph) return;
-                var img = document.createElement('img');
-                img.onload = function () { img.classList.add('loaded'); };
-                img.src = el.dataset.thumb;
-                img.alt = 'Wallpaper ' + el.dataset.idx;
-                img.loading = 'lazy';
-                img.decoding = 'async';
-                el.replaceChild(img, ph);
+                el.replaceChild(createThumbImg(el), ph);
             });
         }
 
@@ -1379,6 +1474,109 @@
         ];
     }
 
+    // ============ Widget Presets ============
+
+    var STORAGE_PRESETS = 'bd_widget_presets';
+    var BUILTIN_PRESETS = {
+        monitoring: {
+            name: t('desktop.label_preset_monitoring'),
+            widgets: [
+                { type: 'server-health', x: 20, y: 20, w: 380, h: 280 },
+                { type: 'system-stats', x: 420, y: 20, w: 360, h: 200 },
+                { type: 'multi-gauge', x: 800, y: 20, w: 400, h: 180 },
+                { type: 'bandwidth', x: 20, y: 320, w: 280, h: 200 },
+                { type: 'disk-usage', x: 320, y: 240, w: 320, h: 240 },
+                { type: 'process-monitor', x: 660, y: 220, w: 380, h: 300 },
+                { type: 'log-viewer', x: 20, y: 540, w: 440, h: 300 },
+                { type: 'alert-feed', x: 480, y: 540, w: 340, h: 260 }
+            ]
+        },
+        helpdesk: {
+            name: t('desktop.label_preset_helpdesk'),
+            widgets: [
+                { type: 'device-status', x: 20, y: 20, w: 320, h: 160 },
+                { type: 'quick-controls', x: 360, y: 20, w: 400, h: 280 },
+                { type: 'tickets-summary', x: 780, y: 20, w: 260, h: 190 },
+                { type: 'device-list', x: 20, y: 200, w: 320, h: 300 },
+                { type: 'recent-activity', x: 360, y: 320, w: 320, h: 280 },
+                { type: 'notes', x: 700, y: 230, w: 260, h: 240 }
+            ]
+        },
+        minimal: {
+            name: t('desktop.label_preset_minimal'),
+            widgets: [
+                { type: 'clock', x: 20, y: 20, w: 240, h: 160 },
+                { type: 'device-status', x: 280, y: 20, w: 320, h: 160 },
+                { type: 'quick-actions', x: 620, y: 20, w: 260, h: 210 }
+            ]
+        },
+        developer: {
+            name: t('desktop.label_preset_developer'),
+            widgets: [
+                { type: 'log-viewer', x: 20, y: 20, w: 460, h: 320 },
+                { type: 'process-monitor', x: 500, y: 20, w: 380, h: 300 },
+                { type: 'database-stats', x: 20, y: 360, w: 320, h: 260 },
+                { type: 'docker-containers', x: 360, y: 340, w: 380, h: 280 },
+                { type: 'shell-command', x: 760, y: 340, w: 400, h: 260 },
+                { type: 'speed-test', x: 900, y: 20, w: 280, h: 220 }
+            ]
+        }
+    };
+
+    function _getUserPresets() {
+        try { return JSON.parse(localStorage.getItem(STORAGE_PRESETS) || '{}'); }
+        catch (e) { return {}; }
+    }
+
+    function savePreset(name) {
+        if (!name) return;
+        var arr = [];
+        _widgets.forEach(function (w) {
+            arr.push({ type: w.type, x: w.x, y: w.y, w: w.w, h: w.h, config: w.config || {} });
+        });
+        var presets = _getUserPresets();
+        presets[name] = { name: name, widgets: arr, wallpaper: _wallpaperPath };
+        localStorage.setItem(STORAGE_PRESETS, JSON.stringify(presets));
+    }
+
+    function loadPreset(key) {
+        var preset = BUILTIN_PRESETS[key] || (_getUserPresets()[key]);
+        if (!preset || !preset.widgets) return;
+        // Clear current widgets
+        _widgets.forEach(function (w) { destroyWidget(w.id, true); });
+        _widgets.clear();
+        _zCounter = 1;
+        // Add preset widgets
+        preset.widgets.forEach(function (pw) {
+            var id = uid();
+            _widgets.set(id, {
+                id: id, type: pw.type, x: pw.x || 20, y: pw.y || 20,
+                w: pw.w || 240, h: pw.h || 200, z: ++_zCounter, config: pw.config || {}
+            });
+        });
+        if (preset.wallpaper) applyWallpaper(preset.wallpaper, 'cover', true);
+        saveLayout();
+        renderAll();
+    }
+
+    function deletePreset(key) {
+        var presets = _getUserPresets();
+        delete presets[key];
+        localStorage.setItem(STORAGE_PRESETS, JSON.stringify(presets));
+    }
+
+    function listPresets() {
+        var result = [];
+        Object.keys(BUILTIN_PRESETS).forEach(function (k) {
+            result.push({ key: k, name: BUILTIN_PRESETS[k].name, builtin: true });
+        });
+        var user = _getUserPresets();
+        Object.keys(user).forEach(function (k) {
+            result.push({ key: k, name: user[k].name || k, builtin: false });
+        });
+        return result;
+    }
+
     // ============ Public API ============
 
     window.DesktopWidgets = {
@@ -1392,7 +1590,13 @@
         getWidgets: function () { return _widgets; },
         removeAddButton: removeAddButton,
         renderAddButton: renderAddButton,
-        refreshAll: refreshAll
+        refreshAll: refreshAll,
+        toggleGrid: toggleGridOverlay,
+        isGridVisible: function () { return _showGrid; },
+        savePreset: savePreset,
+        loadPreset: loadPreset,
+        deletePreset: deletePreset,
+        listPresets: listPresets
     };
 
 })();

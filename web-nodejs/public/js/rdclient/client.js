@@ -833,15 +833,17 @@ class RDClient {
     }
 
     async _handleVideoFrame(videoFrame) {
+        // Send video_received ack IMMEDIATELY before any decoding
+        // Without this, RustDesk peer throttles down to 1-5 FPS
+        // Sending before decode ensures the ack goes out even if decode is slow
+        this._sendPeerMessage(this.proto.buildMisc('videoReceived', true));
+
         // Track total video frames from peer for diagnostics
         this._peerFrameCount = (this._peerFrameCount || 0) + 1;
-        if (this._peerFrameCount <= 3 || this._peerFrameCount % 100 === 0) {
+        this._lastVideoFrameTime = Date.now();
+        if (this._peerFrameCount <= 3 || this._peerFrameCount % 300 === 0) {
             console.log('[RDClient] VideoFrame #' + this._peerFrameCount + ' from peer');
         }
-
-        // Send video_received ack so the peer knows we are consuming frames
-        // Without this, RustDesk server throttles down to 1-5 FPS
-        this._sendPeerMessage(this.proto.buildMisc('videoReceived', true));
 
         const codec = this.proto.detectVideoCodec(videoFrame);
         if (!codec || codec === 'rgb' || codec === 'yuv') return;
@@ -936,6 +938,11 @@ class RDClient {
         this.video.onFrame = (frame) => this.renderer.pushFrame(frame);
         this.video.onError = (err) => this._emit('log', 'Video error: ' + err.message);
 
+        // Request keyframe on resize/fullscreen to fix blur
+        this.renderer.onResizeRefresh = () => {
+            this._sendPeerMessage(this.proto.buildMisc('refreshVideo', true));
+        };
+
         // Start render loop
         this.renderer.startRenderLoop();
 
@@ -971,6 +978,20 @@ class RDClient {
                 this._emit('stats', this.getStats());
             }
         }, 1000);
+
+        // Stall recovery: if no video frames arrive for 5 seconds, request a keyframe
+        this._stallCheckInterval = setInterval(() => {
+            if (this._state !== 'streaming') return;
+            const now = Date.now();
+            const lastFrame = this._lastVideoFrameTime || 0;
+            if (lastFrame > 0 && now - lastFrame > 5000) {
+                this._emit('log', 'Video stall detected, requesting keyframe');
+                this._sendPeerMessage(this.proto.buildMisc('refreshVideo', true));
+                this._lastVideoFrameTime = now; // prevent rapid retries
+            }
+        }, 2000);
+
+        this._lastVideoFrameTime = Date.now();
 
         this._emit('session_start');
     }
@@ -1032,6 +1053,10 @@ class RDClient {
         if (this._statsInterval) {
             clearInterval(this._statsInterval);
             this._statsInterval = null;
+        }
+        if (this._stallCheckInterval) {
+            clearInterval(this._stallCheckInterval);
+            this._stallCheckInterval = null;
         }
 
         this.input.stop();

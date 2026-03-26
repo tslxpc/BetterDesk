@@ -436,12 +436,17 @@ class RDInput {
     }
 
     /**
-     * Check if an input-like element has focus
+     * Check if a visible input-like element has focus (not the remote canvas)
      * @returns {boolean}
      */
     _isInputFocused() {
-        const tag = document.activeElement?.tagName?.toLowerCase();
-        return tag === 'input' || tag === 'textarea' || tag === 'select';
+        const el = document.activeElement;
+        if (!el) return false;
+        const tag = el.tagName?.toLowerCase();
+        if (tag !== 'input' && tag !== 'textarea' && tag !== 'select') return false;
+        // Ignore hidden inputs (e.g. password field after login)
+        if (el.type === 'hidden' || el.offsetParent === null) return false;
+        return true;
     }
 
     /**

@@ -96,29 +96,29 @@ router.get('/organizations/:id', requireAuth, (req, res) => {
 // ---------------------------------------------------------------------------
 
 // Organizations CRUD
-router.get('/api/panel/org', requireAuth, (req, res) => goApiProxy(req, res, 'get', '/api/org'));
-router.post('/api/panel/org', requireAdmin, (req, res) => goApiProxy(req, res, 'post', '/api/org', req.body));
-router.get('/api/panel/org/:id', requireAuth, (req, res) => goApiProxy(req, res, 'get', `/api/org/${req.params.id}`));
-router.put('/api/panel/org/:id', requireAdmin, (req, res) => goApiProxy(req, res, 'put', `/api/org/${req.params.id}`, req.body));
-router.delete('/api/panel/org/:id', requireAdmin, (req, res) => goApiProxy(req, res, 'delete', `/api/org/${req.params.id}`));
+router.get('/api/panel/org', requireAuth, (req, res) => goApiProxy(req, res, 'get', '/org'));
+router.post('/api/panel/org', requireAdmin, (req, res) => goApiProxy(req, res, 'post', '/org', req.body));
+router.get('/api/panel/org/:id', requireAuth, (req, res) => goApiProxy(req, res, 'get', `/org/${req.params.id}`));
+router.put('/api/panel/org/:id', requireAdmin, (req, res) => goApiProxy(req, res, 'put', `/org/${req.params.id}`, req.body));
+router.delete('/api/panel/org/:id', requireAdmin, (req, res) => goApiProxy(req, res, 'delete', `/org/${req.params.id}`));
 
 // Org Users
-router.get('/api/panel/org/:id/users', requireAuth, (req, res) => goApiProxy(req, res, 'get', `/api/org/${req.params.id}/users`));
-router.post('/api/panel/org/:id/users', requireAdmin, (req, res) => goApiProxy(req, res, 'post', `/api/org/${req.params.id}/users`, req.body));
-router.put('/api/panel/org/:id/users/:uid', requireAdmin, (req, res) => goApiProxy(req, res, 'put', `/api/org/${req.params.id}/users/${req.params.uid}`, req.body));
-router.delete('/api/panel/org/:id/users/:uid', requireAdmin, (req, res) => goApiProxy(req, res, 'delete', `/api/org/${req.params.id}/users/${req.params.uid}`));
+router.get('/api/panel/org/:id/users', requireAuth, (req, res) => goApiProxy(req, res, 'get', `/org/${req.params.id}/users`));
+router.post('/api/panel/org/:id/users', requireAdmin, (req, res) => goApiProxy(req, res, 'post', `/org/${req.params.id}/users`, req.body));
+router.put('/api/panel/org/:id/users/:uid', requireAdmin, (req, res) => goApiProxy(req, res, 'put', `/org/${req.params.id}/users/${req.params.uid}`, req.body));
+router.delete('/api/panel/org/:id/users/:uid', requireAdmin, (req, res) => goApiProxy(req, res, 'delete', `/org/${req.params.id}/users/${req.params.uid}`));
 
 // Invitations
-router.post('/api/panel/org/:id/invite', requireAdmin, (req, res) => goApiProxy(req, res, 'post', `/api/org/${req.params.id}/invite`, req.body));
-router.get('/api/panel/org/:id/invitations', requireAdmin, (req, res) => goApiProxy(req, res, 'get', `/api/org/${req.params.id}/invitations`));
+router.post('/api/panel/org/:id/invite', requireAdmin, (req, res) => goApiProxy(req, res, 'post', `/org/${req.params.id}/invite`, req.body));
+router.get('/api/panel/org/:id/invitations', requireAdmin, (req, res) => goApiProxy(req, res, 'get', `/org/${req.params.id}/invitations`));
 
 // Devices
-router.post('/api/panel/org/:id/devices', requireAuth, (req, res) => goApiProxy(req, res, 'post', `/api/org/${req.params.id}/devices`, req.body));
-router.get('/api/panel/org/:id/devices', requireAuth, (req, res) => goApiProxy(req, res, 'get', `/api/org/${req.params.id}/devices`));
-router.delete('/api/panel/org/:id/devices/:did', requireAuth, (req, res) => goApiProxy(req, res, 'delete', `/api/org/${req.params.id}/devices/${req.params.did}`));
+router.post('/api/panel/org/:id/devices', requireAuth, (req, res) => goApiProxy(req, res, 'post', `/org/${req.params.id}/devices`, req.body));
+router.get('/api/panel/org/:id/devices', requireAuth, (req, res) => goApiProxy(req, res, 'get', `/org/${req.params.id}/devices`));
+router.delete('/api/panel/org/:id/devices/:did', requireAuth, (req, res) => goApiProxy(req, res, 'delete', `/org/${req.params.id}/devices/${req.params.did}`));
 
 // Settings
-router.get('/api/panel/org/:id/settings', requireAuth, (req, res) => goApiProxy(req, res, 'get', `/api/org/${req.params.id}/settings`));
-router.put('/api/panel/org/:id/settings', requireAdmin, (req, res) => goApiProxy(req, res, 'put', `/api/org/${req.params.id}/settings`, req.body));
+router.get('/api/panel/org/:id/settings', requireAuth, (req, res) => goApiProxy(req, res, 'get', `/org/${req.params.id}/settings`));
+router.put('/api/panel/org/:id/settings', requireAdmin, (req, res) => goApiProxy(req, res, 'put', `/org/${req.params.id}/settings`, req.body));
 
 module.exports = router;

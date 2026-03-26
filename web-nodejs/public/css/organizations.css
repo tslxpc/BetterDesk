@@ -43,8 +43,8 @@
     align-items: center;
     gap: 16px;
     padding: 16px 20px;
-    background: var(--card-bg, #fff);
-    border: 1px solid var(--border-color, #e2e5ea);
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-primary);
     border-radius: 8px;
     transition: border-color 0.15s, box-shadow 0.15s;
 }
@@ -70,17 +70,17 @@
 .org-card-text { display: flex; flex-direction: column; gap: 2px; }
 .org-card-name {
     font-weight: 600;
-    color: var(--text-primary, #1a1a2e);
+    color: var(--text-primary);
     text-decoration: none;
 }
 .org-card-name:hover { text-decoration: underline; }
 .org-card-slug {
     font-size: 0.8rem;
-    color: var(--text-muted, #9ca3af);
+    color: var(--text-secondary);
     font-family: 'JetBrains Mono', monospace;
 }
 
-.org-card-meta { font-size: 0.8rem; color: var(--text-muted, #9ca3af); }
+.org-card-meta { font-size: 0.8rem; color: var(--text-secondary); }
 .org-card-actions { display: flex; gap: 4px; }
 
 /* Organization detail page */
@@ -102,7 +102,7 @@
 .org-detail-slug {
     display: block;
     font-size: 0.85rem;
-    color: var(--text-muted, #9ca3af);
+    color: var(--text-secondary);
     font-family: 'JetBrains Mono', monospace;
 }
 
@@ -113,7 +113,7 @@
     display: flex;
     gap: 4px;
     margin-bottom: 24px;
-    border-bottom: 1px solid var(--border-color, #e2e5ea);
+    border-bottom: 1px solid var(--border-primary);
     padding-bottom: 0;
 }
 
@@ -130,7 +130,7 @@
     font-size: 0.9rem;
     transition: color 0.15s, border-color 0.15s;
 }
-.org-tab:hover { color: var(--text-primary, #1a1a2e); }
+.org-tab:hover { color: var(--text-primary); }
 .org-tab.active {
     color: var(--bd-accent, #4f6ef7);
     border-bottom-color: var(--bd-accent, #4f6ef7);
@@ -143,7 +143,7 @@
     height: 20px;
     align-items: center;
     justify-content: center;
-    background: var(--bg-hover, #eef0f4);
+    background: var(--bg-tertiary);
     border-radius: 10px;
     font-size: 0.75rem;
     font-weight: 600;
@@ -204,52 +204,8 @@
 .empty-state {
     text-align: center;
     padding: 60px 20px;
-    color: var(--text-muted, #9ca3af);
+    color: var(--text-secondary);
 }
 
-/* Modal */
-.modal-overlay {
-    position: fixed;
-    inset: 0;
-    background: rgba(0, 0, 0, 0.5);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    z-index: 1000;
-}
-
-.modal-card {
-    background: var(--card-bg, #fff);
-    border-radius: 12px;
-    width: 100%;
-    max-width: 480px;
-    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.2);
-}
-
-.modal-header {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    padding: 20px 24px 0;
-}
-
-.modal-header h3 { margin: 0; font-size: 1.1rem; font-weight: 700; }
-
-.modal-close {
-    background: none;
-    border: none;
-    font-size: 1.5rem;
-    cursor: pointer;
-    color: var(--text-muted, #9ca3af);
-    padding: 0;
-    line-height: 1;
-}
-
-.modal-body { padding: 20px 24px; }
-
-.modal-footer {
-    display: flex;
-    justify-content: flex-end;
-    gap: 8px;
-    padding: 0 24px 20px;
-}
+/* Modal — uses standard .modal from main.css */
+.modal-overlay#org-modal .modal-header h3 { margin: 0; font-size: 1.1rem; font-weight: 700; }

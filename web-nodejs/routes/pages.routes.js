@@ -75,13 +75,10 @@ router.get('/dataguard', requireAuth, requireRole('admin'), (req, res) => {
     });
 });
 
-// ── Tenants — admin only ──
+// ── Tenants — redirect to Organizations (merged) ──
 
 router.get('/tenants', requireAuth, requireRole('admin'), (req, res) => {
-    res.render('tenants', {
-        title: req.t('tenants.title'),
-        activePage: 'tenants',
-    });
+    res.redirect('/organizations');
 });
 
 // ── Help Requests — operators and admins ──

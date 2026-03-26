@@ -5,7 +5,7 @@
 
 ---
 
-## 📊 Stan Projektu (aktualizacja: 2026-03-21)
+## 📊 Stan Projektu (aktualizacja: 2026-03-25)
 
 ### Wersja Skryptów ALL-IN-ONE (v2.4.0)
 
@@ -28,6 +28,14 @@
 |-----------|--------|--------|------|
 | **Go Server** | `betterdesk-server/` | ✅ Production-ready | Single binary replacing hbbs+hbbr, ~20K LOC Go |
 | **Rust (archived)** | `archive/hbbs-patch-v2/` | 📦 Archived | Patched Rust binaries v2.1.3 - przeniesione do archiwum |
+
+### BetterDesk Desktop Client (Tauri + SolidJS)
+
+| Komponent | Folder | Status | Opis |
+|-----------|--------|--------|------|
+| **Desktop Client** | `betterdesk-client/` | ⚠️ Alpha (v0.3.0) | Tauri v2, SolidJS, single-instance, tray mode |
+| **Installer NSIS** | `src-tauri/target/release/bundle/nsis/` | ✅ | `BetterDesk_0.3.0_x64-setup.exe` |
+| **Installer MSI** | `src-tauri/target/release/bundle/msi/` | ✅ | `BetterDesk_0.3.0_x64_en-US.msi` |
 
 ### Serwer Go — Binaries (NIE są w repozytorium, kompilowane lokalnie)
 
@@ -381,10 +389,10 @@ sudo apt-get install -y build-essential libsqlite3-dev pkg-config libssl-dev git
 30. [x] Integration with ALL-IN-ONE scripts (betterdesk.sh / betterdesk.ps1) — menu option M in both scripts
 
 #### Node.js Console
-31. [ ] Kompilacja binarek v3.0.0 z nowymi plikami źródłowymi (Rust legacy)
+31. [ ] ~~Kompilacja binarek v3.0.0 z nowymi plikami źródłowymi (Rust legacy)~~ — OBSOLETE (Go server replaced Rust)
 32. [ ] WebSocket real-time push dla statusu
 33. [ ] Dodać testy jednostkowe dla HTTP API
-34. [ ] Deploy v2.3.0 to production and test all new features
+34. [x] Deploy v2.3.0+ to production and test all new features
 
 #### Node.js Console — Recent Changes (deployed 2026-02-28)
 35. [x] **RustDesk Client API v2.0.0** — 3 phases: heartbeat/sysinfo/peers, audit/conn/file/alarm, groups/strategies
@@ -634,19 +642,131 @@ sudo apt-get install -y build-essential libsqlite3-dev pkg-config libssl-dev git
 221. [x] **sdks/README.md + bridges/README.md**: Architecture overview, quick start, bridge creation guide.
 222. [x] **WebSocket path fixed**: All SDKs, bridges, agent, and install scripts updated from `/ws` to `/cdap` (27 replacements across 14 files).
 
-#### Node.js Console
-31. [ ] Kompilacja binarek v3.0.0 z nowymi plikami źródłowymi (Rust legacy)
-32. [ ] WebSocket real-time push dla statusu
-33. [ ] Dodać testy jednostkowe dla HTTP API
-34. [ ] Deploy v2.3.0 to production and test all new features
+#### Desktop Widget Dashboard — Sidebar & i18n Fix (Phase 36) ✅ COMPLETED 2026-03-25
+223. [x] **Sidebar navigation duplication**: Removed 12 duplicated nav items from widget sidebar that were identical to topnav. Sidebar now only has widget-specific tools: home, add widget, wallpaper, edit layout, reset layout, help.
+224. [x] **`desktop.label_uptime` i18n key missing**: Server Info widget showed raw key `desktop.label_uptime: 26m` because `label_uptime` key did not exist (only `label_uptime_prefix`). Added `label_uptime` to EN/PL/ZH.
+225. [x] **Missing i18n keys**: Added `action_add_widget` and `label_merged_server_info` to EN/PL/ZH locale files.
+226. [x] **Canvas area calculation**: Fixed `getCanvasArea()` fallback dimensions to account for new sidebar width.
 
-### Nowe Pliki Źródłowe
+#### BetterDesk Desktop Client — Single Instance Fix (Phase 37) ✅ COMPLETED 2026-03-25
+227. [x] **Dual process conflict**: Old elevated process (PID from autostart) could not be killed by new MSI install. Two tray icons, two WebSocket connections, stale state. User clicks on old tray → old process responds → nothing works.
+228. [x] **`tauri-plugin-single-instance` added**: Second launch detects existing instance via Windows mutex, shows existing window instead of creating duplicate. Verified: only 1 process regardless of launch count.
+229. [x] **i18n imports**: Added `t()` import from `../lib/i18n` to all 19 TSX components (6 were missing).
 
-| Plik | Opis |
-|------|------
-| `peer_v3.rs` | Ulepszony system statusu z konfigurowalnymi timeoutami |
-| `database_v3.rs` | Rozszerzona baza danych z server_config |
-| `http_api_v3.rs` | Nowe endpointy API dla konfiguracji |
+#### BetterDesk Desktop Client & Web Console — Chat, Remote, Operator, i18n, WS Push (Phase 38) ✅ COMPLETED 2026-03-26
+
+##### 🔴 CRITICAL — Chat System Fixed
+230. [x] **Chat shows "Disconnected"**: Root cause: `chatRelay.js` received `hello` frame but never sent acknowledgment (`case 'hello': break;` was a no-op). Rust client expected confirmation. Fixed: server now sends `welcome` ack with capabilities and server_time. Rust client handles `welcome` and `status` frame types.
+231. [x] **Chat window opens blank**: ChatWindow.tsx was properly wired with event listeners. The blank state was caused by #230 — server never confirmed connection, so client showed disconnected. Fixed by #230.
+232. [x] **Chat contacts/groups always empty**: `get_contacts` handler returned nothing when Go API was unavailable. Fixed: fallback contacts (operator + connected agents) now returned even without Go persistence. Initial agent connection also sends fallback contacts.
+
+##### 🔴 CRITICAL — Web Remote Client Performance Fixed
+233. [x] **Max 9 FPS from web console**: Fixed `video_received` ack timing — now sent BEFORE decoding (was after) for better pipelining. Added stall recovery: auto-requests `refreshVideo` keyframe if no frames arrive for 5 seconds. JMuxer fallback on HTTP remains a limitation (WebCodecs requires HTTPS).
+234. [x] **No remote desktop control (mouse/keyboard)**: `_isInputFocused()` in `input.js` was blocking keyboard events when hidden password input retained focus after login. Fixed: now ignores hidden/invisible inputs (`el.offsetParent === null`). Mouse encoding was correct from Phase 32.
+235. [x] **Video blurry/unstable on fullscreen**: `renderer.js` `resize()` now triggers `onResizeRefresh` callback which sends `refreshVideo` keyframe request. Peer sends fresh keyframe after fullscreen toggle, eliminating blur from stale P-frames.
+236. [x] **Video freezes after 30-60 seconds**: Health check in `video.js` now trims MSE `SourceBuffer` when buffer exceeds 2 seconds via `sb.video.remove(start, end - 1.0)`. Prevents SourceBuffer overflow that caused freeze.
+
+##### 🟡 HIGH — Desktop Client GUI Functions (Partially Fixed)
+237. [x] **RemoteView basic JPEG viewer**: Added `start_remote_viewer` Tauri command — connects to management WS (`/ws/bd-mgmt/{device_id}`), receives JPEG binary frames, base64 encodes and emits to frontend. `RemoteView.tsx` now listens for `remote-viewer-frame` events and renders JPEG frames on canvas. Not full H.264 (Phase 43), but functional JPEG streaming.
+238. [ ] **Remote desktop agent uses JPEG at 15fps**: `remote/mod.rs` captures screen with `scrap`, encodes JPEG at quality 75, sends at 15fps via simple WS relay. Need H.264/VP9 codec for production quality (Phase 43).
+239. [x] **OperatorPanel login flow**: Fixed 8 operator endpoints in `commands.rs`: `/api/bd/operator/login` → `/api/auth/login`, `/api/bd/operator/login/2fa` → `/api/auth/login/2fa`, `/api/bd/operator/devices` → `/api/peers`, `/api/bd/operator/help-requests` → `/api/audit/events?action=help_request`, `/api/bd/operator/device-groups` → `/api/peers?with_tags=true`, `/api/bd/operator/devices/{id}/config` → `/api/peers/{id}`, `/api/bd/operator/devices/{id}/install-module` → `/api/bd/mgmt/{id}/send`.
+240. [x] **ManagementPanel device info**: `get_device_info_cmd` returns local device info via `management::get_device_info()` — works correctly for local management panel.
+241. [x] **HelpRequestPanel submission**: `request_help` correctly sends to `/api/bd/help-request` on Node.js console (port 5000). Endpoint exists in `bd-api.routes.js` and is functional.
+242. [ ] **DiscoveryPanel mDNS**: `discover_mdns_servers` uses `mdns-sd` crate for LAN discovery. Works on local network but may timeout or return empty results if firewall blocks mDNS (UDP 5353).
+
+##### 🟢 MEDIUM — Desktop Client Improvements
+243. [ ] **Implement real video decoder in RemoteView**: Replace JPEG viewer with actual H.264/VP9 decode using `openh264` crate. Receive video frames from management WS or RustDesk relay, decode, render to canvas. (Phase 43 scope)
+244. [x] **Input injection via enigo**: Full implementation — `input/mod.rs` now uses `enigo` crate for keyboard (40+ keys mapped incl F1-F12, modifiers, arrows, Unicode), mouse (move, click, scroll), and text typing. Added `simulate_local_key`, `simulate_local_mouse`, `simulate_local_text` Tauri commands.
+245. [x] **File transfer UI**: Created `FileTransferPanel.tsx` with local file browsing via `FileBrowser::list_dir`. Navigate folders, show hidden toggle, file size formatting. Added `browse_local_files` and `open_file_native` Tauri commands. Added `open` crate dependency.
+246. [x] **DataGuard integration**: Created `DataGuardPanel.tsx` with feature cards (file monitoring, USB control, policy engine). Marked "Coming Soon" — backend stubs not yet connected to server policies. Sidebar navigation + i18n EN/PL.
+247. [x] **Automation panel**: Created `AutomationPanel.tsx` with feature cards (script runner, scheduled tasks, command channel). Marked "Coming Soon" — backend stubs not yet connected to server. Sidebar navigation + i18n EN/PL.
+248. [x] **Activity tracking UI**: Created `ActivityPanel.tsx` with filterable log, action icons, color coding, auto-refresh 30s. Added `ActivityTracker` (500-entry ring buffer) to `AppState`. `get_activity_log` Tauri command. Sidebar nav + i18n EN/PL.
+249. [x] **Desktop client i18n completion**: Added 60 missing keys to EN/PL locale files: operator (24 keys — login, devices, help_requests, totp, etc.), management (21 keys — device_info, system commands, etc.), chat (15 keys — contacts, groups, search, typing, etc.). All 19 TSX components already import `t()` function.
+250. [x] **NSIS Polish translation**: Created `nsis/languages/pl.nsh` with 40 Tauri NSIS message keys translated to Polish. Added `customLanguageFiles` config to `tauri.conf.json`. Removed `Russian` from NSIS languages list.
+
+##### 🟢 MEDIUM — Web Console Improvements
+251. [x] **WebSocket real-time device status push**: Created `deviceStatusPush.js` service — connects to Go server WS event bus (`/api/ws/events?filter=peer_online`), pushes `peer_online`/`peer_offline` events to browser clients via `/ws/device-status`. Added `initDeviceStatusWS()` in `devices.js` — updates device status dots in-place without full table reload. Wired in `server.js`.
+252. [x] **Unit tests for HTTP API**: Created 5 test suites (41 tests) with jest+supertest: `auth.routes.test.js` (7 tests), `devices.routes.test.js` (9 tests), `middleware.auth.test.js` (9 tests), `i18n.test.js` (6 tests), `validation.test.js` (10 tests). All passing. Added `test`/`test:ci` npm scripts.
+253. [ ] **PostgreSQL integration tests**: Requires live PostgreSQL instance for Go server db/postgres.go testing.
+
+#### i18n — Remove Russian Language (Phase 39) ✅ COMPLETED 2026-03-26
+254. [x] **Remove `ru.json` from `web-nodejs/lang/`**: Deleted Russian translation file. Languages auto-discovered from `lang/` directory — removing file is sufficient.
+255. [x] **Block Russian in desktop client**: `betterdesk-client/src/lib/i18n.ts` locale list only has `en` and `pl` — no Russian. Removed `Russian` from NSIS languages list in `tauri.conf.json`.
+256. [x] **Audit all language references**: No hardcoded Russian strings found in templates, configs, or scripts.
+
+#### Desktop Widget Dashboard — Full App Widgets (Phase 40) — Partially Complete
+257. [x] **Weather widget**: Fetches weather from wttr.in API. Shows temperature, humidity, wind, conditions, city name. Configurable location via widget config. Auto-refresh every 10 minutes.
+258. [ ] **Calendar/agenda widget**: Show upcoming events. Integrate with system calendar or manual entries. Day/week/month view toggle in compact form.
+259. [ ] **System process monitor widget**: Live process list (top CPU/memory consumers). Kill process button with confirmation. Requires Go server `/api/system/processes` endpoint.
+260. [ ] **Disk usage breakdown widget**: Pie chart or segmented bar per drive/partition. Requires Go server `/api/system/disks` endpoint.
+261. [ ] **Log viewer widget**: Stream last N lines from server logs (Go server, Node.js console). Auto-scroll, severity color coding (ERROR=red, WARN=yellow, INFO=white). Configurable log source.
+262. [x] **Alert feed widget**: Live feed of security alerts from audit log. Color-coded actions (ban=red, login=green, info=gray). Auto-refresh every 30s.
+263. [x] **User sessions widget**: Lists logged-in operators/admins with role badges. Auto-refresh every 15s.
+264. [ ] **Speed test widget**: Run a bandwidth test to a configurable endpoint. Show upload/download speed, latency, jitter. History graph.
+265. [ ] **Database stats widget**: Show SQLite/PostgreSQL DB size, row counts per table, last backup time, WAL size. Configurable refresh interval.
+266. [ ] **Docker containers widget**: Show container status (running/stopped/restarting), image, uptime, port mapping. Start/stop/restart buttons. Requires Docker API access.
+267. [ ] **Custom shell command widget**: Execute a predefined command on the server and display output. Configurable command, refresh interval, output format (text/table/number).
+268. [x] **World clock widget**: Multiple time zones with configurable zones. Tabular-nums second-precise display. Updates every second.
+269. [x] **Bookmark/link launcher widget**: Grid of configurable URL shortcuts with hover effects. Opens in new tab. Configurable via Name|URL pairs.
+270. [ ] **Device map widget**: Geographic map view of devices by IP geolocation. Cluster markers for dense areas. Click to navigate to device detail. Uses Leaflet.js or static map API.
+
+#### Desktop Widget Dashboard — Modern App-Style UI Redesign (Phase 41) — Partially Complete
+271. [x] **Glassmorphism widget cards**: Enhanced frosted glass background with `backdrop-filter: blur(28px) saturate(1.5)`, 14px border-radius, subtle drop shadows, smooth hover lift transitions (`translateY(-1px)`). Windows 11 / macOS Sonoma aesthetic.
+272. [x] **Animated widget transitions**: Widgets fade/slide in with spring cubic-bezier (0.34, 1.56, 0.64, 1). Drag with opacity reduction. Hover micro-animation. Improved leave animation timing.
+273. [x] **Dark/light/auto theme for desktop mode**: Full theme system with `DesktopMode.setTheme/cycleTheme/getTheme` API. Auto mode uses `prefers-color-scheme`. Light theme: white glassmorphism, dark text, blue accents. Persisted to localStorage.
+274. [ ] **Widget header redesign**: Compact title bar with icon, title, and action dots (⋮ kebab menu). Inline settings, remove, resize options. Draggable from header only.
+275. [x] **Snap grid system**: Widgets snap to 20px grid. Edge snapping (15px threshold) to other widgets and canvas borders. Visual grid overlay (radial-gradient dots) togglable via `DesktopWidgets.toggleGrid()`. `getSnapEdges()` builds edge list from all widgets.
+276. [ ] **Widget presets/templates**: Save and load complete widget layouts as JSON presets. Include 3-4 built-in presets: "Monitoring", "Helpdesk", "Minimal", "Developer". Import/export for sharing.
+277. [ ] **Responsive desktop mode**: Auto-adjust widget positions for different screen resolutions. Breakpoints for 1080p, 1440p, 4K. Mobile-aware fallback for tablet access.
+278. [ ] **Widget groups/stacking**: Group multiple widgets into a tabbed container. Click tabs to switch between widgets in the same space. Save group layout.
+
+#### Desktop Widget Dashboard — Multi-Window Snap Layout (Phase 42)
+279. [ ] **Snap layout overlay**: Windows 11-style layout picker appearing on hover over maximize button or via keyboard shortcut (e.g. Win+Z equivalent). Show 6-8 predefined zone layouts: 2-column equal, 2-column 60/40, 3-column, 2×2 grid, 1+2 (large left + two right), 1+3 (large left + three stacked right).
+280. [ ] **Zone-based widget placement**: Click a zone in the overlay → the widget picker opens for that zone. Each zone becomes an independent scrollable container with its own widget(s). Zones have min/max size constraints.
+281. [ ] **Draggable zone borders**: Resize zones by dragging the divider between them. Cursor changes to `col-resize` / `row-resize`. Adjacent zones adjust proportionally. Minimum zone width/height enforced.
+282. [ ] **Layout persistence**: Save current zone layout + widget assignment per zone to localStorage/server. Restore on page load. Support named layouts ("Operator View", "Monitoring", "Custom 1").
+283. [ ] **Multi-monitor support**: Detect browser window position and available screen space via `window.screen`. Allow desktop mode to span across two browser windows (each window = one monitor). Sync state via BroadcastChannel API or SharedWorker.
+284. [ ] **Floating widget windows**: Option to "pop out" a widget into an independent browser popup (`window.open` with specific size). The popup communicates with the main desktop mode via `postMessage`. Useful for putting a widget on a secondary monitor.
+285. [ ] **Auto-arrange**: Button to auto-arrange all widgets into the current zone layout. Widgets sorted by priority (monitoring first, tools second, info third). Fill zones left-to-right, top-to-bottom.
+
+#### Desktop Client (Tauri) — Full Remote Desktop Rewrite (Phase 43)
+286. [ ] **H.264/VP9 video decoder in Rust**: Replace JPEG 15fps agent with proper codec. Use `openh264` crate for H.264 decode, render decoded frames to Tauri WebView canvas via IPC. Target 30-60fps depending on network.
+287. [ ] **RustDesk protobuf video pipeline**: Connect to relay via TCP/WS, receive protobuf `VideoFrame` messages, extract H.264 NALUs, feed to decoder. Match the web client's `rdclient/video.js` architecture but in native Rust.
+288. [ ] **Input forwarding pipeline**: Capture keyboard/mouse events from SolidJS canvas component, serialize as protobuf `MouseEvent`/`KeyEvent`, send through relay connection. Support modifier keys (Ctrl, Alt, Shift, Meta), special keys (F1-F12, PrintScreen), and mouse wheel.
+289. [ ] **Clipboard sync during session**: Bidirectional clipboard sync between local and remote machine using `arboard` crate. Auto-detect text/image clipboard content. Throttle to prevent clipboard storm.
+290. [ ] **File transfer during session**: Drag-and-drop files from local → remote and remote → local. Use protobuf `FileTransfer` messages. Progress bar, cancel support, resume on disconnect.
+291. [ ] **Multi-monitor selection**: Query remote displays, show monitor picker toolbar. Switch between monitors during session. Support "all monitors" stitched view.
+292. [ ] **Session recording**: Record session video (H.264 frames) + input events to local file. Playback viewer for audit/review purposes. Configurable auto-recording policy.
+293. [ ] **Connection quality indicator**: Show latency, FPS, bandwidth, packet loss in a small overlay during session. Adaptive quality: auto-reduce resolution/fps when bandwidth drops.
+
+#### Desktop Client (Tauri) — Operator & Management Features (Phase 44)
+294. [ ] **Operator login → Go server `/api/auth/login`**: Fix `operator_login` command to use existing `/api/auth/login` endpoint (not non-existent `/api/auth/operator-login`). Handle 2FA flow. Store JWT token. Show operator badge in sidebar.
+295. [ ] **Device list with live status**: Fetch devices from Go API `GET /api/peers`, show live online/offline status with color indicators. Search, filter by tag/folder, sort by name/status/last_seen.
+296. [ ] **One-click remote connect**: From operator device list, click device → initiate RustDesk protobuf connection (reuse connection pipeline from Phase 43). No need to type ID/password manually.
+297. [ ] **Device actions panel**: Right-click device → context menu: Connect, Chat, Restart, Shutdown, Lock, Logoff, Wake-on-LAN, View Info, Transfer Files, Run Command.
+298. [ ] **Help request management**: Operators see incoming help requests as notifications (tray + in-app). Accept → auto-connect to requesting device. Close → update server status.
+299. [ ] **Session history dashboard**: View past remote sessions with timestamps, duration, device ID, operator name. Requires Go server audit log queries.
+300. [ ] **Unattended access management**: Set/change device passwords, enable/disable unattended access, configure access schedules (e.g. only during business hours).
+301. [ ] **Wake-on-LAN**: Send WOL magic packet from operator panel. Requires Go server endpoint `POST /api/peers/{id}/wol` + device MAC address storage.
+
+#### Performance & Optimization — Project-Wide (Phase 45)
+302. [ ] **Go server memory profiling**: Profile heap allocations in signal/relay hot paths. Reduce `sync.Map` entries with aggressive TTL. Pool protobuf buffers with `sync.Pool`.
+303. [ ] **Go relay zero-copy**: Replace `io.Copy` with `splice`/`sendfile` syscalls on Linux for TCP relay. Reduce memory copies for high-throughput relay sessions.
+304. [ ] **Node.js console startup time**: Lazy-load routes and heavy services (chat relay, CDAP proxy). Measure and reduce time-to-first-response.
+305. [ ] **Desktop client binary size reduction**: Enable Tauri `strip`, set `opt-level = "z"`, disable unused features in Cargo dependencies. Target < 20MB installer.
+306. [ ] **Desktop client startup time**: Profile Tauri init + WebView2 load. Defer non-critical services (inventory, chat) further. Target < 2s to tray icon visible.
+307. [ ] **Widget dashboard rendering performance**: Virtualize widget list when > 20 widgets. Use `requestAnimationFrame` for drag animations. Debounce resize observers.
+308. [ ] **Web remote client frame pipeline optimization**: Profile decode → render path. Use `OffscreenCanvas` + worker thread for video decode. Reduce GC pressure from Uint8Array allocations.
+309. [ ] **Database query optimization**: Add missing indexes in Go server SQLite/PostgreSQL. Use prepared statements for hot-path queries. Implement connection pooling health checks.
+
+#### Desktop Widget Dashboard — OS-Style Login Screen (Phase 46)
+310. [ ] **Full-screen login page for desktop mode**: When desktop widget mode is the default view and user is not authenticated, show a Windows 11-style full-screen login screen instead of the standard console login form. Background wallpaper matches the user's chosen desktop widget wallpaper (stored in localStorage/server). Centered user avatar (initials or icon), username display, password input field, and "Sign in" button. Frosted glass card with `backdrop-filter: blur(20px)` over the wallpaper.
+311. [ ] **TOTP 2FA flow on login screen**: If user has 2FA enabled, after password verification show a smooth transition to a 6-digit TOTP code input. Animated slide/fade between password → 2FA steps. Error shake animation on invalid code. Auto-submit on 6th digit entry.
+312. [ ] **Multi-user selector (bottom-left)**: Show list of known operator/admin accounts as small avatar chips in the bottom-left corner (similar to Windows lock screen). Click on a user → center card updates with that user's name and avatar. Useful for shared operator workstations where multiple operators log in to the same console.
+313. [ ] **Clock and date overlay**: Large clock and date display on the login screen (top or bottom area), matching Windows 11 lock screen aesthetics. Disappears on mouse click/keypress to reveal login form.
+314. [ ] **Session persistence**: After successful login, redirect to desktop widget dashboard. On browser refresh, restore session from cookie (existing Express session). On session expiry, smoothly transition back to login screen without full page reload.
+315. [ ] **Wallpaper preload**: Login page preloads the user's wallpaper from server/localStorage before showing the login UI. If no wallpaper is set, use a default gradient or bundled wallpaper. Smooth fade-in on load to avoid flash of unstyled content.
+316. [ ] **i18n for login screen**: All login screen text (sign in, password, 2FA code, error messages) uses existing i18n system. Add keys: `desktop_login.title`, `desktop_login.password_placeholder`, `desktop_login.sign_in`, `desktop_login.totp_placeholder`, `desktop_login.invalid_credentials`, `desktop_login.session_expired` to EN/PL/ZH.
 
 ### Konfiguracja przez Zmienne Środowiskowe
 
@@ -779,6 +899,18 @@ Pełna dokumentacja budowania: [BUILD_GUIDE.md](../docs/setup/BUILD_GUIDE.md)
 
 ## ⚠️ Znane Problemy
 
+### Aktywne
+
+38. ~~**Desktop Client: Chat always "Disconnected"**~~ ✅ ROZWIĄZANE — chatRelay.js `case 'hello': break` was a no-op. Now sends `welcome` ack. Rust client handles `welcome`+`status` frames — Phase 38
+39. ~~**Web Remote: Max 9 FPS**~~ ✅ ROZWIĄZANE — `video_received` ack sent before decoding, stall recovery requests keyframe after 5s silence — Phase 38
+40. ~~**Web Remote: No mouse/keyboard control**~~ ✅ ROZWIĄZANE — `_isInputFocused()` blocked keyboard on hidden inputs after login. Now ignores `el.offsetParent === null` — Phase 38
+41. ~~**Web Remote: Video blurry on fullscreen**~~ ✅ ROZWIĄZANE — `renderer.resize()` triggers `refreshVideo` keyframe request via `onResizeRefresh` callback — Phase 38
+42. ~~**Desktop Client: RemoteView is stub**~~ ✅ ROZWIĄZANE — Added `start_remote_viewer` Tauri command (management WS JPEG viewer). Not H.264 yet (Phase 43) — Phase 38
+43. **Desktop Client: Remote agent JPEG 15fps** — `remote/mod.rs` uses raw JPEG capture at 15fps quality 75 instead of H.264/VP9 codec. Fundamentally different from web client's RustDesk protocol path. (Phase 43 scope)
+44. ~~**Desktop Client: GUI panels mostly stubs**~~ ✅ ROZWIĄZANE — OperatorPanel 8 endpoints fixed (`/api/bd/operator/*` → actual Go server routes). ManagementPanel and HelpRequestPanel confirmed functional — Phase 38
+
+### Resolved
+
 1. ~~**Docker pull error**~~ ✅ ROZWIĄZANE - Obrazy budowane lokalnie z `pull_policy: never`
 2. **Axum 0.5 vs 0.6** - Projekt używa axum 0.5, nie 0.6 (różnica w API State vs Extension)
 3. **Windows API key path** - Na Windows `.api_key` jest w katalogu roboczym, nie w `/opt/rustdesk/`
@@ -905,4 +1037,4 @@ All code changes MUST include a security review as part of the implementation pr
 
 ---
 
-*Ostatnia aktualizacja: 2026-03-21 (Native Agent + Bridge SDK — Phase 34+35) przez GitHub Copilot*
+*Ostatnia aktualizacja: 2026-03-26 (Phase 38-41: Chat, Remote, Operator, i18n, WS Push, Russian removal, NSIS PL, Unit tests, Input injection, File Transfer UI, DataGuard/Automation/Activity panels, 5 new widgets, Glassmorphism, Theme system, Snap grid) przez GitHub Copilot*

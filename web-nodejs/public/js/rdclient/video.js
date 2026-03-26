@@ -412,7 +412,9 @@ class RDVideo {
             // Recovery: catch up to live edge if fallen behind
             if (v.buffered && v.buffered.length > 0) {
                 const end = v.buffered.end(v.buffered.length - 1);
+                const start = v.buffered.start(0);
                 const latency = end - v.currentTime;
+                const bufferSize = end - start;
 
                 if (latency > 0.8) {
                     // Far behind — hard seek to live edge
@@ -424,6 +426,19 @@ class RDVideo {
                 } else {
                     // At live edge — normal speed
                     v.playbackRate = 1.0;
+                }
+
+                // Trim old buffer to prevent SourceBuffer overflow/freeze
+                // Keep at most 2 seconds of buffered data
+                if (bufferSize > 2.0 && this._jmuxer && this._jmuxer.sourceBuffer) {
+                    try {
+                        const sb = this._jmuxer.sourceBuffer;
+                        if (sb.video && !sb.video.updating && start < end - 1.5) {
+                            sb.video.remove(start, end - 1.0);
+                        }
+                    } catch (_) {
+                        // SourceBuffer remove can fail if updating
+                    }
                 }
 
                 // Resume if paused
