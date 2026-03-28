@@ -234,7 +234,7 @@ class RDVideo {
             mode: 'video',
             flushingTime: 0,        // Flush immediately for low latency
             fps: 30,
-            clearBuffer: true,      // Clear old MSE segments to prevent buffer buildup
+            clearBuffer: false,     // We manage buffer trimming in _startHealthCheck
             debug: false,
             onReady: () => {
                 console.log('[RDVideo] JMuxer ready, buffered frames:', this._pendingFeeds.length);
@@ -368,7 +368,7 @@ class RDVideo {
         const start = v.buffered.start(0);
 
         // If currentTime is outside buffered range, or behind, seek to live edge
-        if (v.currentTime < start || v.currentTime > end + 0.5 || (end - v.currentTime) > 0.2) {
+        if (v.currentTime < start || v.currentTime > end + 0.5 || (end - v.currentTime) > 0.15) {
             v.currentTime = Math.max(start, end - 0.02);
         }
 
@@ -381,7 +381,7 @@ class RDVideo {
     /**
      * Periodic health check for MSE video element.
      * Monitors buffer state, recovers from stalls, and logs diagnostics.
-     * Uses gentle playback rate adjustment instead of hard seeks to avoid jitter.
+     * Uses aggressive seeking and gentle playback rate adjustment.
      */
     _startHealthCheck() {
         this._healthInterval = setInterval(() => {
@@ -416,25 +416,25 @@ class RDVideo {
                 const latency = end - v.currentTime;
                 const bufferSize = end - start;
 
-                if (latency > 0.8) {
-                    // Far behind — hard seek to live edge
+                if (latency > 0.4) {
+                    // Fallen behind — hard seek to near live edge
                     v.currentTime = end - 0.02;
                     v.playbackRate = 1.0;
-                } else if (latency > 0.15) {
+                } else if (latency > 0.08) {
                     // Slightly behind — speed up to catch up
-                    v.playbackRate = 1.15;
+                    v.playbackRate = 1.25;
                 } else {
                     // At live edge — normal speed
                     v.playbackRate = 1.0;
                 }
 
-                // Trim old buffer to prevent SourceBuffer overflow/freeze
-                // Keep at most 2 seconds of buffered data
-                if (bufferSize > 2.0 && this._jmuxer && this._jmuxer.sourceBuffer) {
+                // Trim old buffer data to prevent SourceBuffer overflow
+                // Keep at most 4s of data, trim to last 2s
+                if (bufferSize > 4.0 && this._jmuxer && this._jmuxer.sourceBuffer) {
                     try {
                         const sb = this._jmuxer.sourceBuffer;
-                        if (sb.video && !sb.video.updating && start < end - 1.5) {
-                            sb.video.remove(start, end - 1.0);
+                        if (sb.video && !sb.video.updating && start < end - 2.0) {
+                            sb.video.remove(start, end - 2.0);
                         }
                     } catch (_) {
                         // SourceBuffer remove can fail if updating
@@ -452,7 +452,58 @@ class RDVideo {
                     this._tryPlay();
                 }
             }
-        }, 1000);
+
+            // Reinit fallback: if frames are being fed but video never reaches
+            // playable state (readyState < 2) for 3+ seconds, recreate JMuxer
+            if (this._lastFeedTime > 0) {
+                const feedAge = now - this._lastFeedTime;
+                if (v.readyState < 2 && feedAge < 2000 && this.frameCount > 10
+                    && (!this._lastReinitTime || now - this._lastReinitTime > 5000)) {
+                    console.warn('[RDVideo] MSE stuck: readyState=' + v.readyState
+                        + ' despite ' + this.frameCount + ' frames fed. Reinitializing...');
+                    this._lastReinitTime = now;
+                    this._reinitJMuxer();
+                }
+            }
+        }, 500);
+    }
+
+    /**
+     * Reinitialize JMuxer when MSE pipeline is stuck
+     * (readyState stays below 2 despite continuous frame feeding).
+     */
+    _reinitJMuxer() {
+        const savedFrameCount = this.frameCount;
+        const savedDropped = this.droppedFrames;
+
+        // Destroy current JMuxer
+        if (this._jmuxer) {
+            try { this._jmuxer.destroy(); } catch (_) { /* ignore */ }
+            this._jmuxer = null;
+        }
+
+        // Remove old video element
+        if (this._videoEl && this._videoEl.parentNode) {
+            this._videoEl.pause();
+            this._videoEl.removeAttribute('src');
+            this._videoEl.parentNode.removeChild(this._videoEl);
+            this._videoEl = null;
+        }
+
+        // Stop old sync/health loops (they will be restarted by _initJMuxer)
+        if (this._syncRafId) {
+            cancelAnimationFrame(this._syncRafId);
+            this._syncRafId = 0;
+        }
+        if (this._healthInterval) {
+            clearInterval(this._healthInterval);
+            this._healthInterval = 0;
+        }
+
+        // Recreate everything
+        this._initJMuxer();
+        this.frameCount = savedFrameCount;
+        this.droppedFrames = savedDropped;
     }
 
     /**
@@ -483,9 +534,9 @@ class RDVideo {
 
         try {
             // WebCodecs expects timestamps in microseconds.
-            // Use monotonic frameCount * 33333µs (~30fps) for stable timing.
+            // Use monotonic frameCount * 16667µs (~60fps) for stable timing.
             // Using pts directly with * 1000 would give 1ms intervals which overflows the decoder queue.
-            const timestamp = this.frameCount * 33333; // ~30fps in microseconds
+            const timestamp = this.frameCount * 16667; // ~60fps in microseconds
             const chunk = new EncodedVideoChunk({
                 type: frameData.key ? 'key' : 'delta',
                 timestamp: timestamp,
@@ -550,7 +601,7 @@ class RDVideo {
                 // Nudge to live edge only when significantly behind (avoid stutter from constant seeks)
                 if (this._videoEl.buffered && this._videoEl.buffered.length > 0) {
                     const end = this._videoEl.buffered.end(this._videoEl.buffered.length - 1);
-                    if (end - this._videoEl.currentTime > 0.5) {
+                    if (end - this._videoEl.currentTime > 0.3) {
                         this._videoEl.currentTime = end - 0.02;
                     }
                 }

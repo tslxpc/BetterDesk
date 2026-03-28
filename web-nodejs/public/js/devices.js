@@ -367,13 +367,13 @@
                             <span class="material-icons">more_vert</span>
                         </button>
                         <div class="kebab-menu">
-                            <button class="kebab-menu-item connect-desktop" data-action="connect-desktop" data-id="${eid}">
-                                <span class="material-icons">computer</span>
-                                <span>${_('actions.connect')}</span>
-                            </button>
-                            <button class="kebab-menu-item" data-action="remote-viewer" data-id="${eid}">
+                            <button class="kebab-menu-item connect-desktop" data-action="web-remote" data-id="${eid}">
                                 <span class="material-icons">screen_share</span>
-                                <span>${_('actions.remote_viewer') || 'Remote Viewer'}</span>
+                                <span>${_('actions.web_remote') || 'Web Remote'}</span>
+                            </button>
+                            <button class="kebab-menu-item" data-action="connect-desktop" data-id="${eid}">
+                                <span class="material-icons">computer</span>
+                                <span>${_('actions.connect_desktop') || 'Desktop Client'}</span>
                             </button>
                             <div class="kebab-divider"></div>
                             <button class="kebab-menu-item info" data-action="details" data-id="${eid}">
@@ -463,8 +463,54 @@
     /**
      * Handle device actions
      */
+    /**
+     * Try to add a remote session tab in an existing RDClient window via BroadcastChannel.
+     * Falls back to opening a new browser tab if no RDClient page is listening.
+     */
+    function _tryAddRemoteTab(deviceId, data) {
+        if (typeof BroadcastChannel === 'undefined') {
+            window.open(`/remote/${encodeURIComponent(deviceId)}`, '_blank');
+            return;
+        }
+
+        const bc = new BroadcastChannel('betterdesk-remote');
+        let handled = false;
+
+        // Listen for acknowledgment from remote page
+        bc.onmessage = (ev) => {
+            if (ev.data && ev.data.type === 'pong') {
+                // Remote page exists — send the add-session command
+                handled = true;
+                bc.postMessage({
+                    type: 'add-session',
+                    deviceId: deviceId,
+                    deviceName: (data && data.deviceName) || ''
+                });
+                bc.close();
+            } else if (ev.data && ev.data.type === 'session-added') {
+                handled = true;
+                bc.close();
+            }
+        };
+
+        // Ping to check if a remote page is open
+        bc.postMessage({ type: 'ping' });
+
+        // Timeout: if no response within 300ms, open new tab
+        setTimeout(() => {
+            if (!handled) {
+                bc.close();
+                window.open(`/remote/${encodeURIComponent(deviceId)}`, '_blank');
+            }
+        }, 300);
+    }
+
     async function handleAction(action, deviceId, data) {
         switch (action) {
+            case 'web-remote':
+                _tryAddRemoteTab(deviceId, data);
+                break;
+
             case 'connect-desktop':
                 connectDesktopClient(deviceId);
                 break;

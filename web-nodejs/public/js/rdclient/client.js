@@ -554,9 +554,10 @@ class RDClient {
                 if (isPlaintext) {
                     // Peer is NOT encrypting.  Abandon the key exchange — do NOT
                     // send PublicKey.  All communication stays in plaintext.
-                    console.log(`[RDClient] Frame #${idx}: peer sent plaintext → skipping key exchange`);
+                    console.warn(`[RDClient] Frame #${idx}: peer sent plaintext → connection NOT encrypted`);
                     this._keyExchangePending = false;
                     this._keyExchangeDone = false;
+                    this._emit('encryption_warning', 'Connection is not encrypted — peer did not use encryption.');
                     // Fall through to process this frame as plaintext
                 } else {
                     // Frame doesn't decode as plaintext Message — peer might be
@@ -751,6 +752,23 @@ class RDClient {
             .map(b => b.toString(16).padStart(2, '0')).join('');
         console.log(`[RDClient] Peer ephemeral pk: ${parsed.peerPk.length} bytes [${peerPkHex}...]`);
 
+        // Verify Ed25519 signature against server public key (MITM protection)
+        const serverPubKey = this.opts.serverPubKey || '';
+        if (serverPubKey && serverPubKey.length >= 64) {
+            const verified = RDCrypto.verifySignedId(parsed.signature, parsed.payload, serverPubKey);
+            parsed.signatureVerified = verified;
+            if (verified) {
+                console.log('[RDClient] Ed25519 signature VERIFIED — peer identity authenticated');
+                this._emit('log', 'Peer identity verified (Ed25519)');
+            } else {
+                console.warn('[RDClient] Ed25519 signature FAILED — possible MITM attack!');
+                this._emit('signature_warning', 'Ed25519 signature verification failed. Connection may be intercepted.');
+                this._emit('log', 'WARNING: Peer signature verification failed');
+            }
+        } else {
+            console.log('[RDClient] No server public key available — signature not verified');
+        }
+
         // Prepare key material but DO NOT send PublicKey yet.
         // We defer the decision until we see the next peer frame.
         this.crypto.generateKeyPair();
@@ -943,6 +961,14 @@ class RDClient {
             this._sendPeerMessage(this.proto.buildMisc('refreshVideo', true));
         };
 
+        // Signal CSS when remote cursor data is available (hide local crosshair)
+        this.renderer.onCursorReady = (ready) => {
+            const container = this.canvas.parentElement;
+            if (container) {
+                container.classList.toggle('has-remote-cursor', !!ready);
+            }
+        };
+
         // Start render loop
         this.renderer.startRenderLoop();
 
@@ -979,17 +1005,17 @@ class RDClient {
             }
         }, 1000);
 
-        // Stall recovery: if no video frames arrive for 5 seconds, request a keyframe
+        // Stall recovery: if no video frames arrive for 3 seconds, request a keyframe
         this._stallCheckInterval = setInterval(() => {
             if (this._state !== 'streaming') return;
             const now = Date.now();
             const lastFrame = this._lastVideoFrameTime || 0;
-            if (lastFrame > 0 && now - lastFrame > 5000) {
+            if (lastFrame > 0 && now - lastFrame > 3000) {
                 this._emit('log', 'Video stall detected, requesting keyframe');
                 this._sendPeerMessage(this.proto.buildMisc('refreshVideo', true));
                 this._lastVideoFrameTime = now; // prevent rapid retries
             }
-        }, 2000);
+        }, 1500);
 
         this._lastVideoFrameTime = Date.now();
 

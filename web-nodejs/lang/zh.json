@@ -363,6 +363,7 @@
     "connect": "连接",
     "connect_desktop": "通过桌面客户端连接",
     "remote_viewer": "远程查看器",
+    "web_remote": "Web远程",
     "details": "详情",
     "edit": "编辑",
     "delete": "删除",
@@ -556,7 +557,10 @@
     "webcodecs_fallback_active": "软件视频解码器已激活（性能有限）",
     "click_to_start": "点击开始",
     "autoplay_blocked": "浏览器需要用户交互才能开始播放视频和音频。",
-    "start_playback": "开始播放"
+    "start_playback": "开始播放",
+    "new_connection": "新建连接",
+    "device_id_placeholder": "输入设备ID",
+    "http_warning": "HTTP模式：仅支持H.264软件解码 (~15 FPS)。使用HTTPS可获得完整性能 (WebCodecs, VP9, 60 FPS)。"
   },
   "branding": {
     "identity_title": "品牌标识",

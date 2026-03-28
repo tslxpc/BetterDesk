@@ -319,6 +319,11 @@ class RDRenderer {
                 this.cursorImage.close();
             }
             this.cursorImage = await createImageBitmap(imgData);
+
+            // Signal that we have a valid remote cursor (CSS hides local cursor)
+            if (this.onCursorReady) {
+                this.onCursorReady(true);
+            }
         } catch (err) {
             // Silently skip invalid cursor data to prevent crash
         }

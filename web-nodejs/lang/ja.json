@@ -347,6 +347,7 @@
     "connect": "Connect",
     "connect_desktop": "Connect via Desktop Client",
     "remote_viewer": "Remote Viewer",
+    "web_remote": "Webリモート",
     "details": "Details",
     "edit": "Edit",
     "delete": "Delete",
@@ -529,7 +530,10 @@
     "webcodecs_fallback_active": "Software video decoder active (limited performance)",
     "click_to_start": "Click to Start",
     "autoplay_blocked": "Browser requires user interaction to start video and audio playback.",
-    "start_playback": "Start Playback"
+    "start_playback": "Start Playback",
+    "new_connection": "新規接続",
+    "device_id_placeholder": "デバイスIDを入力",
+    "http_warning": "HTTPモード：H.264ソフトウェアデコードに制限 (~15 FPS)。最高のパフォーマンスにはHTTPSを使用してください (WebCodecs, VP9, 60 FPS)。"
   },
   "branding": {
     "identity_title": "Brand Identity",

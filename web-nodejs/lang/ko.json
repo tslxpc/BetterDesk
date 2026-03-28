@@ -347,6 +347,7 @@
     "connect": "Connect",
     "connect_desktop": "Connect via Desktop Client",
     "remote_viewer": "Remote Viewer",
+    "web_remote": "웹 원격",
     "details": "Details",
     "edit": "Edit",
     "delete": "Delete",
@@ -529,7 +530,10 @@
     "webcodecs_fallback_active": "Software video decoder active (limited performance)",
     "click_to_start": "Click to Start",
     "autoplay_blocked": "Browser requires user interaction to start video and audio playback.",
-    "start_playback": "Start Playback"
+    "start_playback": "Start Playback",
+    "new_connection": "새 연결",
+    "device_id_placeholder": "장치 ID 입력",
+    "http_warning": "HTTP 모드: H.264 소프트웨어 디코딩으로 제한 (~15 FPS). 최고 성능을 위해 HTTPS를 사용하세요 (WebCodecs, VP9, 60 FPS)."
   },
   "branding": {
     "identity_title": "Brand Identity",

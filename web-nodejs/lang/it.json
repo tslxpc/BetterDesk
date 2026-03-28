@@ -363,7 +363,8 @@
     "close": "Chiudi",
     "clear": "Cancella",
     "ok": "OK",
-    "remote_viewer": "Remote Viewer"
+    "remote_viewer": "Remote Viewer",
+    "web_remote": "Desktop remoto web"
   },
   "time": {
     "just_now": "Proprio ora",
@@ -535,7 +536,10 @@
     "webcodecs_fallback_active": "Decoder video software attivo (prestazioni limitate)",
     "click_to_start": "Clicca per avviare",
     "autoplay_blocked": "Il browser richiede l'interazione dell'utente per avviare video e audio.",
-    "start_playback": "Avvia riproduzione"
+    "start_playback": "Avvia riproduzione",
+    "new_connection": "Nuova connessione",
+    "device_id_placeholder": "Inserire ID dispositivo",
+    "http_warning": "Modalità HTTP: limitata alla decodifica software H.264 (~15 FPS). Usa HTTPS per prestazioni complete (WebCodecs, VP9, 60 FPS)."
   },
   "branding": {
     "identity_title": "Identità del marchio",

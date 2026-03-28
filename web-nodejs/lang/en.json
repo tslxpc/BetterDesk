@@ -366,6 +366,7 @@
     "connect": "Connect",
     "connect_desktop": "Connect via Desktop Client",
     "remote_viewer": "Remote Viewer",
+    "web_remote": "Web Remote",
     "details": "Details",
     "edit": "Edit",
     "delete": "Delete",
@@ -559,7 +560,10 @@
     "webcodecs_fallback_active": "Software video decoder active (limited performance)",
     "click_to_start": "Click to Start",
     "autoplay_blocked": "Browser requires user interaction to start video and audio playback.",
-    "start_playback": "Start Playback"
+    "start_playback": "Start Playback",
+    "new_connection": "New Connection",
+    "device_id_placeholder": "Enter Device ID",
+    "http_warning": "HTTP mode: limited to H.264 software decode (~15 FPS). Use HTTPS for full performance (WebCodecs, VP9, 60 FPS)."
   },
   "branding": {
     "identity_title": "Brand Identity",
