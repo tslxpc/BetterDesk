@@ -14,7 +14,7 @@
 
     const MIN_WIDTH = 420;
     const MIN_HEIGHT = 300;
-    const TASKBAR_HEIGHT = 42;
+    const TASKBAR_HEIGHT = 10;  // slim taskbar height in px
     const BREAKPOINT = 1200;
     const STORAGE_KEY = 'betterdesk_desktop_mode';
     const STORAGE_WINS_KEY = 'betterdesk_desktop_wins';
@@ -1111,8 +1111,8 @@
 
     function showSnapPreview(zone) {
         if (_snapTarget && _snapTarget === zone) return;
-        _snapTarget = zone;
         removeSnapPreview();
+        _snapTarget = zone;
 
         var bounds = getSnapBounds(zone);
         if (!bounds) return;
@@ -1776,7 +1776,7 @@
         }
     }
 
-    // ============ Taskbar (compact: icon-only, expand on hover) ============
+    // ============ Taskbar (slim full-width bar with tab indicators) ============
 
     function updateTaskbar() {
         var container = document.getElementById('taskbar-apps');
@@ -1784,24 +1784,24 @@
         container.innerHTML = '';
 
         windows.forEach(function(win) {
-            var btn = document.createElement('button');
-            btn.className = 'taskbar-app-btn';
-            if (!win.minimized) btn.classList.add('active');
-            if (win.id === focusedWindowId) btn.classList.add('focused');
+            var tab = document.createElement('button');
+            tab.className = 'taskbar-tab';
+            if (!win.minimized) tab.classList.add('active');
+            if (win.id === focusedWindowId) tab.classList.add('focused');
 
-            // Set app color as CSS variable for peek-mode colored squares
-            btn.style.setProperty('--taskbar-btn-color', win.app.color || 'rgba(88,166,255,0.7)');
+            tab.style.setProperty('--tab-color', win.app.color || 'rgba(88,166,255,0.7)');
 
-            // Compact icon-only button with tooltip and hover-expand label
-            btn.innerHTML =
-                '<span class="material-icons taskbar-icon" style="color:' + win.app.color + '">' +
-                    win.app.icon +
-                '</span>' +
-                '<span class="taskbar-label">' + escapeHtml(win.app.name) + '</span>';
+            // Slim indicator strip + hover-revealed label
+            tab.innerHTML =
+                '<span class="taskbar-tab-indicator"></span>' +
+                '<span class="taskbar-tab-content">' +
+                    '<span class="material-icons taskbar-tab-icon" style="color:' + win.app.color + '">' + win.app.icon + '</span>' +
+                    '<span class="taskbar-tab-label">' + escapeHtml(win.app.name) + '</span>' +
+                '</span>';
 
-            btn.title = win.app.name;
+            tab.title = win.app.name;
 
-            btn.addEventListener('click', function() {
+            tab.addEventListener('click', function() {
                 if (win.minimized) {
                     restoreWindow(win.id);
                 } else if (win.id === focusedWindowId) {
@@ -1811,7 +1811,7 @@
                 }
             });
 
-            container.appendChild(btn);
+            container.appendChild(tab);
         });
 
         updateTaskbarVisibility();
@@ -1825,24 +1825,20 @@
     // ============ Helpers ============
 
     function shouldReserveTaskbarSpace() {
-        // Compact taskbar peeks at 8px; only reserve space when actively expanded
+        // Slim taskbar is always 10px, reserve minimal space
         if (!active) return false;
         var taskbar = document.getElementById('desktop-taskbar');
-        if (!taskbar) return false;
-        // Reserve space only when taskbar is fully visible (hovered)
-        return taskbar.matches(':hover') || taskbar.classList.contains('taskbar-expanded');
+        return !!taskbar;
     }
 
     function getDesktopArea() {
-        // Use visualViewport for accurate available space (excludes on-screen keyboards,
-        // browser chrome, etc.). Falls back to window.innerWidth/Height.
         var vp = window.visualViewport;
         var vpWidth = vp ? vp.width : window.innerWidth;
         var vpHeight = vp ? vp.height : window.innerHeight;
 
+        // Slim taskbar reserves TASKBAR_HEIGHT pixels at bottom
         var bottomOffset = shouldReserveTaskbarSpace() ? TASKBAR_HEIGHT : 0;
 
-        // Respect CSS safe-area-inset-bottom (accounts for system UI overlap)
         var safeBottom = 0;
         try {
             var cs = getComputedStyle(document.documentElement);
@@ -1868,9 +1864,21 @@
                           .replace(/'/g, '&#39;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
     }
 
-    // ============ Top Bar (clock + controls) ============
+    // ============ Top Bar (clock + shortcuts + controls) ============
 
     var _topbarClockInterval = null;
+    var _topbarEditMode = false;
+    var STORAGE_SHORTCUTS = 'betterdesk_topbar_shortcuts';
+
+    function getTopbarShortcuts() {
+        try { return JSON.parse(localStorage.getItem(STORAGE_SHORTCUTS) || '[]'); }
+        catch (_) { return []; }
+    }
+
+    function saveTopbarShortcuts(list) {
+        try { localStorage.setItem(STORAGE_SHORTCUTS, JSON.stringify(list)); }
+        catch (_) { /* quota */ }
+    }
 
     function initTopbar() {
         var clockEl = document.getElementById('topbar-clock');
@@ -1899,10 +1907,148 @@
                 window.DesktopWidgets.openAddWidget();
             }
         });
+
+        var editBtn = document.getElementById('topbar-edit-btn');
+        if (editBtn) editBtn.addEventListener('click', function() {
+            toggleTopbarEditMode();
+        });
+
+        renderTopbarShortcuts();
+        initTopbarDropZone();
     }
 
     function destroyTopbar() {
         if (_topbarClockInterval) { clearInterval(_topbarClockInterval); _topbarClockInterval = null; }
+        _topbarEditMode = false;
+    }
+
+    function renderTopbarShortcuts() {
+        var container = document.getElementById('topbar-shortcuts');
+        if (!container) return;
+        container.innerHTML = '';
+
+        var shortcuts = getTopbarShortcuts();
+        shortcuts.forEach(function(sc, idx) {
+            var btn = document.createElement('button');
+            btn.className = 'topbar-shortcut-btn';
+            btn.title = sc.name || sc.id;
+            btn.setAttribute('data-shortcut-idx', idx);
+            btn.style.setProperty('--sc-color', sc.color || '#8b949e');
+            btn.innerHTML = '<span class="material-icons" style="color:' + (sc.color || '#8b949e') + '">' + (sc.icon || 'open_in_new') + '</span>';
+
+            btn.addEventListener('click', function(e) {
+                if (_topbarEditMode) return; // In edit mode, don't open
+                var apps = getApps();
+                var app = apps.find(function(a) { return a.id === sc.id; });
+                if (!app) {
+                    app = { id: sc.id, icon: sc.icon, route: sc.route, color: sc.color, name: sc.name, category: sc.category || 'main' };
+                }
+                openApp(app);
+            });
+
+            if (_topbarEditMode) {
+                btn.setAttribute('draggable', 'true');
+                btn.classList.add('edit-mode');
+
+                // Remove button
+                var removeBtn = document.createElement('span');
+                removeBtn.className = 'topbar-shortcut-remove';
+                removeBtn.innerHTML = '&times;';
+                removeBtn.addEventListener('click', function(e) {
+                    e.stopPropagation();
+                    var list = getTopbarShortcuts();
+                    list.splice(idx, 1);
+                    saveTopbarShortcuts(list);
+                    renderTopbarShortcuts();
+                });
+                btn.appendChild(removeBtn);
+
+                btn.addEventListener('dragstart', function(e) {
+                    e.dataTransfer.setData('text/shortcut-idx', String(idx));
+                    e.dataTransfer.effectAllowed = 'move';
+                    btn.classList.add('dragging');
+                });
+                btn.addEventListener('dragend', function() {
+                    btn.classList.remove('dragging');
+                });
+                btn.addEventListener('dragover', function(e) {
+                    e.preventDefault();
+                    e.dataTransfer.dropEffect = 'move';
+                    btn.classList.add('drag-over');
+                });
+                btn.addEventListener('dragleave', function() {
+                    btn.classList.remove('drag-over');
+                });
+                btn.addEventListener('drop', function(e) {
+                    e.preventDefault();
+                    btn.classList.remove('drag-over');
+                    var fromIdx = parseInt(e.dataTransfer.getData('text/shortcut-idx'), 10);
+                    if (isNaN(fromIdx)) return;
+                    var list = getTopbarShortcuts();
+                    if (fromIdx >= 0 && fromIdx < list.length) {
+                        var moved = list.splice(fromIdx, 1)[0];
+                        list.splice(idx, 0, moved);
+                        saveTopbarShortcuts(list);
+                        renderTopbarShortcuts();
+                    }
+                });
+            }
+
+            container.appendChild(btn);
+        });
+    }
+
+    function initTopbarDropZone() {
+        var container = document.getElementById('topbar-shortcuts');
+        if (!container) return;
+
+        container.addEventListener('dragover', function(e) {
+            e.preventDefault();
+            e.dataTransfer.dropEffect = 'copy';
+            container.classList.add('drag-over');
+        });
+        container.addEventListener('dragleave', function(e) {
+            if (!container.contains(e.relatedTarget)) {
+                container.classList.remove('drag-over');
+            }
+        });
+        container.addEventListener('drop', function(e) {
+            e.preventDefault();
+            container.classList.remove('drag-over');
+
+            // Reorder within shortcuts
+            var reorderIdx = e.dataTransfer.getData('text/shortcut-idx');
+            if (reorderIdx) return; // Handled by individual btn drop
+
+            // Drop from app drawer
+            var raw = e.dataTransfer.getData('text/plain');
+            if (!raw) return;
+            try {
+                var appData = JSON.parse(raw);
+                if (!appData || !appData.id) return;
+
+                var list = getTopbarShortcuts();
+                // Don't add duplicates
+                if (list.some(function(s) { return s.id === appData.id; })) return;
+
+                list.push({ id: appData.id, icon: appData.icon, route: appData.route, color: appData.color, name: appData.name, category: appData.category });
+                saveTopbarShortcuts(list);
+                renderTopbarShortcuts();
+            } catch (_) { /* Not valid JSON */ }
+        });
+    }
+
+    function toggleTopbarEditMode() {
+        _topbarEditMode = !_topbarEditMode;
+        var btn = document.getElementById('topbar-edit-btn');
+        if (btn) {
+            btn.classList.toggle('active', _topbarEditMode);
+            var icon = btn.querySelector('.material-icons');
+            if (icon) icon.textContent = _topbarEditMode ? 'done' : 'edit';
+        }
+        var container = document.getElementById('topbar-shortcuts');
+        if (container) container.classList.toggle('edit-mode', _topbarEditMode);
+        renderTopbarShortcuts();
     }
 
     // ============ App Drawer ============
@@ -1911,7 +2057,6 @@
 
     function initAppDrawer() {
         var btn = document.getElementById('topbar-app-drawer-btn');
-        var startBtn = document.getElementById('taskbar-start-btn');
         var overlay = document.getElementById('app-drawer-overlay');
         var grid = document.getElementById('app-drawer-grid');
         var search = document.getElementById('app-drawer-search');
@@ -1925,7 +2070,6 @@
         }
 
         if (btn) btn.addEventListener('click', onDrawerBtnClick);
-        if (startBtn) startBtn.addEventListener('click', onDrawerBtnClick);
 
         overlay.addEventListener('click', function(e) {
             if (e.target === overlay) closeAppDrawer();
@@ -1971,12 +2115,23 @@
             catApps.forEach(function(app) {
                 var tile = document.createElement('button');
                 tile.className = 'app-drawer-tile';
+                tile.setAttribute('draggable', 'true');
+                tile.setAttribute('data-app-id', app.id);
                 tile.innerHTML =
                     '<span class="material-icons" style="color:' + app.color + ';font-size:28px">' + app.icon + '</span>' +
                     '<span class="app-drawer-tile-name">' + escapeHtml(app.name) + '</span>';
                 tile.addEventListener('click', function() {
                     closeAppDrawer();
-                    openApp(app.id);
+                    openApp(app);
+                });
+                // Drag support for adding to top bar shortcuts
+                tile.addEventListener('dragstart', function(e) {
+                    e.dataTransfer.setData('text/plain', JSON.stringify({ id: app.id, icon: app.icon, route: app.route, color: app.color, name: app.name, category: app.category }));
+                    e.dataTransfer.effectAllowed = 'copy';
+                    tile.classList.add('dragging');
+                });
+                tile.addEventListener('dragend', function() {
+                    tile.classList.remove('dragging');
                 });
                 row.appendChild(tile);
             });
