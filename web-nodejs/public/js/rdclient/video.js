@@ -233,7 +233,7 @@ class RDVideo {
             node: this._videoEl,
             mode: 'video',
             flushingTime: 0,        // Flush immediately for low latency
-            fps: 30,
+            fps: 60,
             clearBuffer: false,     // We manage buffer trimming in _startHealthCheck
             debug: false,
             onReady: () => {
@@ -368,7 +368,7 @@ class RDVideo {
         const start = v.buffered.start(0);
 
         // If currentTime is outside buffered range, or behind, seek to live edge
-        if (v.currentTime < start || v.currentTime > end + 0.5 || (end - v.currentTime) > 0.15) {
+        if (v.currentTime < start || v.currentTime > end + 0.5 || (end - v.currentTime) > 0.1) {
             v.currentTime = Math.max(start, end - 0.02);
         }
 
@@ -416,25 +416,25 @@ class RDVideo {
                 const latency = end - v.currentTime;
                 const bufferSize = end - start;
 
-                if (latency > 0.4) {
+                if (latency > 0.3) {
                     // Fallen behind — hard seek to near live edge
                     v.currentTime = end - 0.02;
                     v.playbackRate = 1.0;
-                } else if (latency > 0.08) {
+                } else if (latency > 0.06) {
                     // Slightly behind — speed up to catch up
-                    v.playbackRate = 1.25;
+                    v.playbackRate = 1.5;
                 } else {
                     // At live edge — normal speed
                     v.playbackRate = 1.0;
                 }
 
                 // Trim old buffer data to prevent SourceBuffer overflow
-                // Keep at most 4s of data, trim to last 2s
-                if (bufferSize > 4.0 && this._jmuxer && this._jmuxer.sourceBuffer) {
+                // Keep at most 3s of data, trim to last 1.5s
+                if (bufferSize > 3.0 && this._jmuxer && this._jmuxer.sourceBuffer) {
                     try {
                         const sb = this._jmuxer.sourceBuffer;
-                        if (sb.video && !sb.video.updating && start < end - 2.0) {
-                            sb.video.remove(start, end - 2.0);
+                        if (sb.video && !sb.video.updating && start < end - 1.5) {
+                            sb.video.remove(start, end - 1.5);
                         }
                     } catch (_) {
                         // SourceBuffer remove can fail if updating
@@ -465,7 +465,7 @@ class RDVideo {
                     this._reinitJMuxer();
                 }
             }
-        }, 500);
+        }, 300);
     }
 
     /**

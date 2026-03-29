@@ -155,9 +155,12 @@
 
 .widget-body {
     padding: 4px 12px 10px;
-    overflow: hidden;
+    overflow-y: auto;
+    overflow-x: hidden;
     flex: 1;
     position: relative;
+    scrollbar-width: thin;
+    scrollbar-color: rgba(255,255,255,0.15) transparent;
 }
 
 .widget-body::-webkit-scrollbar {

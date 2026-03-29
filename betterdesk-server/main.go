@@ -5,6 +5,7 @@ package main
 import (
 	"context"
 	cryptoRand "crypto/rand"
+	"crypto/sha256"
 	"encoding/hex"
 	"flag"
 	"fmt"
@@ -371,6 +372,31 @@ func main() {
 	log.Printf("Server stopped")
 }
 
+func ensureScopedAPIKey(database db.Database, apiKey string) error {
+	if strings.TrimSpace(apiKey) == "" {
+		return nil
+	}
+	hash := sha256.Sum256([]byte(apiKey))
+	hashHex := hex.EncodeToString(hash[:])
+	if existing, err := database.GetAPIKeyByHash(hashHex); err == nil && existing != nil {
+		return nil
+	}
+	key := &db.APIKey{
+		KeyHash:   hashHex,
+		KeyPrefix: apiKey[:min(len(apiKey), 8)],
+		Name:      "console-bridge",
+		Role:      auth.RoleAdmin,
+	}
+	return database.CreateAPIKey(key)
+}
+
+func min(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
+}
+
 // loadAPIKey reads the API key from API_KEY environment variable or .api_key file
 // in the key file directory (and DB directory as fallback), and syncs it to the
 // database's server_config table. This ensures the Node.js console and Go server
@@ -462,6 +488,12 @@ func loadAPIKey(cfg *config.Config, database db.Database) {
 		log.Printf("API key loaded from %s and stored in database", source)
 	} else {
 		log.Printf("API key loaded from %s and updated in database", source)
+	}
+
+	if err := ensureScopedAPIKey(database, apiKey); err != nil {
+		log.Printf("WARN: Failed to migrate API key into scoped api_keys table: %v", err)
+	} else {
+		log.Printf("API key is available in scoped api_keys table")
 	}
 }
 

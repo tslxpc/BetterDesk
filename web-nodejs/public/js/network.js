@@ -86,6 +86,7 @@
     const createBtn = document.getElementById('create-target-btn');
     const targetModal = document.getElementById('target-modal');
     const saveBtn = document.getElementById('target-save-btn');
+    const cancelBtn = document.getElementById('target-cancel-btn');
 
     async function loadTargets() {
         targetsBody.innerHTML = `<tr class="loading-row"><td colspan="8">${_('common.loading')}</td></tr>`;
@@ -203,6 +204,10 @@
             loadStats();
         } catch (err) { showToast(err.message, 'error'); }
     }
+
+    createBtn?.addEventListener('click', () => openTargetModal(null));
+    saveBtn?.addEventListener('click', saveTarget);
+    cancelBtn?.addEventListener('click', () => { targetModal.style.display = 'none'; });
 
     async function showHistory(id) {
         const modal = document.getElementById('history-modal');

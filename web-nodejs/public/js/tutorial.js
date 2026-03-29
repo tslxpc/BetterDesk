@@ -3,9 +3,12 @@
  * Spotlight-based guided tour with i18n support.
  * 
  * Usage:
- *   Tutorial.start('console'); // Start console panel tutorial
- *   Tutorial.start('desktop'); // Start desktop mode tutorial
- *   Tutorial.skip();           // Skip/close tutorial
+ *   Tutorial.start('console');        // Console panel tutorial
+ *   Tutorial.start('desktop');        // Desktop mode tutorial
+ *   Tutorial.start('devices');        // Devices page tutorial
+ *   Tutorial.start('settings');       // Settings page tutorial
+ *   Tutorial.skip();                  // Close tutorial
+ *   Tutorial.autoStart('console');    // Auto-start on first visit
  */
 
 (function() {
@@ -13,18 +16,20 @@
 
     // ============ Constants ============
 
-    const STORAGE_SEEN = 'betterdesk_tutorial_seen';
-    const STORAGE_DISABLED = 'betterdesk_tutorial_disabled';
+    var STORAGE_SEEN = 'betterdesk_tutorial_seen';
+    var STORAGE_DISABLED = 'betterdesk_tutorial_disabled';
     
     // ============ State ============
 
-    let _overlay = null;
-    let _spotlight = null;
-    let _tooltip = null;
-    let _steps = [];
-    let _currentStep = 0;
-    let _isActive = false;
-    let _onComplete = null;
+    var _overlay = null;
+    var _spotlight = null;
+    var _tooltip = null;
+    var _steps = [];
+    var _currentStep = 0;
+    var _isActive = false;
+    var _onComplete = null;
+    var _tutorialType = 'console';
+    var _resizeHandler = null;
 
     // ============ i18n Helper ============
 
@@ -33,7 +38,6 @@
             var result = window._(key);
             return result !== key ? result : fallback;
         }
-        // Manual translation lookup
         if (window.BetterDesk && window.BetterDesk.translations) {
             var keys = key.split('.');
             var val = window.BetterDesk.translations;
@@ -54,37 +58,44 @@
     function getConsoleTutorialSteps() {
         return [
             {
-                selector: '.sidebar',
-                title: t('tutorial.console.sidebar_title', 'Navigation Sidebar'),
-                text: t('tutorial.console.sidebar_text', 'Use the sidebar to navigate between different sections of the console. Click on icons to switch pages.'),
+                selector: '.sidebar-rail',
+                title: t('tutorial.console_sidebar_title', 'Navigation Sidebar'),
+                text: t('tutorial.console_sidebar_text', 'Access all modules from here. Click any icon to navigate to that section. The sidebar adapts to your screen size.'),
+                position: 'right',
+                highlight: true
+            },
+            {
+                selector: '.sidebar-rail-bottom .sidebar-rail-btn[title]',
+                title: t('tutorial.console_expand_title', 'Expand Sidebar'),
+                text: t('tutorial.console_expand_text', 'Click here to expand the sidebar and see full labels for all navigation items. Click again to collapse.'),
                 position: 'right',
                 highlight: true
             },
             {
                 selector: '.navbar .search-box',
-                title: t('tutorial.console.search_title', 'Quick Search'),
-                text: t('tutorial.console.search_text', 'Search for devices, settings, or actions quickly. Press Ctrl+K for keyboard shortcut.'),
+                title: t('tutorial.console_search_title', 'Quick Search'),
+                text: t('tutorial.console_search_text', 'Search for devices, settings, or actions quickly. Press Ctrl+K for keyboard shortcut.'),
                 position: 'bottom',
                 highlight: true
             },
             {
-                selector: '#desktop-toggle-btn',
-                title: t('tutorial.console.desktop_btn_title', 'Desktop Mode'),
-                text: t('tutorial.console.desktop_btn_text', 'Switch to desktop mode for a Windows-like experience with floating windows and widgets. Best on large screens.'),
-                position: 'left',
-                highlight: true
-            },
-            {
                 selector: '.content-wrapper',
-                title: t('tutorial.console.content_title', 'Main Content Area'),
-                text: t('tutorial.console.content_text', 'This is where all your data and actions are displayed. Each page shows relevant information and controls.'),
+                title: t('tutorial.console_dashboard_title', 'Dashboard'),
+                text: t('tutorial.console_dashboard_text', 'Your central hub showing server status, online devices, and quick actions. Keep an eye on important metrics at a glance.'),
                 position: 'center',
                 highlight: false
             },
             {
+                selector: '#desktop-toggle-btn',
+                title: t('tutorial.console_desktop_title', 'Desktop Mode'),
+                text: t('tutorial.console_desktop_text', 'Switch to desktop mode for a windowed workspace with widgets. Perfect for multi-tasking and monitoring dashboards.'),
+                position: 'left',
+                highlight: true
+            },
+            {
                 selector: null,
-                title: t('tutorial.console.complete_title', 'You\'re Ready!'),
-                text: t('tutorial.console.complete_text', 'You can access this tutorial anytime from Settings → Help. Enjoy using BetterDesk Console!'),
+                title: t('tutorial.console_complete_title', 'You\'re Ready!'),
+                text: t('tutorial.console_complete_text', 'Explore the sidebar categories to discover all features. Click the Help icon anytime to restart this guide.'),
                 position: 'center',
                 highlight: false,
                 final: true
@@ -95,37 +106,54 @@
     function getDesktopTutorialSteps() {
         return [
             {
-                selector: '.widget-topnav',
-                title: t('tutorial.desktop.topnav_title', 'Top Navigation Bar'),
-                text: t('tutorial.desktop.topnav_text', 'Access all modules quickly from here. Click tabs to open apps in floating windows.'),
+                selector: '.desktop-topbar',
+                title: t('tutorial.desktop_topbar_title', 'Top Bar'),
+                text: t('tutorial.desktop_topbar_text', 'The top bar shows the clock, quick controls, and access to the app drawer. Click the grid icon to browse all apps.'),
                 position: 'bottom',
                 highlight: true
             },
             {
-                selector: '.widget-sidebar',
-                title: t('tutorial.desktop.sidebar_title', 'Quick Actions'),
-                text: t('tutorial.desktop.sidebar_text', 'Add widgets, change wallpaper, access settings and additional modules from the sidebar.'),
-                position: 'right',
-                highlight: true
+                selector: '.app-drawer-overlay .app-drawer',
+                title: t('tutorial.desktop_drawer_title', 'App Drawer'),
+                text: t('tutorial.desktop_drawer_text', 'Open the app drawer to search and launch any console function as a floating window. Apps are organized by category.'),
+                position: 'bottom',
+                highlight: true,
+                beforeShow: function() {
+                    var btn = document.querySelector('.topbar-app-drawer-btn');
+                    if (btn) btn.click();
+                },
+                afterHide: function() {
+                    var overlay = document.querySelector('.app-drawer-overlay');
+                    if (overlay && overlay.classList.contains('open')) {
+                        overlay.classList.remove('open');
+                    }
+                }
             },
             {
                 selector: '.widget-canvas',
-                title: t('tutorial.desktop.canvas_title', 'Widget Dashboard'),
-                text: t('tutorial.desktop.canvas_text', 'Your customizable dashboard. Drag widgets to reposition, resize corners to change size. Click + to add new widgets.'),
+                title: t('tutorial.desktop_widgets_title', 'Widget Dashboard'),
+                text: t('tutorial.desktop_widgets_text', 'Your customizable workspace. Widgets display live information and provide quick access to features. Drag to rearrange.'),
                 position: 'center',
                 highlight: false
             },
             {
                 selector: '.desktop-taskbar',
-                title: t('tutorial.desktop.taskbar_title', 'Taskbar'),
-                text: t('tutorial.desktop.taskbar_text', 'Minimized windows appear here. Use Start menu to launch apps, wallpaper picker, or return to console mode.'),
+                title: t('tutorial.desktop_taskbar_title', 'Taskbar'),
+                text: t('tutorial.desktop_taskbar_text', 'Open apps appear here. Click to focus or minimize windows. The clock shows current time and wallpaper button changes the background.'),
                 position: 'top',
                 highlight: true
             },
             {
                 selector: null,
-                title: t('tutorial.desktop.complete_title', 'Desktop Mode Ready!'),
-                text: t('tutorial.desktop.complete_text', 'Try clicking tabs to open apps as floating windows. You can run multiple apps side-by-side!'),
+                title: t('tutorial.desktop_snap_title', 'Snap Layouts'),
+                text: t('tutorial.desktop_snap_text', 'Drag windows to screen edges to snap them into position, or hover the maximize button for layout presets. Try Aero Shake!'),
+                position: 'center',
+                highlight: false
+            },
+            {
+                selector: null,
+                title: t('tutorial.desktop_complete_title', 'Desktop Mode Ready!'),
+                text: t('tutorial.desktop_complete_text', 'Try opening apps from the drawer and arranging windows side-by-side. Use widget presets for quick dashboard layouts.'),
                 position: 'center',
                 highlight: false,
                 final: true
@@ -133,22 +161,89 @@
         ];
     }
 
+    function getDevicesTutorialSteps() {
+        return [
+            {
+                selector: '.folder-chips',
+                title: t('tutorial.devices_folders_title', 'Device Folders'),
+                text: t('tutorial.devices_folders_text', 'Organize devices into folders. Click a folder to filter the list. Right-click to rename or delete.'),
+                position: 'bottom',
+                highlight: true
+            },
+            {
+                selector: '.search-devices',
+                title: t('tutorial.devices_search_title', 'Search & Filter'),
+                text: t('tutorial.devices_search_text', 'Search by ID, hostname, or platform. Use the status pills to show only online, offline, or all devices.'),
+                position: 'bottom',
+                highlight: true
+            },
+            {
+                selector: '.devices-table',
+                title: t('tutorial.devices_table_title', 'Device List'),
+                text: t('tutorial.devices_table_text', 'Click any device row for details. Use the kebab menu on the right for quick actions like connect, edit tags, or delete.'),
+                position: 'center',
+                highlight: false
+            },
+            {
+                selector: null,
+                title: t('tutorial.devices_complete_title', 'Device Management Ready!'),
+                text: t('tutorial.devices_complete_text', 'Drag devices between folders to organize them. Double-click a device to open its detail panel.'),
+                position: 'center',
+                highlight: false,
+                final: true
+            }
+        ];
+    }
+
+    function getSettingsTutorialSteps() {
+        return [
+            {
+                selector: '.settings-tabs, .settings-nav',
+                title: t('tutorial.settings_tabs_title', 'Settings Categories'),
+                text: t('tutorial.settings_tabs_text', 'Navigate between General, Security, Appearance, and other configuration sections.'),
+                position: 'right',
+                highlight: true
+            },
+            {
+                selector: '.settings-content, .settings-panel',
+                title: t('tutorial.settings_content_title', 'Configuration'),
+                text: t('tutorial.settings_content_text', 'Each section contains specific server and console settings. Changes are saved when you click Save.'),
+                position: 'center',
+                highlight: false
+            },
+            {
+                selector: null,
+                title: t('tutorial.settings_complete_title', 'Settings Overview'),
+                text: t('tutorial.settings_complete_text', 'Check Security settings for 2FA, API keys and user management. Visit Appearance to customize the console look.'),
+                position: 'center',
+                highlight: false,
+                final: true
+            }
+        ];
+    }
+
+    function getStepsForType(type) {
+        switch (type) {
+            case 'desktop': return getDesktopTutorialSteps();
+            case 'devices': return getDevicesTutorialSteps();
+            case 'settings': return getSettingsTutorialSteps();
+            default: return getConsoleTutorialSteps();
+        }
+    }
+
     // ============ DOM Creation ============
 
     function createOverlay() {
         if (_overlay) return;
         
-        // Main overlay
         _overlay = document.createElement('div');
         _overlay.className = 'tutorial-overlay';
         _overlay.id = 'tutorial-overlay';
         
-        // Spotlight cut-out element
         _spotlight = document.createElement('div');
         _spotlight.className = 'tutorial-spotlight';
         _overlay.appendChild(_spotlight);
         
-        // Tooltip container
         _tooltip = document.createElement('div');
         _tooltip.className = 'tutorial-tooltip';
         _tooltip.innerHTML = 
@@ -171,25 +266,31 @@
         
         document.body.appendChild(_overlay);
         
-        // Event listeners
         _tooltip.querySelector('.tutorial-close').addEventListener('click', skip);
         _tooltip.querySelector('.tutorial-skip').addEventListener('click', skip);
         _tooltip.querySelector('.tutorial-prev').addEventListener('click', prevStep);
         _tooltip.querySelector('.tutorial-next').addEventListener('click', nextStep);
         
-        // Close on overlay click (outside tooltip)
         _overlay.addEventListener('click', function(e) {
-            if (e.target === _overlay) {
-                skip();
-            }
+            if (e.target === _overlay) skip();
         });
         
-        // Keyboard navigation
         document.addEventListener('keydown', handleKeyDown);
+        
+        _resizeHandler = function() {
+            if (_isActive && _steps[_currentStep]) {
+                positionElements(_steps[_currentStep]);
+            }
+        };
+        window.addEventListener('resize', _resizeHandler);
     }
 
     function removeOverlay() {
         document.removeEventListener('keydown', handleKeyDown);
+        if (_resizeHandler) {
+            window.removeEventListener('resize', _resizeHandler);
+            _resizeHandler = null;
+        }
         if (_overlay) {
             _overlay.remove();
             _overlay = null;
@@ -203,16 +304,40 @@
     function showStep(index) {
         if (!_steps.length || index < 0 || index >= _steps.length) return;
         
+        // Run afterHide for current step
+        var prevStepObj = _steps[_currentStep];
+        if (prevStepObj && prevStepObj.afterHide && index !== _currentStep) {
+            prevStepObj.afterHide();
+        }
+        
         _currentStep = index;
         var step = _steps[index];
         
-        // Update tooltip content
+        // Run beforeShow for new step
+        if (step.beforeShow) {
+            step.beforeShow();
+            // Small delay to let DOM update
+            setTimeout(function() { renderStep(step, index); }, 200);
+        } else {
+            renderStep(step, index);
+        }
+    }
+    
+    function renderStep(step, index) {
+        // Transition animation
+        _tooltip.classList.add('step-transition');
+        setTimeout(function() { _tooltip.classList.remove('step-transition'); }, 250);
+        
         _tooltip.querySelector('.tutorial-title').textContent = step.title || '';
         _tooltip.querySelector('.tutorial-tooltip-body').textContent = step.text || '';
-        _tooltip.querySelector('.tutorial-progress').textContent = 
-            t('tutorial.step', 'Step') + ' ' + (index + 1) + ' / ' + _steps.length;
+        _tooltip.querySelector('.tutorial-progress').innerHTML = 
+            '<div class="tutorial-progress-dots">' +
+            _steps.map(function(_, i) {
+                var cls = i === index ? 'active' : (i < index ? 'seen' : '');
+                return '<span class="tutorial-progress-dot ' + cls + '"></span>';
+            }).join('') +
+            '</div>';
         
-        // Update button visibility
         var prevBtn = _tooltip.querySelector('.tutorial-prev');
         var nextBtn = _tooltip.querySelector('.tutorial-next');
         var skipBtn = _tooltip.querySelector('.tutorial-skip');
@@ -221,7 +346,6 @@
         nextBtn.textContent = step.final ? t('tutorial.finish', 'Finish') : t('tutorial.next', 'Next');
         skipBtn.style.display = step.final ? 'none' : '';
         
-        // Position spotlight and tooltip
         positionElements(step);
     }
 
@@ -229,21 +353,17 @@
         var target = step.selector ? document.querySelector(step.selector) : null;
         
         if (target && step.highlight) {
-            // Get target position
             var rect = target.getBoundingClientRect();
             var padding = 8;
             
-            // Position spotlight
             _spotlight.style.display = 'block';
             _spotlight.style.left = (rect.left - padding) + 'px';
             _spotlight.style.top = (rect.top - padding) + 'px';
             _spotlight.style.width = (rect.width + padding * 2) + 'px';
             _spotlight.style.height = (rect.height + padding * 2) + 'px';
             
-            // Position tooltip based on step.position
             positionTooltip(rect, step.position);
         } else {
-            // No target or no highlight - center tooltip
             _spotlight.style.display = 'none';
             _tooltip.style.left = '50%';
             _tooltip.style.top = '50%';
@@ -273,12 +393,11 @@
                 left = targetRect.right + gap;
                 top = targetRect.top + targetRect.height / 2 - tooltipRect.height / 2;
                 break;
-            default: // center
+            default:
                 left = window.innerWidth / 2 - tooltipRect.width / 2;
                 top = window.innerHeight / 2 - tooltipRect.height / 2;
         }
         
-        // Keep tooltip in viewport
         left = Math.max(16, Math.min(left, window.innerWidth - tooltipRect.width - 16));
         top = Math.max(16, Math.min(top, window.innerHeight - tooltipRect.height - 16));
         
@@ -313,17 +432,19 @@
         }
     }
 
-    // ============ Public API ============
+    // ============ Lifecycle ============
 
     function start(type, callback) {
         if (_isActive) return;
         
-        // Get tutorial steps based on type
-        if (type === 'desktop') {
-            _steps = getDesktopTutorialSteps();
-        } else {
-            _steps = getConsoleTutorialSteps();
-        }
+        _tutorialType = type || 'console';
+        _steps = getStepsForType(_tutorialType);
+        
+        // Filter steps whose target elements don't exist (skip gracefully)
+        _steps = _steps.filter(function(step) {
+            if (!step.selector) return true;
+            return document.querySelector(step.selector) !== null;
+        });
         
         if (!_steps.length) return;
         
@@ -333,7 +454,6 @@
         
         createOverlay();
         
-        // Animate in
         requestAnimationFrame(function() {
             _overlay.classList.add('active');
             showStep(0);
@@ -342,6 +462,10 @@
 
     function skip() {
         if (!_isActive) return;
+        
+        // Run afterHide for current step
+        var step = _steps[_currentStep];
+        if (step && step.afterHide) step.afterHide();
         
         _isActive = false;
         _overlay.classList.remove('active');
@@ -354,19 +478,20 @@
     }
 
     function complete() {
-        // Mark as seen
         var seen = JSON.parse(localStorage.getItem(STORAGE_SEEN) || '{}');
-        seen[_steps === getDesktopTutorialSteps() ? 'desktop' : 'console'] = true;
+        seen[_tutorialType] = true;
         localStorage.setItem(STORAGE_SEEN, JSON.stringify(seen));
+        
+        // Run afterHide for current step
+        var step = _steps[_currentStep];
+        if (step && step.afterHide) step.afterHide();
         
         _isActive = false;
         _overlay.classList.remove('active');
         
         setTimeout(function() {
             removeOverlay();
-            if (typeof _onComplete === 'function') {
-                _onComplete();
-            }
+            if (typeof _onComplete === 'function') _onComplete();
             _steps = [];
             _currentStep = 0;
             _onComplete = null;
@@ -396,15 +521,13 @@
         return localStorage.getItem(STORAGE_DISABLED) === 'true';
     }
 
-    // Auto-start on first visit (if not disabled)
     function autoStart(type) {
         if (isDisabled()) return;
         if (hasSeenTutorial(type)) return;
         
-        // Small delay to let the page settle
         setTimeout(function() {
             start(type);
-        }, 1000);
+        }, 1500);
     }
 
     // ============ Export ============
@@ -416,7 +539,108 @@
         resetTutorial: resetTutorial,
         setDisabled: setDisabled,
         isDisabled: isDisabled,
-        autoStart: autoStart
+        autoStart: autoStart,
+        showHelpButton: showHelpButton,
+        hideHelpButton: hideHelpButton
     };
+
+    // Backward compatibility alias
+    window.BetterDeskTutorial = window.Tutorial;
+
+    // ============ Floating Help Button ============
+
+    var _helpBtn = null;
+    var _helpMenu = null;
+    var _helpMenuOpen = false;
+
+    function showHelpButton() {
+        if (_helpBtn) { _helpBtn.classList.add('visible'); return; }
+
+        _helpBtn = document.createElement('button');
+        _helpBtn.className = 'tutorial-help-btn';
+        _helpBtn.title = t('tutorial.help', 'Help & Tutorials');
+        _helpBtn.innerHTML = '<span class="material-icons">help_outline</span>';
+        document.body.appendChild(_helpBtn);
+
+        _helpMenu = document.createElement('div');
+        _helpMenu.className = 'tutorial-help-menu';
+
+        var tutorials = [
+            { type: 'console',  icon: 'dashboard',       label: t('tutorial.tour_console', 'Console Tour') },
+            { type: 'desktop',  icon: 'desktop_windows',  label: t('tutorial.tour_desktop', 'Desktop Mode Tour') },
+            { type: 'devices',  icon: 'devices',          label: t('tutorial.tour_devices', 'Devices Tour') },
+            { type: 'settings', icon: 'settings',         label: t('tutorial.tour_settings', 'Settings Tour') }
+        ];
+
+        tutorials.forEach(function(tut) {
+            var btn = document.createElement('button');
+            btn.className = 'tutorial-help-menu-item';
+            btn.innerHTML = '<span class="material-icons">' + tut.icon + '</span>' + esc(tut.label);
+            btn.addEventListener('click', function() {
+                closeHelpMenu();
+                start(tut.type);
+            });
+            _helpMenu.appendChild(btn);
+        });
+
+        // Divider + reset option
+        var div = document.createElement('div');
+        div.className = 'tutorial-help-menu-divider';
+        _helpMenu.appendChild(div);
+
+        var resetBtn = document.createElement('button');
+        resetBtn.className = 'tutorial-help-menu-item';
+        resetBtn.innerHTML = '<span class="material-icons">refresh</span>' + esc(t('tutorial.reset_all', 'Reset All Tutorials'));
+        resetBtn.addEventListener('click', function() {
+            closeHelpMenu();
+            resetTutorial();
+        });
+        _helpMenu.appendChild(resetBtn);
+
+        document.body.appendChild(_helpMenu);
+
+        _helpBtn.addEventListener('click', function(e) {
+            e.stopPropagation();
+            _helpMenuOpen ? closeHelpMenu() : openHelpMenu();
+        });
+
+        document.addEventListener('click', function() {
+            if (_helpMenuOpen) closeHelpMenu();
+        });
+
+        requestAnimationFrame(function() {
+            _helpBtn.classList.add('visible');
+        });
+    }
+
+    function hideHelpButton() {
+        if (_helpBtn) _helpBtn.classList.remove('visible');
+        closeHelpMenu();
+    }
+
+    function openHelpMenu() {
+        if (!_helpMenu) return;
+        _helpMenuOpen = true;
+        _helpMenu.classList.add('open');
+    }
+
+    function closeHelpMenu() {
+        if (!_helpMenu) return;
+        _helpMenuOpen = false;
+        _helpMenu.classList.remove('open');
+    }
+
+    function esc(s) {
+        var el = document.createElement('span');
+        el.textContent = s || '';
+        return el.innerHTML;
+    }
+
+    // Auto-show help button after DOM ready
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', function() { showHelpButton(); });
+    } else {
+        showHelpButton();
+    }
 
 })();

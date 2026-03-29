@@ -86,11 +86,11 @@
                     </div>
                 </div>
                 <div class="toolbar-right">
-                    <button class="btn btn-secondary" onclick="Tokens.showBulkModal()">
+                    <button class="btn btn-secondary" data-token-action="show-bulk-modal">
                         <span class="material-icons">playlist_add</span>
                         ${_('tokens.bulk_generate')}
                     </button>
-                    <button class="btn btn-primary" onclick="Tokens.showCreateModal()">
+                    <button class="btn btn-primary" data-token-action="show-create-modal">
                         <span class="material-icons">add</span>
                         ${_('tokens.create')}
                     </button>
@@ -123,7 +123,7 @@
                 <div class="modal">
                     <div class="modal-header">
                         <h3 id="token-modal-title">${_('tokens.create')}</h3>
-                        <button class="modal-close" onclick="Tokens.closeModal()">
+                        <button class="modal-close" data-token-action="close-modal">
                             <span class="material-icons">close</span>
                         </button>
                     </div>
@@ -158,8 +158,8 @@
                         </div>
                     </div>
                     <div class="modal-footer">
-                        <button class="btn btn-secondary" onclick="Tokens.closeModal()">${_('common.cancel')}</button>
-                        <button class="btn btn-primary" onclick="Tokens.saveToken()">${_('common.save')}</button>
+                        <button class="btn btn-secondary" data-token-action="close-modal">${_('common.cancel')}</button>
+                        <button class="btn btn-primary" data-token-action="save-token">${_('common.save')}</button>
                     </div>
                 </div>
             </div>
@@ -169,7 +169,7 @@
                 <div class="modal">
                     <div class="modal-header">
                         <h3>${_('tokens.bulk_generate')}</h3>
-                        <button class="modal-close" onclick="Tokens.closeBulkModal()">
+                        <button class="modal-close" data-token-action="close-bulk-modal">
                             <span class="material-icons">close</span>
                         </button>
                     </div>
@@ -202,8 +202,8 @@
                         </div>
                     </div>
                     <div class="modal-footer">
-                        <button class="btn btn-secondary" onclick="Tokens.closeBulkModal()">${_('common.cancel')}</button>
-                        <button class="btn btn-primary" onclick="Tokens.generateBulk()">
+                        <button class="btn btn-secondary" data-token-action="close-bulk-modal">${_('common.cancel')}</button>
+                        <button class="btn btn-primary" data-token-action="generate-bulk">
                             <span class="material-icons">playlist_add</span>
                             ${_('tokens.generate')}
                         </button>
@@ -216,7 +216,7 @@
                 <div class="modal">
                     <div class="modal-header">
                         <h3>${_('tokens.token_created')}</h3>
-                        <button class="modal-close" onclick="Tokens.closeCreatedModal()">
+                        <button class="modal-close" data-token-action="close-created-modal">
                             <span class="material-icons">close</span>
                         </button>
                     </div>
@@ -228,7 +228,7 @@
                         <div class="token-display" id="created-tokens-list"></div>
                     </div>
                     <div class="modal-footer">
-                        <button class="btn btn-primary" onclick="Tokens.closeCreatedModal()">${_('common.close')}</button>
+                        <button class="btn btn-primary" data-token-action="close-created-modal">${_('common.close')}</button>
                     </div>
                 </div>
             </div>

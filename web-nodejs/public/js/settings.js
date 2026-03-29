@@ -295,7 +295,7 @@
                     <div class="totp-manual-key">
                         <p class="totp-manual-label">${_('settings.totp_manual_key')}:</p>
                         <code class="totp-secret-code">${data.secret}</code>
-                        <button class="btn btn-sm btn-ghost" onclick="navigator.clipboard.writeText('${data.secret}')">
+                        <button class="btn btn-sm btn-ghost" id="totp-copy-secret-btn">
                             <span class="material-icons" style="font-size: 16px;">content_copy</span>
                         </button>
                     </div>
@@ -348,6 +348,10 @@
             // Cancel
             document.getElementById('totp-cancel-btn')?.addEventListener('click', () => {
                 initTotpSection();
+            });
+
+            document.getElementById('totp-copy-secret-btn')?.addEventListener('click', () => {
+                navigator.clipboard.writeText(data.secret).catch(() => {});
             });
             
         } catch (error) {

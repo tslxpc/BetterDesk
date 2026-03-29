@@ -22,7 +22,7 @@
     <%- body %>
     
     <!-- Scripts -->
-    <script>
+    <script nonce="<%= cspNonce %>">
         // Global config for viewer
         window.BetterDesk = {
             lang: '<%= lang || "en" %>',

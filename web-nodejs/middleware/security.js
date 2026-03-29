@@ -3,6 +3,7 @@
  * Configures Helmet and custom security headers
  */
 
+const crypto = require('crypto');
 const helmet = require('helmet');
 const config = require('../config/config');
 
@@ -14,43 +15,50 @@ const connectSources = config.httpsEnabled
     ? ["'self'", "wss:"]
     : ["'self'", "ws:"];
 
-/**
- * Configure Helmet with hardened CSP
- * - unsafe-eval: required by protobuf.js codegen (pinned to that library)
- * - unsafe-inline for scripts: required for EJS inline handlers + page scripts
- * - unsafe-inline for styles: required for dynamic theming via branding service
- */
-const helmetMiddleware = helmet({
-    contentSecurityPolicy: {
-        directives: {
-            defaultSrc: ["'self'"],
-            scriptSrc: ["'self'", "'unsafe-inline'", "'unsafe-eval'"],
-            scriptSrcAttr: ["'unsafe-inline'"],
-            styleSrc: ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com"],
-            fontSrc: ["'self'", "https://fonts.gstatic.com"],
-            imgSrc: ["'self'", "data:", "blob:"],
-            mediaSrc: ["'self'", "blob:"],
-            connectSrc: connectSources,
-            frameSrc: ["'self'"],
-            objectSrc: ["'none'"],
-            childSrc: ["'self'"],
-            workerSrc: ["'self'", "blob:"],
-            baseUri: ["'self'"],
-            formAction: ["'self'"],
-            frameAncestors: ["'self'"],
-            upgradeInsecureRequests: config.httpsEnabled ? [] : null
-        }
-    },
-    crossOriginEmbedderPolicy: false,
-    crossOriginResourcePolicy: { policy: 'same-origin' },
-    crossOriginOpenerPolicy: config.httpsEnabled ? { policy: 'same-origin' } : false,
-    originAgentCluster: config.httpsEnabled,
-    strictTransportSecurity: config.httpsEnabled
-        ? { maxAge: 31536000, includeSubDomains: true, preload: false }
-        : false,
-    dnsPrefetchControl: { allow: false },
-    referrerPolicy: { policy: 'strict-origin-when-cross-origin' }
-});
+function buildHelmetMiddleware(req, res) {
+    const nonce = crypto.randomBytes(16).toString('base64');
+    const isRemoteViewerPage = req.path.startsWith('/remote');
+
+    res.locals.cspNonce = nonce;
+
+    const scriptSources = ["'self'", `'nonce-${nonce}'`];
+    if (isRemoteViewerPage) {
+        // The remote viewer still depends on protobuf.js runtime code generation.
+        scriptSources.push("'unsafe-eval'");
+    }
+
+    return helmet({
+        contentSecurityPolicy: {
+            directives: {
+                defaultSrc: ["'self'"],
+                scriptSrc: scriptSources,
+                // scriptSrcAttr intentionally omitted — blocks inline event handlers
+                styleSrc: ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com"],
+                fontSrc: ["'self'", "https://fonts.gstatic.com"],
+                imgSrc: ["'self'", "data:", "blob:"],
+                mediaSrc: ["'self'", "blob:"],
+                connectSrc: connectSources,
+                frameSrc: ["'self'"],
+                objectSrc: ["'none'"],
+                childSrc: ["'self'"],
+                workerSrc: ["'self'", "blob:"],
+                baseUri: ["'self'"],
+                formAction: ["'self'"],
+                frameAncestors: ["'self'"],
+                upgradeInsecureRequests: config.httpsEnabled ? [] : null
+            }
+        },
+        crossOriginEmbedderPolicy: false,
+        crossOriginResourcePolicy: { policy: 'same-origin' },
+        crossOriginOpenerPolicy: config.httpsEnabled ? { policy: 'same-origin' } : false,
+        originAgentCluster: config.httpsEnabled,
+        strictTransportSecurity: config.httpsEnabled
+            ? { maxAge: 31536000, includeSubDomains: true, preload: false }
+            : false,
+        dnsPrefetchControl: { allow: false },
+        referrerPolicy: { policy: 'strict-origin-when-cross-origin' }
+    });
+}
 
 /**
  * Custom security headers beyond what Helmet provides
@@ -86,7 +94,7 @@ function customSecurityHeaders(req, res, next) {
  * Combined security middleware
  */
 function securityMiddleware(req, res, next) {
-    helmetMiddleware(req, res, () => {
+    buildHelmetMiddleware(req, res)(req, res, () => {
         customSecurityHeaders(req, res, next);
     });
 }

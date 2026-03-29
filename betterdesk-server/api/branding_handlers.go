@@ -1,6 +1,7 @@
 package api
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"log"
 	"net/http"
@@ -125,15 +126,15 @@ type EnrollmentRequest struct {
 
 // EnrollmentResponse is returned to the desktop client.
 type EnrollmentResponse struct {
-	Status        string         `json:"status"` // approved, pending, rejected
-	DeviceID      string         `json:"device_id"`
-	ServerTime    int64          `json:"server_time"`
-	SyncMode      string         `json:"sync_mode,omitempty"`      // silent, standard, turbo
-	DisplayName   string         `json:"display_name,omitempty"`   // Operator-assigned name
-	Branding      *BrandingConfig `json:"branding,omitempty"`      // Inline branding
-	ServerKey     string         `json:"server_key,omitempty"`     // Ed25519 public key (base64)
-	HeartbeatSec  int            `json:"heartbeat_interval"`       // Heartbeat interval
-	Message       string         `json:"message,omitempty"`        // Human-readable message
+	Status       string          `json:"status"` // approved, pending, rejected
+	DeviceID     string          `json:"device_id"`
+	ServerTime   int64           `json:"server_time"`
+	SyncMode     string          `json:"sync_mode,omitempty"`    // silent, standard, turbo
+	DisplayName  string          `json:"display_name,omitempty"` // Operator-assigned name
+	Branding     *BrandingConfig `json:"branding,omitempty"`     // Inline branding
+	ServerKey    string          `json:"server_key,omitempty"`   // Ed25519 public key (base64)
+	HeartbeatSec int             `json:"heartbeat_interval"`     // Heartbeat interval
+	Message      string          `json:"message,omitempty"`      // Human-readable message
 }
 
 // handleDeviceRegister handles desktop client self-registration.
@@ -153,6 +154,12 @@ func (s *Server) handleDeviceRegister(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "device_id is required", http.StatusBadRequest)
 		return
 	}
+	if req.PublicKey != "" {
+		if _, err := canonicalizeDevicePublicKey(req.PublicKey); err != nil {
+			http.Error(w, "invalid public_key", http.StatusBadRequest)
+			return
+		}
+	}
 
 	clientIP := s.remoteIP(r)
 	mode := s.cfg.EnrollmentMode
@@ -163,6 +170,19 @@ func (s *Server) handleDeviceRegister(w http.ResponseWriter, r *http.Request) {
 	// Check if device already exists (re-registration = always approve)
 	existing, _ := s.db.GetPeer(req.DeviceID)
 	if existing != nil {
+		if req.PublicKey != "" {
+			incomingCanonical, _ := canonicalizeDevicePublicKey(req.PublicKey)
+			if bound, err := s.loadBdMgmtPublicKey(req.DeviceID); err == nil && len(bound) == 32 {
+				boundCanonical := base64.StdEncoding.EncodeToString(bound)
+				if incomingCanonical != boundCanonical {
+					http.Error(w, "public_key does not match enrolled device identity", http.StatusForbidden)
+					return
+				}
+			} else if err := s.storeBdMgmtPublicKey(req.DeviceID, incomingCanonical); err != nil {
+				log.Printf("[API] Failed to bind public key for %s: %v", req.DeviceID, err)
+			}
+		}
+
 		// Device already known — return approved with current config
 		syncMode, _ := s.db.GetConfig("device_sync_mode_" + req.DeviceID)
 		if syncMode == "" {
@@ -551,6 +571,12 @@ func (s *Server) createPeerFromEnrollment(req *EnrollmentRequest, clientIP strin
 
 	// Persist device_type via UpdatePeerFields
 	s.db.UpdatePeerFields(req.DeviceID, map[string]string{"device_type": devType})
+
+	if req.PublicKey != "" {
+		if err := s.storeBdMgmtPublicKey(req.DeviceID, req.PublicKey); err != nil {
+			log.Printf("[API] Failed to persist enrollment public key for %s: %v", req.DeviceID, err)
+		}
+	}
 }
 
 type pendingDeviceInfo struct {

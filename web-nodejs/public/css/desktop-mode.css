@@ -62,7 +62,7 @@ body.desktop-active .desktop-shell {
 .desktop-wallpaper {
     position: absolute;
     inset: 0;
-    background-image: url('/img/betterdesk_wallpaper.png');
+    background-image: linear-gradient(135deg, #0d1117 0%, #161b22 40%, #1a1a2e 70%, #0f3460 100%);
     background-size: cover;
     background-position: center;
     background-repeat: no-repeat;
@@ -388,41 +388,263 @@ body.desktop-active .desktop-shell {
 
 .desktop-window.maximized .window-edge { display: none; }
 
-/* ============ Taskbar ============ */
+/* ============ Top Bar ============ */
+
+.desktop-topbar {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 36px;
+    z-index: 110;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    background: rgba(13, 17, 23, 0.88);
+    backdrop-filter: blur(24px) saturate(180%);
+    -webkit-backdrop-filter: blur(24px) saturate(180%);
+    border-bottom: 1px solid rgba(48, 54, 61, 0.5);
+    padding: 0 10px;
+    font-size: 13px;
+    user-select: none;
+    -webkit-user-select: none;
+}
+
+.topbar-left,
+.topbar-right {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.topbar-center {
+    font-size: 12px;
+    color: var(--text-secondary, #8b949e);
+    font-variant-numeric: tabular-nums;
+}
+
+.topbar-brand {
+    font-weight: 600;
+    font-size: 13px;
+    color: var(--text-primary, #e6edf3);
+    letter-spacing: 0.02em;
+}
+
+.topbar-btn {
+    width: 30px;
+    height: 30px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border: none;
+    background: transparent;
+    color: var(--text-secondary, #8b949e);
+    cursor: pointer;
+    border-radius: 6px;
+    transition: background 0.15s ease, color 0.15s ease;
+}
+
+.topbar-btn:hover {
+    background: rgba(255, 255, 255, 0.1);
+    color: var(--text-primary, #e6edf3);
+}
+
+.topbar-btn .material-icons {
+    font-size: 18px;
+}
+
+/* ============ App Drawer ============ */
+
+.app-drawer-overlay {
+    position: absolute;
+    inset: 36px 0 0 0;
+    z-index: 105;
+    display: flex;
+    align-items: flex-start;
+    justify-content: center;
+    background: rgba(0, 0, 0, 0.45);
+    backdrop-filter: blur(4px);
+    animation: fadeIn 0.15s ease;
+}
+
+.app-drawer {
+    margin-top: 20px;
+    width: min(640px, 90vw);
+    max-height: calc(100vh - 100px);
+    background: rgba(22, 27, 34, 0.95);
+    backdrop-filter: blur(28px) saturate(1.4);
+    -webkit-backdrop-filter: blur(28px) saturate(1.4);
+    border: 1px solid rgba(48, 54, 61, 0.7);
+    border-radius: 14px;
+    box-shadow: 0 16px 48px rgba(0, 0, 0, 0.4);
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    animation: slideDown 0.2s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+@keyframes slideDown {
+    from { opacity: 0; transform: translateY(-12px) scale(0.97); }
+    to   { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+.app-drawer-header {
+    padding: 12px 16px;
+    border-bottom: 1px solid rgba(48, 54, 61, 0.5);
+}
+
+.app-drawer-search {
+    width: 100%;
+    background: rgba(255, 255, 255, 0.06);
+    border: 1px solid rgba(48, 54, 61, 0.5);
+    border-radius: 8px;
+    padding: 8px 12px;
+    color: var(--text-primary, #e6edf3);
+    font-size: 13px;
+    outline: none;
+    font-family: inherit;
+}
+
+.app-drawer-search:focus {
+    border-color: var(--accent-blue, #58a6ff);
+    box-shadow: 0 0 0 2px rgba(88, 166, 255, 0.2);
+}
+
+.app-drawer-search::placeholder { color: var(--text-tertiary, #484f58); }
+
+.app-drawer-grid {
+    padding: 12px 16px 16px;
+    overflow-y: auto;
+    flex: 1;
+}
+
+.app-drawer-category {
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--text-tertiary, #484f58);
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    padding: 8px 0 4px;
+    margin-top: 4px;
+}
+
+.app-drawer-category:first-child { margin-top: 0; }
+
+.app-drawer-row {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(100px, 1fr));
+    gap: 6px;
+    padding: 4px 0;
+}
+
+.app-drawer-tile {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 6px;
+    padding: 12px 8px;
+    background: transparent;
+    border: none;
+    border-radius: 10px;
+    color: var(--text-primary, #e6edf3);
+    cursor: pointer;
+    transition: background 0.15s ease, transform 0.15s ease;
+    font-family: inherit;
+}
+
+.app-drawer-tile:hover {
+    background: rgba(255, 255, 255, 0.07);
+    transform: scale(1.05);
+}
+
+.app-drawer-tile:active {
+    transform: scale(0.97);
+}
+
+.app-drawer-tile-name {
+    font-size: 11px;
+    text-align: center;
+    line-height: 1.3;
+    max-width: 90px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+/* ============ Taskbar (compact dock) ============ */
 
 .desktop-taskbar {
     position: absolute;
     bottom: 0;
-    left: 0;
-    right: 0;
-    height: 48px;
+    left: 50%;
+    transform: translateX(-50%) translateY(calc(100% - 8px));
+    height: 40px;
     z-index: 100;
     display: flex;
     align-items: center;
-    background: rgba(13, 17, 23, 0.85);
-    backdrop-filter: blur(20px) saturate(180%);
-    -webkit-backdrop-filter: blur(20px) saturate(180%);
-    border-top: 1px solid rgba(48, 54, 61, 0.6);
-    padding: 0 8px;
-    gap: 4px;
+    background: rgba(13, 17, 23, 0.88);
+    backdrop-filter: blur(24px) saturate(180%);
+    -webkit-backdrop-filter: blur(24px) saturate(180%);
+    border: 1px solid rgba(48, 54, 61, 0.5);
+    border-bottom: none;
+    border-radius: 12px 12px 0 0;
+    padding: 0 4px;
+    gap: 3px;
     animation: taskbarSlideUp 0.35s cubic-bezier(0.4, 0, 0.2, 1) forwards;
-    transition: transform 0.3s ease, opacity 0.2s ease;
+    transition: transform 0.25s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.2s ease;
+    max-width: 90vw;
+    opacity: 0.7;
 }
 
-/* Start button removed in Phase 11.2 — styles kept for backwards compatibility */
+/* Taskbar peeks as thin strip of color dots; expands upward on hover */
+.desktop-taskbar:hover,
+.desktop-taskbar.taskbar-expanded {
+    transform: translateX(-50%) translateY(0);
+    opacity: 1;
+}
+
 .taskbar-start {
-    display: none;
+    display: flex;
+    align-items: center;
+    padding: 0 2px;
 }
 
 .taskbar-start-btn {
-    display: none;
+    width: 32px;
+    height: 32px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border: none;
+    background: transparent;
+    color: var(--text-secondary, #8b949e);
+    cursor: pointer;
+    border-radius: 6px;
+    transition: background 0.15s ease, color 0.15s ease;
+}
+
+.taskbar-start-btn:hover {
+    background: rgba(255, 255, 255, 0.12);
+    color: var(--text-primary, #e6edf3);
+}
+
+.taskbar-start-btn .material-icons {
+    font-size: 20px;
+}
+
+.taskbar-start::after {
+    content: '';
+    width: 1px;
+    height: 20px;
+    background: rgba(255, 255, 255, 0.12);
+    margin-left: 2px;
 }
 
 .taskbar-apps {
     flex: 1;
     display: flex;
     align-items: center;
-    gap: 2px;
+    gap: 3px;
     overflow-x: auto;
     scrollbar-width: none;
 }
@@ -431,29 +653,72 @@ body.desktop-active .desktop-shell {
     display: none;
 }
 
+/* --- Compact app button: small color square in peek, icon on hover --- */
 .taskbar-app-btn {
     display: flex;
     align-items: center;
-    gap: 6px;
-    height: 36px;
-    padding: 0 12px;
+    justify-content: center;
+    width: 12px;
+    height: 12px;
+    padding: 0;
     border: none;
-    background: transparent;
-    color: var(--text-secondary, #8b949e);
+    background: var(--taskbar-btn-color, rgba(88, 166, 255, 0.7));
+    color: transparent;
     cursor: pointer;
-    border-radius: 6px;
-    transition: background 0.15s ease, color 0.15s ease;
+    border-radius: 3px;
+    transition: width 0.2s cubic-bezier(0.4, 0, 0.2, 1),
+                height 0.2s cubic-bezier(0.4, 0, 0.2, 1),
+                border-radius 0.2s ease,
+                background 0.15s ease,
+                color 0.15s ease,
+                box-shadow 0.15s ease;
     white-space: nowrap;
     flex-shrink: 0;
     font-size: 12px;
     font-family: inherit;
     position: relative;
+    overflow: hidden;
 }
 
+/* When taskbar is expanded (hovered), buttons grow to icon size */
+.desktop-taskbar:hover .taskbar-app-btn,
+.desktop-taskbar.taskbar-expanded .taskbar-app-btn {
+    width: 32px;
+    height: 32px;
+    border-radius: 7px;
+    background: transparent;
+    color: var(--text-secondary, #8b949e);
+}
+
+.taskbar-app-btn .taskbar-label {
+    max-width: 0;
+    overflow: hidden;
+    opacity: 0;
+    transition: max-width 0.2s ease, opacity 0.15s ease, margin 0.2s ease;
+    margin-left: 0;
+    font-size: 11px;
+}
+
+.desktop-taskbar:hover .taskbar-app-btn:hover,
+.desktop-taskbar.taskbar-expanded .taskbar-app-btn:hover {
+    width: auto;
+    padding: 0 10px;
+    background: rgba(255, 255, 255, 0.08);
+    color: var(--text-primary, #e6edf3);
+}
+
+.desktop-taskbar:hover .taskbar-app-btn:hover .taskbar-label,
+.desktop-taskbar.taskbar-expanded .taskbar-app-btn:hover .taskbar-label {
+    max-width: 120px;
+    opacity: 1;
+    margin-left: 5px;
+}
+
+/* Active indicator dot */
 .taskbar-app-btn::after {
     content: '';
     position: absolute;
-    bottom: 2px;
+    bottom: 1px;
     left: 50%;
     transform: translateX(-50%);
     width: 0;
@@ -463,39 +728,62 @@ body.desktop-active .desktop-shell {
     transition: width 0.2s ease;
 }
 
-.taskbar-app-btn.active::after {
-    width: 20px;
+.desktop-taskbar:hover .taskbar-app-btn.active::after,
+.desktop-taskbar.taskbar-expanded .taskbar-app-btn.active::after {
+    width: 14px;
 }
 
+.desktop-taskbar:hover .taskbar-app-btn.focused,
+.desktop-taskbar.taskbar-expanded .taskbar-app-btn.focused {
+    background: rgba(255, 255, 255, 0.08);
+    color: var(--text-primary, #e6edf3);
+}
+
+.desktop-taskbar:hover .taskbar-app-btn.focused::after,
+.desktop-taskbar.taskbar-expanded .taskbar-app-btn.focused::after {
+    width: 14px;
+}
+
+/* Focused app square glows in peek mode */
 .taskbar-app-btn.focused {
-    background: rgba(255, 255, 255, 0.08);
-    color: var(--text-primary, #e6edf3);
+    box-shadow: 0 0 6px 1px var(--taskbar-btn-color, rgba(88, 166, 255, 0.6));
 }
 
-.taskbar-app-btn.focused::after {
-    width: 20px;
-}
-
-.taskbar-app-btn:hover {
-    background: rgba(255, 255, 255, 0.08);
-    color: var(--text-primary, #e6edf3);
-}
-
-.taskbar-app-btn .material-icons {
+.taskbar-icon {
     font-size: 18px;
+    flex-shrink: 0;
+    /* Hidden in peek mode, shown when expanded */
+    opacity: 0;
+    transition: opacity 0.15s ease;
+}
+
+.desktop-taskbar:hover .taskbar-icon,
+.desktop-taskbar.taskbar-expanded .taskbar-icon {
+    opacity: 1;
 }
 
 .taskbar-right {
     display: flex;
     align-items: center;
-    gap: 4px;
-    padding-left: 8px;
+    gap: 3px;
+    padding-left: 6px;
     margin-left: auto;
+    /* Hidden in peek mode */
+    opacity: 0;
+    max-width: 0;
+    overflow: hidden;
+    transition: opacity 0.2s ease, max-width 0.25s ease;
+}
+
+.desktop-taskbar:hover .taskbar-right,
+.desktop-taskbar.taskbar-expanded .taskbar-right {
+    opacity: 1;
+    max-width: 200px;
 }
 
 .taskbar-btn {
-    width: 36px;
-    height: 36px;
+    width: 30px;
+    height: 30px;
     display: flex;
     align-items: center;
     justify-content: center;
@@ -513,30 +801,30 @@ body.desktop-active .desktop-shell {
 }
 
 .taskbar-btn .material-icons {
-    font-size: 20px;
+    font-size: 18px;
 }
 
 .taskbar-clock {
-    font-size: 12px;
+    font-size: 11px;
     color: var(--text-secondary, #8b949e);
-    min-width: 50px;
+    min-width: 44px;
     text-align: center;
-    padding: 0 6px;
+    padding: 0 4px;
     font-variant-numeric: tabular-nums;
 }
 
-/* Taskbar auto-hide (slides down when no open windows in widgets mode) */
+/* Taskbar fully hidden when no windows */
 .desktop-taskbar.taskbar-hidden {
-    transform: translateY(100%);
+    transform: translateX(-50%) translateY(100%);
     opacity: 0;
     pointer-events: none;
     transition: transform 0.3s ease, opacity 0.2s ease;
 }
 
 .desktop-taskbar.taskbar-hidden:hover {
-    transform: translateY(0);
-    opacity: 1;
-    pointer-events: auto;
+    transform: translateX(-50%) translateY(100%);
+    opacity: 0;
+    pointer-events: none;
 }
 
 /* ============ Desktop Context Menu ============ */

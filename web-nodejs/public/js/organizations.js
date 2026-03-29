@@ -95,15 +95,25 @@
                     <span class="org-card-date">${formatDate(org.created_at)}</span>
                 </div>
                 <div class="org-card-actions">
-                    <button class="btn btn-icon btn-sm" onclick="orgPage.edit('${org.id}')" title="Edit">
+                    <button class="btn btn-icon btn-sm org-edit-btn" data-id="${org.id}" title="Edit">
                         <span class="material-icons">edit</span>
                     </button>
-                    <button class="btn btn-icon btn-sm btn-danger" onclick="orgPage.remove('${org.id}')" title="Delete">
+                    <button class="btn btn-icon btn-sm btn-danger org-delete-btn" data-id="${org.id}" title="Delete">
                         <span class="material-icons">delete</span>
                     </button>
                 </div>
             </div>
         `).join('');
+
+        orgList.querySelectorAll('.org-edit-btn').forEach(btn => {
+            btn.addEventListener('click', () => {
+                const org = organizations.find(o => o.id === btn.dataset.id);
+                if (org) openModal(org);
+            });
+        });
+        orgList.querySelectorAll('.org-delete-btn').forEach(btn => {
+            btn.addEventListener('click', () => removeOrg(btn.dataset.id));
+        });
     }
 
     function escHtml(s) {
@@ -213,12 +223,4 @@
     // -----------------------------------------------------------------------
     loadOrganizations();
 
-    // Expose for inline handlers
-    window.orgPage = {
-        edit(id) {
-            const org = organizations.find(o => o.id === id);
-            if (org) openModal(org);
-        },
-        remove: removeOrg,
-    };
 })();

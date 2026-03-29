@@ -228,7 +228,7 @@
 </template>
 
 <!-- Initial session data (from server route) -->
-<script>
+<script nonce="<%= cspNonce %>">
     window.__initialDeviceId = '` + deviceId + `';
     window.__initialDeviceName = '` + (device && device.hostname ? device.hostname.replace(/'/g, "\\\\'") : '') + `';
 </script>

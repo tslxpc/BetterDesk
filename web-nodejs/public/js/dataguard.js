@@ -90,6 +90,7 @@
     const createBtn = document.getElementById('create-policy-btn');
     const policyModal = document.getElementById('policy-modal');
     const saveBtn = document.getElementById('policy-save-btn');
+    const cancelBtn = document.getElementById('policy-cancel-btn');
     const policySearch = document.getElementById('policy-search');
     let allPolicies = [];
 
@@ -202,6 +203,7 @@
 
     createBtn.addEventListener('click', () => openPolicyModal(null));
     saveBtn.addEventListener('click', savePolicy);
+    cancelBtn?.addEventListener('click', () => { policyModal.style.display = 'none'; });
     policySearch.addEventListener('input', filterPolicies);
 
     // ==== Events ====

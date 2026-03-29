@@ -110,7 +110,7 @@
                                 <td><span class="role-badge role-${u.role}">${u.role}</span></td>
                                 <td>${formatDate(u.last_login)}</td>
                                 <td>
-                                    <button class="btn btn-icon btn-sm" onclick="orgDetail.deleteUser('${u.id}')" title="Remove">
+                                    <button class="btn btn-icon btn-sm user-remove-btn" data-user-id="${u.id}" title="Remove">
                                         <span class="material-icons">person_remove</span>
                                     </button>
                                 </td>
@@ -118,6 +118,10 @@
                         `).join('')}
                     </tbody>
                 </table>`;
+
+            container.querySelectorAll('.user-remove-btn').forEach(btn => {
+                btn.addEventListener('click', () => deleteUser(btn.dataset.userId));
+            });
         } catch (err) {
             toast('Failed to load users', 'error');
         }
@@ -174,7 +178,7 @@
                                 <td>${escHtml(d.location)}</td>
                                 <td>${escHtml(d.assigned_user_id)}</td>
                                 <td>
-                                    <button class="btn btn-icon btn-sm btn-danger" onclick="orgDetail.unassignDevice('${d.device_id}')" title="Unassign">
+                                    <button class="btn btn-icon btn-sm btn-danger device-unassign-btn" data-device-id="${d.device_id}" title="Unassign">
                                         <span class="material-icons">link_off</span>
                                     </button>
                                 </td>
@@ -182,6 +186,10 @@
                         `).join('')}
                     </tbody>
                 </table>`;
+
+            container.querySelectorAll('.device-unassign-btn').forEach(btn => {
+                btn.addEventListener('click', () => unassignDevice(btn.dataset.deviceId));
+            });
         } catch (err) {
             toast('Failed to load devices', 'error');
         }
@@ -349,6 +357,28 @@
         }
     });
 
+    async function deleteUser(uid) {
+        if (!confirm('Remove this user from the organization?')) return;
+        try {
+            await api('DELETE', `/users/${uid}`);
+            toast('User removed', 'success');
+            loadUsers();
+        } catch (err) {
+            toast(err.message, 'error');
+        }
+    }
+
+    async function unassignDevice(did) {
+        if (!confirm('Unassign this device from the organization?')) return;
+        try {
+            await api('DELETE', `/devices/${did}`);
+            toast('Device unassigned', 'success');
+            loadDevices();
+        } catch (err) {
+            toast(err.message, 'error');
+        }
+    }
+
     // -----------------------------------------------------------------------
     //  Init
     // -----------------------------------------------------------------------
@@ -358,27 +388,4 @@
     loadInvitations();
     loadSettings();
 
-    // Expose for inline handlers
-    window.orgDetail = {
-        async deleteUser(uid) {
-            if (!confirm('Remove this user from the organization?')) return;
-            try {
-                await api('DELETE', `/users/${uid}`);
-                toast('User removed', 'success');
-                loadUsers();
-            } catch (err) {
-                toast(err.message, 'error');
-            }
-        },
-        async unassignDevice(did) {
-            if (!confirm('Unassign this device from the organization?')) return;
-            try {
-                await api('DELETE', `/devices/${did}`);
-                toast('Device unassigned', 'success');
-                loadDevices();
-            } catch (err) {
-                toast(err.message, 'error');
-            }
-        },
-    };
 })();

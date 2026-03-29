@@ -138,10 +138,10 @@
                 <td>${formatTimeAgo(t.created_at)}</td>
                 <td class="actions-cell">
                     ${t.status !== 'revoked' ? `
-                        <button class="btn-icon" onclick="Tokens.editToken(${t.id})" title="${escapeHtml(_('common.save'))}">
+                        <button class="btn-icon" data-token-action="edit" data-id="${t.id}" title="${escapeHtml(_('common.save'))}">
                             <span class="material-icons">edit</span>
                         </button>
-                        <button class="btn-icon btn-icon-danger" onclick="Tokens.revokeToken(${t.id})" title="${escapeHtml(_('tokens.revoke'))}">
+                        <button class="btn-icon btn-icon-danger" data-token-action="revoke" data-id="${t.id}" title="${escapeHtml(_('tokens.revoke'))}">
                             <span class="material-icons">block</span>
                         </button>
                     ` : ''}
@@ -201,7 +201,7 @@
                 <div class="token-created-name">${escapeHtml(t.name)}</div>
                 <div class="token-created-value">
                     <code>${escapeHtml(t.token)}</code>
-                    <button class="btn-icon" onclick="Tokens.copyToken('${escapeHtml(t.token)}')">
+                    <button class="btn-icon" data-token-action="copy" data-token="${encodeURIComponent(t.token)}">
                         <span class="material-icons">content_copy</span>
                     </button>
                 </div>
@@ -313,6 +313,44 @@
     // ── Init ─────────────────────────────────────────────────────────────
 
     function init() {
+        document.addEventListener('click', (event) => {
+            const button = event.target.closest('[data-token-action]');
+            if (!button) return;
+
+            switch (button.dataset.tokenAction) {
+                case 'show-bulk-modal':
+                    showBulkModal();
+                    break;
+                case 'show-create-modal':
+                    showCreateModal();
+                    break;
+                case 'close-modal':
+                    closeModal();
+                    break;
+                case 'save-token':
+                    saveToken();
+                    break;
+                case 'close-bulk-modal':
+                    closeBulkModal();
+                    break;
+                case 'generate-bulk':
+                    generateBulk();
+                    break;
+                case 'close-created-modal':
+                    closeCreatedModal();
+                    break;
+                case 'edit':
+                    editToken(Number(button.dataset.id));
+                    break;
+                case 'revoke':
+                    revokeToken(Number(button.dataset.id));
+                    break;
+                case 'copy':
+                    copyToken(decodeURIComponent(button.dataset.token || ''));
+                    break;
+            }
+        });
+
         // Filter pills
         document.querySelectorAll('.filter-pill').forEach(btn => {
             btn.addEventListener('click', () => {

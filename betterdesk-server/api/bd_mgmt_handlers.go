@@ -14,7 +14,11 @@ package api
 
 import (
 	"context"
+	"crypto/ed25519"
+	"encoding/base64"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"log"
 	"net/http"
 	"sync"
@@ -22,6 +26,13 @@ import (
 
 	"github.com/coder/websocket"
 	"github.com/coder/websocket/wsjson"
+	"github.com/unitronix/betterdesk-server/audit"
+)
+
+const (
+	bdMgmtClockSkew           = 5 * time.Minute
+	bdMgmtNonceTTL            = 10 * time.Minute
+	bdMgmtPublicKeyConfigPref = "device_public_key_"
 )
 
 // bdMgmtMessage is the JSON envelope for management messages.
@@ -50,6 +61,122 @@ type bdMgmtHub struct {
 
 var mgmtHub = &bdMgmtHub{
 	sessions: make(map[string]*bdMgmtSession),
+}
+
+type bdMgmtNonceCache struct {
+	mu    sync.Mutex
+	items map[string]time.Time
+}
+
+var mgmtNonceCache = &bdMgmtNonceCache{items: make(map[string]time.Time)}
+
+func (c *bdMgmtNonceCache) markUsed(key string, now time.Time) bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	for k, exp := range c.items {
+		if now.After(exp) {
+			delete(c.items, k)
+		}
+	}
+	if _, exists := c.items[key]; exists {
+		return true
+	}
+	c.items[key] = now.Add(bdMgmtNonceTTL)
+	return false
+}
+
+func bdMgmtSignaturePayload(deviceID, ts, nonce string) []byte {
+	return []byte(fmt.Sprintf("bd-mgmt-v1\n%s\n%s\n%s", deviceID, ts, nonce))
+}
+
+func canonicalizeDevicePublicKey(encoded string) (string, error) {
+	decoded, err := base64.StdEncoding.DecodeString(encoded)
+	if err != nil {
+		return "", fmt.Errorf("invalid base64 public key: %w", err)
+	}
+	if len(decoded) != ed25519.PublicKeySize {
+		return "", fmt.Errorf("invalid public key length: %d", len(decoded))
+	}
+	return base64.StdEncoding.EncodeToString(decoded), nil
+}
+
+func (s *Server) storeBdMgmtPublicKey(deviceID, encoded string) error {
+	canonical, err := canonicalizeDevicePublicKey(encoded)
+	if err != nil {
+		return err
+	}
+	return s.db.SetConfig(bdMgmtPublicKeyConfigPref+deviceID, canonical)
+}
+
+func (s *Server) loadBdMgmtPublicKey(deviceID string) ([]byte, error) {
+	if peerInfo, err := s.db.GetPeer(deviceID); err == nil && peerInfo != nil && len(peerInfo.PK) == ed25519.PublicKeySize {
+		pk := make([]byte, len(peerInfo.PK))
+		copy(pk, peerInfo.PK)
+		return pk, nil
+	}
+
+	stored, err := s.db.GetConfig(bdMgmtPublicKeyConfigPref + deviceID)
+	if err != nil {
+		return nil, err
+	}
+	if stored == "" {
+		return nil, errors.New("no bound device public key")
+	}
+	decoded, err := base64.StdEncoding.DecodeString(stored)
+	if err != nil {
+		return nil, fmt.Errorf("invalid stored public key: %w", err)
+	}
+	if len(decoded) != ed25519.PublicKeySize {
+		return nil, fmt.Errorf("invalid stored public key length: %d", len(decoded))
+	}
+	return decoded, nil
+}
+
+func (s *Server) verifyBdMgmtRequest(r *http.Request, deviceID string) error {
+	tsHeader := r.Header.Get("X-BD-Timestamp")
+	nonce := r.Header.Get("X-BD-Nonce")
+	sigHeader := r.Header.Get("X-BD-Signature")
+	if tsHeader == "" || nonce == "" || sigHeader == "" {
+		return errors.New("missing signed device headers")
+	}
+
+	unixTs, err := time.Parse(time.RFC3339, tsHeader)
+	if err != nil {
+		return fmt.Errorf("invalid timestamp: %w", err)
+	}
+	now := time.Now().UTC()
+	delta := now.Sub(unixTs.UTC())
+	if delta < 0 {
+		delta = -delta
+	}
+	if delta > bdMgmtClockSkew {
+		return errors.New("timestamp outside allowed skew")
+	}
+
+	pubKey, err := s.loadBdMgmtPublicKey(deviceID)
+	if err != nil {
+		return err
+	}
+
+	sig, err := base64.StdEncoding.DecodeString(sigHeader)
+	if err != nil {
+		return fmt.Errorf("invalid signature encoding: %w", err)
+	}
+	if len(sig) != ed25519.SignatureSize {
+		return fmt.Errorf("invalid signature length: %d", len(sig))
+	}
+
+	payload := bdMgmtSignaturePayload(deviceID, tsHeader, nonce)
+	if !ed25519.Verify(ed25519.PublicKey(pubKey), payload, sig) {
+		return errors.New("invalid device signature")
+	}
+
+	cacheKey := deviceID + ":" + nonce
+	if mgmtNonceCache.markUsed(cacheKey, now) {
+		return errors.New("replayed device signature")
+	}
+
+	return nil
 }
 
 // Get returns the session for a device, or nil.
@@ -119,6 +246,13 @@ func (h *bdMgmtHub) ConnectedDevices() []string {
 
 // handleBdMgmt upgrades to WebSocket and runs the management session.
 // Route: GET /ws/bd-mgmt/{device_id}
+//
+// Auth: Requires proof-of-possession using the device's bound Ed25519 key.
+// The client must send signed headers before the WS upgrade is attempted:
+//
+//	X-BD-Timestamp: RFC3339 UTC timestamp
+//	X-BD-Nonce:     unique per-connection nonce
+//	X-BD-Signature: base64(Ed25519Sign("bd-mgmt-v1\n<device_id>\n<ts>\n<nonce>"))
 func (s *Server) handleBdMgmt(w http.ResponseWriter, r *http.Request) {
 	deviceID := r.PathValue("device_id")
 	if deviceID == "" || len(deviceID) < 3 || len(deviceID) > 32 {
@@ -126,19 +260,36 @@ func (s *Server) handleBdMgmt(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Verify the device exists, is not banned, and is not deleted
+	clientIP := s.remoteIP(r)
+	peerInfo, err := s.db.GetPeer(deviceID)
+	if err != nil {
+		http.Error(w, "device lookup failed", http.StatusInternalServerError)
+		return
+	}
+	if peerInfo == nil {
+		http.Error(w, "unknown device", http.StatusUnauthorized)
+		return
+	}
+
+	// Verify the device exists, is not banned, and is not deleted.
 	if banned, _ := s.db.IsPeerBanned(deviceID); banned {
+		log.Printf("[bd-mgmt] Rejected connection from %s — device %s is banned", clientIP, deviceID)
 		http.Error(w, "device banned", http.StatusForbidden)
 		return
 	}
 	if deleted, _ := s.db.IsPeerSoftDeleted(deviceID); deleted {
+		log.Printf("[bd-mgmt] Rejected connection from %s — device %s is deleted", clientIP, deviceID)
 		http.Error(w, "device deleted", http.StatusForbidden)
 		return
 	}
 
-	conn, err := websocket.Accept(w, r, &websocket.AcceptOptions{
-		InsecureSkipVerify: true, // Accept from any origin (device clients)
-	})
+	if err := s.verifyBdMgmtRequest(r, deviceID); err != nil {
+		log.Printf("[bd-mgmt] Rejected connection from %s for %s: %v", clientIP, deviceID, err)
+		http.Error(w, "device authentication failed", http.StatusUnauthorized)
+		return
+	}
+
+	conn, err := websocket.Accept(w, r, nil)
 	if err != nil {
 		log.Printf("[bd-mgmt] WebSocket accept error for %s: %v", deviceID, err)
 		return
@@ -155,7 +306,12 @@ func (s *Server) handleBdMgmt(w http.ResponseWriter, r *http.Request) {
 	}
 
 	mgmtHub.Put(session)
-	log.Printf("[bd-mgmt] Device %s connected (management channel)", deviceID)
+	log.Printf("[bd-mgmt] Device %s connected (proof-of-possession, ip: %s)", deviceID, clientIP)
+
+	if s.auditLog != nil {
+		s.auditLog.Log(audit.ActionPeerUpdated, clientIP, deviceID,
+			map[string]string{"event": "bd_mgmt_connect", "auth": "device_signature"})
+	}
 
 	// Mark device as betterdesk_desktop in the database
 	_ = s.db.UpdatePeerFields(deviceID, map[string]string{
@@ -179,6 +335,11 @@ func (s *Server) handleBdMgmt(w http.ResponseWriter, r *http.Request) {
 	cancel()
 	conn.Close(websocket.StatusNormalClosure, "session ended")
 	log.Printf("[bd-mgmt] Device %s disconnected", deviceID)
+
+	if s.auditLog != nil {
+		s.auditLog.Log(audit.ActionPeerUpdated, clientIP, deviceID,
+			map[string]string{"event": "bd_mgmt_disconnect", "auth": "device_signature"})
+	}
 }
 
 // readLoop reads messages from the device.

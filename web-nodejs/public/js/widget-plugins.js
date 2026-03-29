@@ -1081,15 +1081,23 @@
             var html = '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(100px,1fr));gap:8px;padding:10px">';
             items.forEach(function (item) {
                 html += '<a href="' + esc(item.url) + '" target="_blank" rel="noopener" ' +
+                    'class="widget-bookmark-link" ' +
                     'style="display:flex;flex-direction:column;align-items:center;gap:6px;padding:12px 8px;' +
                     'border-radius:8px;background:rgba(255,255,255,0.03);text-decoration:none;color:inherit;' +
-                    'transition:background .15s" onmouseenter="this.style.background=\'rgba(255,255,255,0.08)\'" ' +
-                    'onmouseleave="this.style.background=\'rgba(255,255,255,0.03)\'">' +
+                    'transition:background .15s">' +
                     '<span class="material-icons" style="font-size:24px;color:#f0883e">link</span>' +
                     '<span style="font-size:11px;text-align:center;word-break:break-word">' + esc(item.name) + '</span></a>';
             });
             html += '</div>';
             body.innerHTML = html;
+            body.querySelectorAll('.widget-bookmark-link').forEach(function (link) {
+                link.addEventListener('mouseenter', function () {
+                    link.style.background = 'rgba(255,255,255,0.08)';
+                });
+                link.addEventListener('mouseleave', function () {
+                    link.style.background = 'rgba(255,255,255,0.03)';
+                });
+            });
         },
         configFields: [
             { key: 'links', label: 'Links (Name|URL, comma-separated)', type: 'text', placeholder: 'Grafana|http://localhost:3000' }
@@ -1686,6 +1694,107 @@
                 });
                 pinsContainer.innerHTML = html;
             }).catch(function () {});
+        }
+    });
+
+    // ============ 32. Remote Connect ============
+
+    register('remote-connect', {
+        name: t('desktop.widget_remote_connect') || 'Remote Connect',
+        icon: 'connected_tv',
+        color: '#58a6ff',
+        category: 'tools',
+        description: 'Quick-connect to online devices',
+        defaultSize: { w: 340, h: 300 },
+        minSize: { w: 260, h: 200 },
+        render: function (body) {
+            body.innerHTML =
+                '<div style="display:flex;flex-direction:column;height:100%;gap:6px;padding:2px 0">' +
+                '<div style="display:flex;align-items:center;gap:6px;flex-shrink:0">' +
+                '<input class="rc-search" type="text" placeholder="' + esc(t('desktop.label_filter_devices') || 'Filter…') + '" ' +
+                'style="flex:1;background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.1);border-radius:6px;padding:5px 8px;color:inherit;font-size:12px;outline:none">' +
+                '<span class="rc-count" style="font-size:11px;opacity:0.5;white-space:nowrap"></span></div>' +
+                '<div class="rc-list" style="flex:1;overflow-y:auto;display:flex;flex-direction:column;gap:4px;scrollbar-width:thin"></div>' +
+                '<div class="rc-empty" style="display:none;text-align:center;padding:20px 8px;opacity:0.4;font-size:12px">' +
+                '<span class="material-icons" style="font-size:32px;display:block;margin-bottom:6px">desktop_access_disabled</span>' +
+                (t('desktop.label_no_online') || 'No online devices') + '</div></div>';
+        },
+        update: function (body) {
+            apiGet('/api/devices').then(function (data) {
+                var peers = data && data.devices ? data.devices : (Array.isArray(data) ? data : []);
+                var online = peers.filter(function (p) { return p.live_online || p.online; });
+                var list = body.querySelector('.rc-list');
+                var empty = body.querySelector('.rc-empty');
+                var countEl = body.querySelector('.rc-count');
+                var search = body.querySelector('.rc-search');
+
+                if (countEl) countEl.textContent = online.length + '/' + peers.length;
+
+                if (!online.length) {
+                    if (list) list.innerHTML = '';
+                    if (empty) empty.style.display = 'block';
+                    return;
+                }
+                if (empty) empty.style.display = 'none';
+
+                var filter = (search && search.value || '').toLowerCase();
+                var filtered = filter ? online.filter(function (p) {
+                    return (p.id || '').toLowerCase().includes(filter) ||
+                           (p.hostname || '').toLowerCase().includes(filter) ||
+                           (p.platform || '').toLowerCase().includes(filter);
+                }) : online;
+
+                if (!list) return;
+                list.innerHTML = filtered.map(function (p) {
+                    var name = esc(p.hostname || p.id);
+                    var platform = esc(p.platform || '');
+                    var platformIcon = platform.toLowerCase().includes('windows') ? 'desktop_windows' :
+                                       platform.toLowerCase().includes('linux') ? 'terminal' :
+                                       platform.toLowerCase().includes('mac') ? 'laptop_mac' : 'devices';
+                    return '<div class="rc-device" data-id="' + esc(p.id) + '" style="display:flex;align-items:center;gap:8px;padding:6px 8px;' +
+                        'border-radius:6px;cursor:pointer;background:rgba(255,255,255,0.04);transition:background 0.15s" ' +
+                        'onmouseover="this.style.background=\'rgba(88,166,255,0.12)\'" onmouseout="this.style.background=\'rgba(255,255,255,0.04)\'">' +
+                        '<span class="material-icons" style="font-size:18px;opacity:0.6">' + platformIcon + '</span>' +
+                        '<div style="flex:1;min-width:0">' +
+                        '<div style="font-size:12px;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">' + name + '</div>' +
+                        '<div style="font-size:10px;opacity:0.45;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">' + esc(p.id) + (platform ? ' · ' + platform : '') + '</div></div>' +
+                        '<span class="rc-dot" style="width:6px;height:6px;border-radius:50%;background:#3fb950;flex-shrink:0"></span>' +
+                        '<button class="rc-connect-btn" data-id="' + esc(p.id) + '" style="background:rgba(88,166,255,0.15);border:none;' +
+                        'border-radius:4px;color:#58a6ff;padding:3px 8px;font-size:11px;cursor:pointer;white-space:nowrap" ' +
+                        'onmouseover="this.style.background=\'rgba(88,166,255,0.3)\'" onmouseout="this.style.background=\'rgba(88,166,255,0.15)\'">' +
+                        (t('desktop.label_connect') || 'Connect') + '</button></div>';
+                }).join('');
+
+                // Attach search filter
+                if (search && !search._rcBound) {
+                    search._rcBound = true;
+                    search.addEventListener('input', function () {
+                        if (body._rcTimer) clearTimeout(body._rcTimer);
+                        body._rcTimer = setTimeout(function () {
+                            var plugin = get('remote-connect');
+                            if (plugin && plugin.update) plugin.update(body);
+                        }, 200);
+                    });
+                }
+
+                // Attach click handlers
+                list.querySelectorAll('.rc-device').forEach(function (el) {
+                    el.addEventListener('click', function (e) {
+                        var id = el.getAttribute('data-id');
+                        if (!id) return;
+                        e.stopPropagation();
+                        // In desktop mode, open as a window; otherwise navigate
+                        if (window.DesktopMode && window.DesktopMode.isActive && window.DesktopMode.isActive()) {
+                            window.DesktopMode.openAppByRoute('/remote/' + id);
+                        } else {
+                            window.location.href = '/remote/' + id;
+                        }
+                    });
+                });
+            }).catch(function () {
+                var empty = body.querySelector('.rc-empty');
+                if (empty) empty.style.display = 'block';
+            });
         }
     });
 

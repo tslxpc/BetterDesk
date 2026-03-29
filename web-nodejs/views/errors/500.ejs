@@ -80,7 +80,7 @@
             </div>
         </div>
     </div>
-    <script>
+    <script nonce="<%= typeof cspNonce !== 'undefined' ? cspNonce : '' %>">
         document.getElementById('btn-retry').addEventListener('click', function() { location.reload(); });
     </script>
 </body>

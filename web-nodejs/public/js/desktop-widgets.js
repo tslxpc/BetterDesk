@@ -169,11 +169,61 @@
     // ============ Wallpaper ============
 
     var STORAGE_WALL_FIT = 'bd_widget_wallpaper_fit';
+    var DEFAULT_GRADIENT = 'linear-gradient(135deg, #0d1117 0%, #161b22 40%, #1a1a2e 70%, #0f3460 100%)';
+    var _wallpapersAvailable = null; // null = unknown, true/false after probe
 
     function loadWallpaper() {
         var saved = localStorage.getItem(STORAGE_WALL);
         var fit = localStorage.getItem(STORAGE_WALL_FIT) || 'cover';
-        applyWallpaper(saved || '/wallpapers/1.png', fit, false);
+        if (saved) {
+            // Solid colors don't need validation
+            if (saved.indexOf('solid:') === 0) {
+                applyWallpaper(saved, fit, false);
+                return;
+            }
+            // Validate saved image URL exists before applying
+            var probe = new Image();
+            probe.onload = function() {
+                _wallpapersAvailable = true;
+                applyWallpaper(saved, fit, false);
+            };
+            probe.onerror = function() {
+                // Saved wallpaper missing — clear stale preference and fall back
+                localStorage.removeItem(STORAGE_WALL);
+                _wallpapersAvailable = false;
+                applyDefaultGradient();
+            };
+            probe.src = saved;
+        } else {
+            // Probe if wallpapers exist before loading default
+            probeWallpapers(function(available) {
+                if (available) {
+                    applyWallpaper('/wallpapers/1.png', fit, false);
+                } else {
+                    applyDefaultGradient();
+                }
+            });
+        }
+    }
+
+    /** Check if wallpaper files are available on server */
+    function probeWallpapers(cb) {
+        if (_wallpapersAvailable !== null) { cb(_wallpapersAvailable); return; }
+        var img = new Image();
+        img.onload = function() { _wallpapersAvailable = true; cb(true); };
+        img.onerror = function() { _wallpapersAvailable = false; cb(false); };
+        img.src = '/wallpapers/1.png';
+    }
+
+    /** Apply default gradient when wallpapers are unavailable */
+    function applyDefaultGradient() {
+        var el = document.querySelector('.desktop-wallpaper');
+        if (!el) return;
+        _wallpaperPath = 'solid:#0d1117';
+        el.style.backgroundImage = DEFAULT_GRADIENT;
+        el.style.backgroundColor = '#0d1117';
+        el.style.backgroundSize = 'cover';
+        el.style.backgroundPosition = 'center';
     }
 
     /**
@@ -239,10 +289,9 @@
             }, 600);
         };
         img.onerror = function() {
-            el.style.backgroundColor = '';
-            el.style.backgroundImage = 'url("' + url + '")';
-            el.style.backgroundSize = bgSize;
-            el.style.backgroundPosition = bgPos;
+            // Image failed to load — fall back to gradient
+            applyDefaultGradient();
+            localStorage.removeItem(STORAGE_WALL);
         };
         img.src = url;
 
@@ -600,8 +649,8 @@
         var edges = getSnapEdges(s.id);
         var rawX = s.origX + (cx - s.startX);
         var rawY = s.origY + (cy - s.startY);
-        w.x = clamp(edgeSnap(rawX, edges.x), 0, area.w - w.w);
-        w.y = clamp(edgeSnap(rawY, edges.y), 0, area.h - w.h);
+        w.x = clamp(edgeSnap(rawX, edges.x), 0, Math.max(area.w - w.w, 0));
+        w.y = clamp(edgeSnap(rawY, edges.y), 0, Math.max(area.h - w.h, 0));
 
         var el = document.getElementById(s.id);
         if (el) {
@@ -1086,19 +1135,41 @@
         // Image grid
         var grid = overlay.querySelector('#wallpaper-grid');
         var frag = document.createDocumentFragment();
-        for (var i = 1; i <= WALLPAPER_COUNT; i++) {
-            var wallPath = '/wallpapers/' + i + '.png';
-            var thumbPath = '/wallpapers/thumbs/' + i + '.webp';
-            var active = (!isSolid && _wallpaperPath === wallPath) ? ' active' : '';
-            var thumb = document.createElement('div');
-            thumb.className = 'wallpaper-thumb' + active;
-            thumb.dataset.path = wallPath;
-            thumb.dataset.thumb = thumbPath;
-            thumb.dataset.idx = String(i);
-            thumb.innerHTML = '<div class="wallpaper-thumb-placeholder"><span>' + i + '</span></div>';
-            frag.appendChild(thumb);
+
+        // Show wallpapers availability message
+        function showWallpaperNotice(grid) {
+            var notice = document.createElement('div');
+            notice.className = 'wallpaper-unavailable-notice';
+            notice.innerHTML =
+                '<span class="material-icons">info</span>' +
+                '<p>' + esc(t('desktop.wp_unavailable')) + '</p>' +
+                '<small>' + esc(t('desktop.wp_download_hint')) + '</small>';
+            grid.appendChild(notice);
         }
-        grid.appendChild(frag);
+
+        probeWallpapers(function(available) {
+            if (!available) {
+                showWallpaperNotice(grid);
+                return;
+            }
+            var innerFrag = document.createDocumentFragment();
+            for (var j = 1; j <= WALLPAPER_COUNT; j++) {
+                var wPath = '/wallpapers/' + j + '.png';
+                var tPath = '/wallpapers/thumbs/' + j + '.webp';
+                var act = (!isSolid && _wallpaperPath === wPath) ? ' active' : '';
+                var th = document.createElement('div');
+                th.className = 'wallpaper-thumb' + act;
+                th.dataset.path = wPath;
+                th.dataset.thumb = tPath;
+                th.dataset.idx = String(j);
+                th.innerHTML = '<div class="wallpaper-thumb-placeholder"><span>' + j + '</span></div>';
+                innerFrag.appendChild(th);
+            }
+            grid.appendChild(innerFrag);
+
+            // Attach click + lazy load for dynamically added thumbnails
+            attachWallpaperGridEvents(grid, fitSelect);
+        });
 
         // Single click handler via event delegation
         grid.addEventListener('click', function (e) {
@@ -1110,46 +1181,50 @@
             closeWallpaperPicker();
         });
 
-        // Helper: create thumbnail <img> with fallback to full PNG on error
-        function createThumbImg(el) {
-            var img = document.createElement('img');
-            img.onload = function () { img.classList.add('loaded'); };
-            img.onerror = function () {
-                if (img.src !== el.dataset.path) {
-                    img.src = el.dataset.path;
-                } else {
-                    img.classList.add('loaded');
-                }
-            };
-            img.src = el.dataset.thumb;
-            img.alt = 'Wallpaper ' + el.dataset.idx;
-            img.loading = 'lazy';
-            img.decoding = 'async';
-            return img;
-        }
+        function attachWallpaperGridEvents(targetGrid, fitSel) {
+            // Helper: create thumbnail <img> with fallback to full PNG on error
+            function createThumbImg(el) {
+                var img = document.createElement('img');
+                img.onload = function () { img.classList.add('loaded'); };
+                img.onerror = function () {
+                    if (img.src.indexOf(el.dataset.path) === -1) {
+                        img.src = el.dataset.path;
+                    } else {
+                        // Both thumb and full image failed — show placeholder
+                        img.classList.add('loaded');
+                        img.style.display = 'none';
+                    }
+                };
+                img.src = el.dataset.thumb;
+                img.alt = 'Wallpaper ' + el.dataset.idx;
+                img.loading = 'lazy';
+                img.decoding = 'async';
+                return img;
+            }
 
-        // Lazy-load WebP thumbnails via IntersectionObserver
-        if ('IntersectionObserver' in window) {
-            _pickerObserver = new IntersectionObserver(function (entries) {
-                entries.forEach(function (entry) {
-                    if (!entry.isIntersecting) return;
-                    var el = entry.target;
-                    var ph = el.querySelector('.wallpaper-thumb-placeholder');
-                    if (!ph) { _pickerObserver.unobserve(el); return; }
-                    el.replaceChild(createThumbImg(el), ph);
-                    _pickerObserver.unobserve(el);
+            // Lazy-load thumbnails via IntersectionObserver
+            if ('IntersectionObserver' in window) {
+                _pickerObserver = new IntersectionObserver(function (entries) {
+                    entries.forEach(function (entry) {
+                        if (!entry.isIntersecting) return;
+                        var el = entry.target;
+                        var ph = el.querySelector('.wallpaper-thumb-placeholder');
+                        if (!ph) { _pickerObserver.unobserve(el); return; }
+                        el.replaceChild(createThumbImg(el), ph);
+                        _pickerObserver.unobserve(el);
+                    });
+                }, { root: targetGrid, rootMargin: '300px' });
+
+                targetGrid.querySelectorAll('.wallpaper-thumb').forEach(function (el) {
+                    _pickerObserver.observe(el);
                 });
-            }, { root: grid, rootMargin: '300px' });
-
-            grid.querySelectorAll('.wallpaper-thumb').forEach(function (el) {
-                _pickerObserver.observe(el);
-            });
-        } else {
-            grid.querySelectorAll('.wallpaper-thumb').forEach(function (el) {
-                var ph = el.querySelector('.wallpaper-thumb-placeholder');
-                if (!ph) return;
-                el.replaceChild(createThumbImg(el), ph);
-            });
+            } else {
+                targetGrid.querySelectorAll('.wallpaper-thumb').forEach(function (el) {
+                    var ph = el.querySelector('.wallpaper-thumb-placeholder');
+                    if (!ph) return;
+                    el.replaceChild(createThumbImg(el), ph);
+                });
+            }
         }
 
         // If currently on solid color, auto-switch to colors tab

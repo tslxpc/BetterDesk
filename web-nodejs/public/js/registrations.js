@@ -113,18 +113,18 @@
             let actions = '';
             if (reg.status === 'pending') {
                 actions = `
-                    <button class="action-btn approve" onclick="window._regActions.approve(${reg.id})" title="${_('registrations.approve_btn')}">
+                    <button class="action-btn approve" data-reg-action="approve" data-id="${reg.id}" title="${_('registrations.approve_btn')}">
                         <span class="material-icons">check</span>
                         ${_('registrations.approve_btn')}
                     </button>
-                    <button class="action-btn reject" onclick="window._regActions.reject(${reg.id})" title="${_('registrations.reject_btn')}">
+                    <button class="action-btn reject" data-reg-action="reject" data-id="${reg.id}" title="${_('registrations.reject_btn')}">
                         <span class="material-icons">close</span>
                         ${_('registrations.reject_btn')}
                     </button>
                 `;
             } else {
                 actions = `
-                    <button class="action-btn delete" onclick="window._regActions.remove(${reg.id})" title="${_('common.delete')}">
+                    <button class="action-btn delete" data-reg-action="remove" data-id="${reg.id}" title="${_('common.delete')}">
                         <span class="material-icons">delete</span>
                     </button>
                 `;
@@ -206,13 +206,6 @@
         }
     }
 
-    // Expose actions to inline onclick handlers
-    window._regActions = {
-        approve: approveRegistration,
-        reject: openRejectModal,
-        remove: deleteRegistration,
-    };
-
     // ---- Helpers ----
 
     function escapeHtml(str) {
@@ -283,6 +276,23 @@
 
     // Reject modal
     confirmRejectBtn.addEventListener('click', confirmReject);
+
+    tbody.addEventListener('click', (e) => {
+        const actionBtn = e.target.closest('[data-reg-action]');
+        if (!actionBtn) return;
+        const id = actionBtn.dataset.id;
+        switch (actionBtn.dataset.regAction) {
+            case 'approve':
+                approveRegistration(id);
+                break;
+            case 'reject':
+                openRejectModal(id);
+                break;
+            case 'remove':
+                deleteRegistration(id);
+                break;
+        }
+    });
 
     // Close modal buttons
     document.querySelectorAll('.modal-close').forEach(btn => {

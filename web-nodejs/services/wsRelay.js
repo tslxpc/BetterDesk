@@ -56,8 +56,9 @@ function getNonLoopbackIp() {
 /**
  * Initialize WebSocket proxy servers and attach to HTTP server
  * @param {http.Server} server - The HTTP/HTTPS server instance
+ * @param {Function} sessionMiddleware - Express session middleware to validate WS upgrades
  */
-function initWsProxy(server) {
+function initWsProxy(server, sessionMiddleware) {
     // Rendezvous proxy (hbbs)
     const rendezvousWss = new WebSocket.Server({ noServer: true });
     // Relay proxy (hbbr)
@@ -75,32 +76,43 @@ function initWsProxy(server) {
             return; // let other upgrade handlers deal with it
         }
 
-        // Parse session cookie to verify authentication
-        const cookies = {};
-        const cookieHeader = request.headers.cookie || '';
-        cookieHeader.split(';').forEach(c => {
-            const [name, ...rest] = c.trim().split('=');
-            if (name) cookies[name] = rest.join('=');
-        });
-
-        // Require valid session cookie for WebSocket connections
-        if (!cookies['betterdesk.sid']) {
-            console.warn(`WS proxy: Rejected upgrade to ${pathname} — no session cookie`);
-            socket.write('HTTP/1.1 401 Unauthorized\r\n\r\n');
+        // Validate the session against the real Express session store.
+        // Using sessionMiddleware (from server.js) populates req.session, which
+        // we then check for an authenticated userId. This replaces the old
+        // cookie-name-only check that could be bypassed with a fake cookie.
+        if (typeof sessionMiddleware !== 'function') {
+            console.warn('WS proxy: sessionMiddleware not provided — rejecting upgrade');
+            socket.write('HTTP/1.1 503 Service Unavailable\r\n\r\n');
             socket.destroy();
             return;
         }
 
-        if (pathname === '/ws/rendezvous') {
-            rendezvousWss.handleUpgrade(request, socket, head, (ws) => {
-                rendezvousWss.emit('connection', ws, request);
-            });
-        } else {
-            relayWss.handleUpgrade(request, socket, head, (ws) => {
-                relayWss.emit('connection', ws, request);
-            });
-        }
-    });
+        // Attach a minimal fake response so session middleware can call next()
+        const fakeRes = Object.create(null);
+        fakeRes.getHeader = () => undefined;
+        fakeRes.setHeader = () => {};
+        fakeRes.end = () => {};
+        fakeRes.on = () => {};
+
+        sessionMiddleware(request, fakeRes, () => {
+            if (!request.session || !request.session.userId) {
+                console.warn(`WS proxy: Rejected upgrade to ${pathname} — no authenticated session (ip: ${request.socket?.remoteAddress})`);
+                socket.write('HTTP/1.1 401 Unauthorized\r\n\r\n');
+                socket.destroy();
+                return;
+            }
+
+            if (pathname === '/ws/rendezvous') {
+                rendezvousWss.handleUpgrade(request, socket, head, (ws) => {
+                    rendezvousWss.emit('connection', ws, request);
+                });
+            } else {
+                relayWss.handleUpgrade(request, socket, head, (ws) => {
+                    relayWss.emit('connection', ws, request);
+                });
+            }
+        });
+    }); // server.on('upgrade')
 
     // Parse target host/port from config
     const hbbsHost = config.wsProxy?.hbbsHost || 'localhost';

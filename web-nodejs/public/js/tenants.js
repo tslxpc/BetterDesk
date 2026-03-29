@@ -56,6 +56,7 @@
     const createBtn = document.getElementById('create-tenant-btn');
     const formModal = document.getElementById('form-modal');
     const saveBtn = document.getElementById('tenant-save-btn');
+    const cancelBtn = document.getElementById('tenant-cancel-btn');
 
     let allTenants = [];
 
@@ -198,6 +199,7 @@
 
     createBtn.addEventListener('click', () => openForm(null));
     saveBtn.addEventListener('click', saveTenant);
+    cancelBtn?.addEventListener('click', () => { formModal.style.display = 'none'; });
     searchInput.addEventListener('input', filterAndRender);
 
     // ==== Detail ====

@@ -14,7 +14,7 @@
 
     const MIN_WIDTH = 420;
     const MIN_HEIGHT = 300;
-    const TASKBAR_HEIGHT = 48;
+    const TASKBAR_HEIGHT = 42;
     const BREAKPOINT = 1200;
     const STORAGE_KEY = 'betterdesk_desktop_mode';
     const STORAGE_WINS_KEY = 'betterdesk_desktop_wins';
@@ -99,18 +99,37 @@
         var isAdmin = window.BetterDesk && window.BetterDesk.user &&
                       window.BetterDesk.user.role === 'admin';
         var apps = [
-            { id: 'dashboard',     icon: 'dashboard',   route: '/',              color: '#58a6ff',  name: t('nav.dashboard') },
-            { id: 'devices',       icon: 'devices',     route: '/devices',       color: '#3fb950',  name: t('nav.devices') },
-            { id: 'registrations', icon: 'how_to_reg',  route: '/registrations', color: '#79c0ff',  name: t('nav.registrations') },
-            { id: 'keys',          icon: 'vpn_key',     route: '/keys',          color: '#d29922',  name: t('nav.keys') },
-            { id: 'generator',     icon: 'build',       route: '/generator',     color: '#bc8cff',  name: t('nav.generator') },
-            { id: 'settings',      icon: 'settings',    route: '/settings',      color: '#8b949e',  name: t('nav.settings') }
+            // Main
+            { id: 'dashboard',     icon: 'dashboard',        route: '/',              color: '#58a6ff',  name: t('nav.dashboard'),      category: 'main' },
+            { id: 'devices',       icon: 'devices',          route: '/devices',       color: '#3fb950',  name: t('nav.devices'),        category: 'main' },
+            { id: 'registrations', icon: 'how_to_reg',       route: '/registrations', color: '#79c0ff',  name: t('nav.registrations'),  category: 'main' },
+            // Management
+            { id: 'inventory',     icon: 'inventory_2',      route: '/inventory',     color: '#d2a8ff',  name: t('nav.inventory'),      category: 'management' },
+            { id: 'tickets',       icon: 'confirmation_number', route: '/tickets',    color: '#ffa657',  name: t('nav.tickets'),        category: 'management' },
+            { id: 'help-requests', icon: 'support_agent',    route: '/help-requests', color: '#79c0ff',  name: t('nav.help_requests'),  category: 'management' },
+            { id: 'automation',    icon: 'smart_toy',        route: '/automation',    color: '#7ee787',  name: t('nav.automation'),     category: 'management' },
+            { id: 'network',       icon: 'lan',              route: '/network',       color: '#56d4dd',  name: t('nav.network'),        category: 'management' },
+            { id: 'activity',      icon: 'timeline',         route: '/activity',      color: '#ffd33d',  name: t('nav.activity'),       category: 'management' },
+            { id: 'cdap',          icon: 'developer_board',  route: '/cdap',          color: '#a5d6ff',  name: t('nav.cdap'),           category: 'management' },
+            // Tools
+            { id: 'reports',       icon: 'assessment',       route: '/reports',       color: '#da7756',  name: t('nav.reports'),        category: 'tools' },
+            { id: 'keys',          icon: 'vpn_key',          route: '/keys',          color: '#d29922',  name: t('nav.keys'),           category: 'tools' },
+            { id: 'generator',     icon: 'build',            route: '/generator',     color: '#bc8cff',  name: t('nav.generator'),      category: 'tools' },
+            { id: 'remote',        icon: 'connected_tv',     route: '/remote',        color: '#58a6ff',  name: t('nav.remote') || 'Remote Desktop', category: 'tools' },
+            { id: 'toolkit',       icon: 'handyman',         route: '/toolkit',       color: '#f0883e',  name: t('nav.toolkit') || 'Toolkit', category: 'tools' },
+            // System (always visible)
+            { id: 'settings',      icon: 'settings',         route: '/settings',      color: '#8b949e',  name: t('nav.settings'),       category: 'system' }
         ];
 
         if (isAdmin) {
-            apps.splice(5, 0, {
-                id: 'users', icon: 'group', route: '/users', color: '#f778ba', name: t('nav.users')
-            });
+            // Admin-only system apps (before settings)
+            var sysIdx = apps.findIndex(function(a) { return a.id === 'settings'; });
+            apps.splice(sysIdx, 0,
+                { id: 'tokens',        icon: 'token',          route: '/tokens',        color: '#e3b341', name: t('nav.tokens'),        category: 'system' },
+                { id: 'organizations', icon: 'corporate_fare', route: '/organizations', color: '#79c0ff', name: t('nav.organizations'), category: 'system' },
+                { id: 'dataguard',     icon: 'shield',         route: '/dataguard',     color: '#f85149', name: t('nav.dataguard'),     category: 'system' },
+                { id: 'users',         icon: 'group',          route: '/users',         color: '#f778ba', name: t('nav.users'),         category: 'system' }
+            );
         }
 
         return apps;
@@ -272,6 +291,21 @@
         document.addEventListener('mousemove', handleMouseMove);
         document.addEventListener('mouseup', handleMouseUp);
 
+        // Detect when focus enters an iframe (user clicked inside a window)
+        window.addEventListener('blur', function() {
+            if (!active) return;
+            // Check which iframe received focus and focus that window
+            setTimeout(function() {
+                var activeEl = document.activeElement;
+                if (activeEl && activeEl.tagName === 'IFRAME') {
+                    var winEl = activeEl.closest('.desktop-window');
+                    if (winEl && winEl.id) {
+                        focusWindow(winEl.id);
+                    }
+                }
+            }, 0);
+        });
+
         // Responsive: deactivate if viewport shrinks below breakpoint
         // and re-clamp windows that may be offscreen after resize
         var onResize = Utils.debounce(function() {
@@ -308,6 +342,8 @@
         applyTheme(currentTheme);
 
         renderDesktopIcons();
+        initTopbar();
+        initAppDrawer();
 
         // Restore saved mode or default to widgets
         currentMode = localStorage.getItem(STORAGE_MODE) || 'widgets';
@@ -327,6 +363,9 @@
             window.DesktopWidgets.removeAddButton();
         }
 
+        destroyTopbar();
+        closeAppDrawer();
+
         // Close all windows
         windows.forEach(function(win) {
             removeWindowDOM(win.id, true);
@@ -336,7 +375,7 @@
         cascadeIndex = 0;
         clearActiveZoneLayout();
 
-        document.body.classList.remove('desktop-active', 'desktop-entering', 'desktop-mode-widgets', 'desktop-mode-windows');
+        document.body.classList.remove('desktop-active', 'desktop-entering', 'desktop-mode-widgets', 'desktop-mode-windows', 'desktop-mode-unified');
         clearDesktopIcons();
         clearTaskbar();
 
@@ -1737,7 +1776,7 @@
         }
     }
 
-    // ============ Taskbar ============
+    // ============ Taskbar (compact: icon-only, expand on hover) ============
 
     function updateTaskbar() {
         var container = document.getElementById('taskbar-apps');
@@ -1750,11 +1789,17 @@
             if (!win.minimized) btn.classList.add('active');
             if (win.id === focusedWindowId) btn.classList.add('focused');
 
+            // Set app color as CSS variable for peek-mode colored squares
+            btn.style.setProperty('--taskbar-btn-color', win.app.color || 'rgba(88,166,255,0.7)');
+
+            // Compact icon-only button with tooltip and hover-expand label
             btn.innerHTML =
-                '<span class="material-icons" style="color:' + win.app.color + '">' +
+                '<span class="material-icons taskbar-icon" style="color:' + win.app.color + '">' +
                     win.app.icon +
                 '</span>' +
-                '<span>' + escapeHtml(win.app.name) + '</span>';
+                '<span class="taskbar-label">' + escapeHtml(win.app.name) + '</span>';
+
+            btn.title = win.app.name;
 
             btn.addEventListener('click', function() {
                 if (win.minimized) {
@@ -1780,10 +1825,12 @@
     // ============ Helpers ============
 
     function shouldReserveTaskbarSpace() {
+        // Compact taskbar peeks at 8px; only reserve space when actively expanded
         if (!active) return false;
         var taskbar = document.getElementById('desktop-taskbar');
-        if (windows.size > 0) return true;
-        return !!(taskbar && !taskbar.classList.contains('taskbar-hidden'));
+        if (!taskbar) return false;
+        // Reserve space only when taskbar is fully visible (hovered)
+        return taskbar.matches(':hover') || taskbar.classList.contains('taskbar-expanded');
     }
 
     function getDesktopArea() {
@@ -1819,6 +1866,142 @@
     function escapeAttr(str) {
         return (str || '').replace(/&/g, '&amp;').replace(/"/g, '&quot;')
                           .replace(/'/g, '&#39;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    }
+
+    // ============ Top Bar (clock + controls) ============
+
+    var _topbarClockInterval = null;
+
+    function initTopbar() {
+        var clockEl = document.getElementById('topbar-clock');
+        if (clockEl) {
+            function updateClock() {
+                var now = new Date();
+                clockEl.textContent = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+            }
+            updateClock();
+            _topbarClockInterval = setInterval(updateClock, 30000);
+        }
+
+        var exitBtn = document.getElementById('topbar-exit-btn');
+        if (exitBtn) exitBtn.addEventListener('click', function() { deactivate(); });
+
+        var themeBtn = document.getElementById('topbar-theme-btn');
+        if (themeBtn) themeBtn.addEventListener('click', function() {
+            if (typeof cycleTheme === 'function') cycleTheme();
+            var icon = themeBtn.querySelector('.material-icons');
+            if (icon) icon.textContent = currentTheme === 'dark' ? 'dark_mode' : currentTheme === 'light' ? 'light_mode' : 'brightness_auto';
+        });
+
+        var widgetsBtn = document.getElementById('topbar-widgets-btn');
+        if (widgetsBtn) widgetsBtn.addEventListener('click', function() {
+            if (window.DesktopWidgets && typeof window.DesktopWidgets.openAddWidget === 'function') {
+                window.DesktopWidgets.openAddWidget();
+            }
+        });
+    }
+
+    function destroyTopbar() {
+        if (_topbarClockInterval) { clearInterval(_topbarClockInterval); _topbarClockInterval = null; }
+    }
+
+    // ============ App Drawer ============
+
+    var _appDrawerOpen = false;
+
+    function initAppDrawer() {
+        var btn = document.getElementById('topbar-app-drawer-btn');
+        var startBtn = document.getElementById('taskbar-start-btn');
+        var overlay = document.getElementById('app-drawer-overlay');
+        var grid = document.getElementById('app-drawer-grid');
+        var search = document.getElementById('app-drawer-search');
+        if (!overlay || !grid) return;
+
+        renderAppDrawerGrid(grid, '');
+
+        function onDrawerBtnClick(e) {
+            e.stopPropagation();
+            toggleAppDrawer();
+        }
+
+        if (btn) btn.addEventListener('click', onDrawerBtnClick);
+        if (startBtn) startBtn.addEventListener('click', onDrawerBtnClick);
+
+        overlay.addEventListener('click', function(e) {
+            if (e.target === overlay) closeAppDrawer();
+        });
+
+        if (search) {
+            search.addEventListener('input', function() {
+                renderAppDrawerGrid(grid, search.value.toLowerCase());
+            });
+        }
+
+        document.addEventListener('keydown', function(e) {
+            if (e.key === 'Escape' && _appDrawerOpen) closeAppDrawer();
+        });
+    }
+
+    function renderAppDrawerGrid(grid, filter) {
+        grid.innerHTML = '';
+        var apps = getApps();
+        var t = typeof _ === 'function' ? _ : function(k) { return k; };
+        var categories = ['main', 'management', 'tools', 'system'];
+        var catNames = {
+            main: t('nav.main'),
+            management: t('nav.management') || 'Management',
+            tools: t('nav.tools'),
+            system: t('nav.system')
+        };
+
+        categories.forEach(function(cat) {
+            var catApps = apps.filter(function(a) {
+                return a.category === cat &&
+                       (!filter || a.name.toLowerCase().indexOf(filter) !== -1 || a.id.indexOf(filter) !== -1);
+            });
+            if (catApps.length === 0) return;
+
+            var header = document.createElement('div');
+            header.className = 'app-drawer-category';
+            header.textContent = catNames[cat] || cat;
+            grid.appendChild(header);
+
+            var row = document.createElement('div');
+            row.className = 'app-drawer-row';
+            catApps.forEach(function(app) {
+                var tile = document.createElement('button');
+                tile.className = 'app-drawer-tile';
+                tile.innerHTML =
+                    '<span class="material-icons" style="color:' + app.color + ';font-size:28px">' + app.icon + '</span>' +
+                    '<span class="app-drawer-tile-name">' + escapeHtml(app.name) + '</span>';
+                tile.addEventListener('click', function() {
+                    closeAppDrawer();
+                    openApp(app.id);
+                });
+                row.appendChild(tile);
+            });
+            grid.appendChild(row);
+        });
+    }
+
+    function toggleAppDrawer() {
+        _appDrawerOpen ? closeAppDrawer() : openAppDrawer();
+    }
+
+    function openAppDrawer() {
+        var overlay = document.getElementById('app-drawer-overlay');
+        var search = document.getElementById('app-drawer-search');
+        if (!overlay) return;
+        overlay.style.display = 'flex';
+        _appDrawerOpen = true;
+        if (search) { search.value = ''; search.focus(); }
+        renderAppDrawerGrid(document.getElementById('app-drawer-grid'), '');
+    }
+
+    function closeAppDrawer() {
+        var overlay = document.getElementById('app-drawer-overlay');
+        if (overlay) overlay.style.display = 'none';
+        _appDrawerOpen = false;
     }
 
     // ============ Mode Switching (Windows ↔ Widgets) ============

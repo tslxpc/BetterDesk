@@ -324,7 +324,7 @@ async function startServer() {
         }
         
         // Initialize WebSocket proxy for remote desktop client
-        initWsProxy(server);
+        initWsProxy(server, sessionMiddleware);
 
         // Initialize BetterDesk native relay (WebSocket)
         initBdRelay(server);

@@ -6,7 +6,7 @@
 <!-- Beta Banner -->
 <div class="bdv-beta-banner" id="bdv-beta-banner">
     <span>🔧 Web Remote Client — Beta</span>
-    <button onclick="this.parentElement.style.display='none'" class="bdv-beta-dismiss">&times;</button>
+    <button id="bdv-beta-dismiss" class="bdv-beta-dismiss">&times;</button>
 </div>
 
 <!-- BetterDesk Native Remote Desktop Viewer -->
@@ -106,7 +106,7 @@
 
 </div>
 
-<script>
+<script nonce="<%= cspNonce %>">
 (function() {
     'use strict';
 
@@ -311,6 +311,10 @@
     // ---- Toolbar / UI ----
     function setStatus(msg) { statusTxt.textContent = msg; }
     function showActions() { actions.style.display = 'flex'; }
+
+    document.getElementById('bdv-beta-dismiss')?.addEventListener('click', () => {
+        document.getElementById('bdv-beta-banner').style.display = 'none';
+    });
 
     document.getElementById('btnReconnect').onclick = () => {
         actions.style.display = 'none';

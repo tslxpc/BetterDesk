@@ -173,16 +173,16 @@
         // Status change buttons
         html += `<div class="detail-section" style="display:flex;gap:8px;flex-wrap:wrap">`;
         if (t.status === 'open') {
-            html += `<button class="btn btn-sm btn-secondary" onclick="window._ticketActions.changeStatus(${t.id},'in_progress')">${_('tickets.status_in_progress')}</button>`;
+            html += `<button class="btn btn-sm btn-secondary" data-ticket-detail-action="change-status" data-id="${t.id}" data-status="in_progress">${_('tickets.status_in_progress')}</button>`;
         }
         if (t.status === 'in_progress') {
-            html += `<button class="btn btn-sm btn-primary" onclick="window._ticketActions.changeStatus(${t.id},'resolved')">${_('tickets.status_resolved')}</button>`;
+            html += `<button class="btn btn-sm btn-primary" data-ticket-detail-action="change-status" data-id="${t.id}" data-status="resolved">${_('tickets.status_resolved')}</button>`;
         }
         if (t.status !== 'closed') {
-            html += `<button class="btn btn-sm btn-secondary" onclick="window._ticketActions.changeStatus(${t.id},'closed')">${_('tickets.status_closed')}</button>`;
+            html += `<button class="btn btn-sm btn-secondary" data-ticket-detail-action="change-status" data-id="${t.id}" data-status="closed">${_('tickets.status_closed')}</button>`;
         }
         if (!t.assigned_to && user.username) {
-            html += `<button class="btn btn-sm btn-secondary" onclick="window._ticketActions.assign(${t.id})">${_('tickets.assign_to_me')}</button>`;
+            html += `<button class="btn btn-sm btn-secondary" data-ticket-detail-action="assign" data-id="${t.id}">${_('tickets.assign_to_me')}</button>`;
         }
         html += `</div>`;
 
@@ -203,7 +203,7 @@
         }
         html += `<div class="add-comment-form">
             <textarea class="form-input" id="new-comment" placeholder="${_('tickets.comment_placeholder')}" maxlength="2000"></textarea>
-            <button class="btn btn-primary" onclick="window._ticketActions.addComment(${t.id})">${_('tickets.add_comment')}</button>
+            <button class="btn btn-primary" data-ticket-detail-action="add-comment" data-id="${t.id}">${_('tickets.add_comment')}</button>
         </div></div>`;
 
         detailBody.innerHTML = html;
@@ -332,8 +332,6 @@
         }
     }
 
-    window._ticketActions = { changeStatus, assign: assignToMe, addComment };
-
     // ---- Helpers ----
 
     function escapeHtml(str) {
@@ -392,6 +390,23 @@
 
     createBtn.addEventListener('click', openCreateModal);
     ticketSaveBtn.addEventListener('click', saveTicket);
+
+    detailBody.addEventListener('click', (e) => {
+        const actionBtn = e.target.closest('[data-ticket-detail-action]');
+        if (!actionBtn) return;
+        const id = actionBtn.dataset.id;
+        switch (actionBtn.dataset.ticketDetailAction) {
+            case 'change-status':
+                changeStatus(id, actionBtn.dataset.status);
+                break;
+            case 'assign':
+                assignToMe(id);
+                break;
+            case 'add-comment':
+                addComment(id);
+                break;
+        }
+    });
 
     document.querySelectorAll('.modal-close').forEach(btn => {
         btn.addEventListener('click', () => {

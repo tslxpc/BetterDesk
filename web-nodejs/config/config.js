@@ -91,11 +91,11 @@ module.exports = {
     
     // Server
     port: parseInt(process.env.PORT, 10) || 5000,
-    host: process.env.HOST || '0.0.0.0',
+    host: process.env.HOST || '127.0.0.1',
     
     // RustDesk Client API (dedicated WAN-facing port)
     apiPort: parseInt(process.env.API_PORT, 10) || 21121,
-    apiHost: process.env.API_HOST || '0.0.0.0',
+    apiHost: process.env.API_HOST || '127.0.0.1',
     apiEnabled: (process.env.API_ENABLED || 'true').toLowerCase() !== 'false',
     
     // HTTPS / SSL
@@ -128,9 +128,10 @@ module.exports = {
     betterdeskApiTimeout: parseInt(process.env.BETTERDESK_API_TIMEOUT, 10) || 5000,
     
     // TLS certificate verification (BD-2026-002)
-    // When true, self-signed certificates are accepted for internal connections.
-    // Set to 'false' in production with proper certificates.
-    allowSelfSignedCerts: (process.env.ALLOW_SELF_SIGNED_CERTS || 'true').toLowerCase() === 'true',
+    // Default is false (reject self-signed certs) for production safety.
+    // Set ALLOW_SELF_SIGNED_CERTS=true only in dev/local environments where
+    // the Go API is accessed over HTTPS with a self-signed cert.
+    allowSelfSignedCerts: (process.env.ALLOW_SELF_SIGNED_CERTS || 'false').toLowerCase() === 'true',
     // SMTP TLS verification — separate control for outbound email.
     // Set to 'true' when using a trusted SMTP server with valid certificates.
     smtpTlsVerify: (process.env.SMTP_TLS_VERIFY || 'false').toLowerCase() === 'true',

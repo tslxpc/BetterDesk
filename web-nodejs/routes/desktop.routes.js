@@ -37,10 +37,11 @@ function isValidWidgetArray(arr) {
 }
 
 function isValidWallpaperPath(p) {
+    if (p === null || p === '') return true;
     if (typeof p !== 'string') return false;
     if (p.length > 100) return false;
-    // Only allow /wallpapers/<number>.png or empty
-    return /^\/wallpapers\/\d{1,4}\.png$/.test(p) || p === '';
+    // Allow /wallpapers/<number>.png or solid:<hex color>
+    return /^\/wallpapers\/\d{1,4}\.png$/.test(p) || /^solid:#[0-9a-fA-F]{3,8}$/.test(p);
 }
 
 /* ── POST /layout — Save widget layout ──────────────────────── */

@@ -32,6 +32,7 @@ const tokensRoutes = require('./tokens.routes');
 const pagesRoutes = require('./pages.routes');
 const desktopRoutes = require('./desktop.routes');
 const organizationsRoutes = require('./organizations.routes');
+const toolkitRoutes = require('./toolkit.routes');
 const systemRoutes = require('./system.routes');
 
 /**
@@ -103,6 +104,7 @@ router.use('/', cdapRoutes);                            // admin-facing: /cdap/d
 router.use('/', tokensRoutes);                          // admin-facing: /tokens, /api/panel/tokens/*
 router.use('/api/desktop', desktopRoutes);               // admin-facing: /api/desktop/layout, /api/desktop/wallpapers
 router.use('/', organizationsRoutes);                    // admin-facing: /organizations, /api/panel/org/*
+router.use('/', toolkitRoutes);                              // admin-facing: /toolkit, /api/toolkit/*
 router.use('/', systemRoutes);                           // admin-facing: /api/system/*, /api/logs/*, /api/database/*, /api/docker/*, /api/speed-test
 
 module.exports = router;

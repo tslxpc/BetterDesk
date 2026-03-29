@@ -130,7 +130,7 @@
         </div>
 
         <!-- Session expired indicator (shown when redirected from session timeout) -->
-        <script>
+        <script nonce="<%= cspNonce %>">
             window.BetterDesk = window.BetterDesk || {};
             window.BetterDesk.users = <%- JSON.stringify(loginUsers || []) %>;
             window.BetterDesk.csrfToken = '<%= csrfToken %>';
@@ -140,7 +140,7 @@
             }
         </script>
 
-    <script>
+    <script nonce="<%= cspNonce %>">
         window.BetterDesk = {
             csrfToken: '<%= csrfToken || "" %>',
             lang: '<%= lang || "en" %>',
