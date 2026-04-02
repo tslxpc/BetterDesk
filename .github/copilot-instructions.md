@@ -29,13 +29,20 @@
 | **Go Server** | `betterdesk-server/` | ✅ Production-ready | Single binary replacing hbbs+hbbr, ~20K LOC Go |
 | **Rust (archived)** | `archive/hbbs-patch-v2/` | 📦 Archived | Patched Rust binaries v2.1.3 - przeniesione do archiwum |
 
-### BetterDesk Desktop Client (Tauri + SolidJS)
+### BetterDesk MGMT Client (Tauri + SolidJS) — Operator/Admin Console
 
 | Komponent | Folder | Status | Opis |
 |-----------|--------|--------|------|
-| **Desktop Client** | `betterdesk-client/` | ⚠️ Alpha (v0.3.0) | Tauri v2, SolidJS, single-instance, tray mode |
-| **Installer NSIS** | `src-tauri/target/release/bundle/nsis/` | ✅ | `BetterDesk_0.3.0_x64-setup.exe` |
-| **Installer MSI** | `src-tauri/target/release/bundle/msi/` | ✅ | `BetterDesk_0.3.0_x64_en-US.msi` |
+| **MGMT Client** | `betterdesk-mgmt/` | ⚠️ Alpha (v1.0.0) | Tauri v2, SolidJS, operator/admin desktop app |
+| **Installer NSIS** | `src-tauri/target/release/bundle/nsis/` | ✅ | `BetterDesk_MGMT_1.0.0_x64-setup.exe` |
+| **Installer MSI** | `src-tauri/target/release/bundle/msi/` | ✅ | `BetterDesk_MGMT_1.0.0_x64_en-US.msi` |
+
+### BetterDesk Agent Client (Tauri + SolidJS) — Endpoint Device Agent
+
+| Komponent | Folder | Status | Opis |
+|-----------|--------|--------|------|
+| **Agent Client** | `betterdesk-agent-client/` | ⚠️ Alpha (v1.0.0) | Tauri v2, SolidJS, lightweight endpoint agent |
+| **Installer NSIS** | `src-tauri/target/release/bundle/nsis/` | ✅ | `BetterDesk_Agent_1.0.0_x64-setup.exe` |
 
 ### Serwer Go — Binaries (NIE są w repozytorium, kompilowane lokalnie)
 
@@ -190,6 +197,12 @@ Rustdesk-FreeConsole/
 │   ├── proto/               # Generated protobuf (rendezvous + message)
 │   └── tools/               # Migration utilities
 ├── web-nodejs/              # Node.js web console (active)
+├── betterdesk-mgmt/         # MGMT Client — operator/admin desktop app (Tauri v2 + SolidJS)
+│   ├── src/                 # SolidJS frontend (components, i18n, styles)
+│   └── src-tauri/           # Rust backend (~40K LOC, 25+ modules, 100+ IPC commands)
+├── betterdesk-agent-client/ # Agent Client — lightweight endpoint agent (Tauri v2 + SolidJS)
+│   ├── src/                 # SolidJS frontend (4 views, minimal UI)
+│   └── src-tauri/           # Rust backend (config, registration, sysinfo, 17 IPC commands)
 ├── betterdesk-agent/        # Native CDAP agent (Go binary)
 │   ├── main.go              # CLI entry point, 14 flags, signal handling
 │   ├── agent/               # Core: config, agent, system, manifest, terminal, filebrowser, clipboard, screenshot
@@ -805,6 +818,33 @@ sudo apt-get install -y build-essential libsqlite3-dev pkg-config libssl-dev git
 340. [x] **Responsive auto-reposition**: `autoReposition()` on window resize — clamps widgets within canvas bounds, shrinks oversized widgets. Debounced 300ms.
 341. [x] **Group persistence**: `STORAGE_GROUPS` in localStorage. `loadGroups()`/`saveGroups()` called during init/save cycle.
 342. [x] **i18n**: Added ~50 new keys to EN/PL/ZH for snap layouts, widget groups, remote features, chat E2E, toast, theme selector.
+
+#### BetterDesk MGMT Client — Standalone Operator Desktop App (Phase 49) — Partially Complete
+343. [x] **Architecture design**: Tauri v2 + SolidJS frontend + Rust backend. Renamed from `betterdesk-client/` to `betterdesk-mgmt/`. 25+ Rust modules (~40K LOC), 100+ IPC commands. Dark/light theme, operator-optimized density.
+344. [ ] **Device panel**: Unified device list from Go server API (`GET /api/peers`). Online/offline status, device type, OS, hostname, network addresses, security status, tags, groups, owner. Search, filter, sort, group, bulk actions. Source indicator (BetterDesk / RustDesk integration).
+345. [ ] **Premium remote session**: Max quality video with adaptive bitrate, dynamic resolution, hardware codec acceleration (H.264/VP9/AV1), software fallback. Audio streaming, multi-monitor selection, clipboard sync, file transfer, remote shell/terminal. Session recording per audit policy. In-session quality reconfiguration.
+346. [ ] **Chat & communication**: 1:1 chat (operator ↔ end user), operator ↔ agent chat, group chat per incident/ticket. Canned responses, conversation history, push/in-app notifications, ticket escalation, urgent help flagging. E2E encryption via existing chatCrypto module.
+347. [x] **Server management panel**: ServerPanel.tsx (6 tabs: overview/clients/operators/audit/keys/config), 8 Rust IPC commands (server_get_health, server_get_clients, server_get_operators, server_get_audit, server_get_api_keys, server_disconnect_client, server_ban_client, server_revoke_api_key). RBAC-gated admin panel.
+348. [ ] **CDAP operator mode**: Multiple concurrent sessions, ticket queue with priorities, active connection dashboard, session quality metrics (bandwidth, codec, FPS, latency), agent alert monitoring, session takeover/transfer/end per RBAC.
+349. [ ] **Security hardening**: Mutual auth (client ↔ server), TLS/mTLS, session token rotation, short-lived access tokens, RBAC roles, MFA for operators, certificate pinning, full admin event audit, update signature verification, OS credential store for secrets, replay/downgrade attack resistance.
+350. [ ] **RustDesk integration layer**: Device source adapter pattern — normalize metadata, separate device sources logically, consistent permission model, secure session/status/ID mapping. Staged integration plan if full integration requires major changes.
+351. [ ] **Cross-platform build & installers**: Windows (MSI/NSIS), Linux (deb/rpm/AppImage), macOS (dmg). Auto-update mechanism. Per-platform codec/acceleration detection, secret storage, service/tray/notification differences.
+352. [x] **UX/UI**: NotificationCenter.tsx (type filtering, real-time push, 30s polling), sidebar nav entries, full i18n EN+PL (~60 keys: server.*, notif.*, common.*). Spec: `docs/new_agents/client1.md`.
+353. [ ] **Testing**: Unit tests, integration tests, E2E tests, security tests, streaming performance tests, cross-platform compatibility tests.
+
+#### BetterDesk Agent Client — Endpoint Device Agent (Phase 50) — Partially Complete
+354. [x] **Architecture design**: Tauri v2 + SolidJS frontend + Rust backend. `betterdesk-agent-client/` — lightweight endpoint agent. 4 modules (commands, config, registration, sysinfo_collect), 17 IPC commands. Single window (480x520), tray icon, autostart.
+355. [x] **Installation & server onboarding**: SetupWizard.tsx with 5-step flow: address input with format validation → sequential server validation (availability/protocol/registration/certificate) → device registration → config sync → complete. `registration.rs` with `validate_step()` and `register()`.
+356. [x] **Device identity & registration**: Machine UID-based device ID (`BD-{hash}`), SHA-256 device fingerprint, secure token storage via OS keyring (`keyring` crate), config persistence via `AgentConfig` struct.
+357. [ ] **Remote access support**: Screen capture sharing, remote control input injection, file transfer, chat with operator, multi-session per policy, connection quality reporting, hardware capability reporting. Adaptive quality, weak-link adaptation, selective feature activation post-sync.
+358. [x] **System info collection**: `sysinfo_collect.rs` — hostname, OS, version, arch, CPU name/cores, total RAM/disk, username. `SystemSnapshot::collect()` used in registration and diagnostics.
+359. [ ] **Administrative automation**: Execute approved scripts, admin commands, policy deployment, diagnostics collection, operator-tasked jobs. Task signing/authorization model, source validation, strict permission model, full action audit, scope restrictions, abuse resistance, server-policy disable/limit capability.
+360. [x] **Staged sync after registration**: 5-step validation in `registration.rs` (availability → protocol → registration_open → certificate), then `register()` via heartbeat API, then `sync_config()` via sysinfo API.
+361. [x] **Background service mode**: Tauri tray icon (show/quit menu), autostart via `tauri-plugin-autostart`, single-instance via `tauri-plugin-single-instance`, minimize to tray on close.
+362. [x] **Minimal end-user UI**: StatusPanel (connection hero, info grid, copy ID, reconnect, diagnostics), ChatPanel (operator chat), HelpRequest (4-state flow), SettingsPanel (connection, privacy, general, about). Full i18n EN+PL (~120 keys).
+363. [ ] **Security hardening**: Secure device registration, mutual server auth, encrypted communication, cert pinning/trust model, anti-server-impersonation, anti-unauthorized-control, token/session rotation, process hardening, least-privilege, attended/unattended mode distinction, full admin action audit, secure update mechanism, server config validation, automation sandboxing.
+364. [ ] **Cross-platform build & installers**: Windows (MSI + NSSM service), Linux (deb/rpm + systemd), macOS (pkg + launchd). Per-platform: screen capture, input model, permissions/UAC, secret storage, firewall, autostart, script execution differences.
+365. [ ] **Testing**: Unit tests, integration tests, registration tests, security tests, automation tests, cross-platform compatibility tests, update tests, connection loss resilience tests, server/certificate reconfiguration tests. Spec: `docs/new_agents/client2.md`.
 
 ### Konfiguracja przez Zmienne Środowiskowe
 

@@ -341,7 +341,7 @@
         // Apply theme
         applyTheme(currentTheme);
 
-        renderDesktopIcons();
+        // Desktop icons removed — apps open via drawer/shortcuts only
         initTopbar();
         initAppDrawer();
 
@@ -459,6 +459,8 @@
                 var action = item.getAttribute('data-action');
                 if (action === 'wallpaper' && window.DesktopWidgets) {
                     window.DesktopWidgets.openWallpaperPicker();
+                } else if (action === 'layout') {
+                    openLayoutOverlay();
                 } else if (action === 'refresh') {
                     if (window.DesktopWidgets) window.DesktopWidgets.refreshAll();
                 } else if (action === 'exit') {
@@ -872,7 +874,22 @@
         document.body.style.cursor = 'move';
     }
 
+    var _rafPending = false;
+    var _lastMoveEvent = null;
+
     function handleMouseMove(e) {
+        _lastMoveEvent = e;
+        if (_rafPending) return;
+        _rafPending = true;
+        requestAnimationFrame(function () {
+            _rafPending = false;
+            var ev = _lastMoveEvent;
+            if (!ev) return;
+            _handleMouseMoveInner(ev);
+        });
+    }
+
+    function _handleMouseMoveInner(e) {
         if (dragState) {
             var dx = e.clientX - dragState.startX;
             var dy = e.clientY - dragState.startY;

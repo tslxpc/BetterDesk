@@ -300,6 +300,9 @@ func (s *SQLiteDB) Migrate() error {
 	// "no such column" errors on legacy databases.
 	deferredIndexes := []string{
 		`CREATE INDEX IF NOT EXISTS idx_peers_banned ON peers(banned)`,
+		`CREATE INDEX IF NOT EXISTS idx_peers_soft_deleted ON peers(soft_deleted)`,
+		`CREATE INDEX IF NOT EXISTS idx_peers_linked_peer ON peers(linked_peer_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_peer_metrics_peer_created ON peer_metrics(peer_id, created_at DESC)`,
 	}
 	for _, idx := range deferredIndexes {
 		if _, err := s.db.Exec(idx); err != nil {

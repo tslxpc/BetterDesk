@@ -93,6 +93,8 @@ func (pg *PostgresDB) Migrate() error {
 		`CREATE INDEX IF NOT EXISTS idx_peers_uuid ON peers(uuid)`,
 		`CREATE INDEX IF NOT EXISTS idx_peers_status ON peers(status)`,
 		`CREATE INDEX IF NOT EXISTS idx_peers_banned ON peers(banned) WHERE banned = TRUE`,
+		`CREATE INDEX IF NOT EXISTS idx_peers_soft_deleted ON peers(soft_deleted) WHERE soft_deleted = FALSE`,
+		`CREATE INDEX IF NOT EXISTS idx_peers_linked_peer ON peers(linked_peer_id) WHERE linked_peer_id != ''`,
 
 		`CREATE TABLE IF NOT EXISTS server_config (
 			key   TEXT PRIMARY KEY,
@@ -172,6 +174,7 @@ func (pg *PostgresDB) Migrate() error {
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_peer_metrics_peer_id ON peer_metrics(peer_id)`,
 		`CREATE INDEX IF NOT EXISTS idx_peer_metrics_created_at ON peer_metrics(created_at)`,
+		`CREATE INDEX IF NOT EXISTS idx_peer_metrics_peer_created ON peer_metrics(peer_id, created_at DESC)`,
 
 		// Chat messages
 		`CREATE TABLE IF NOT EXISTS chat_messages (

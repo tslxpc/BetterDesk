@@ -35,6 +35,7 @@
     var _wallpicker  = false;
     var _updateTimers = new Map();
     var _wallpaperPath = null;
+    var _popouts     = new Map();     // widgetId → { win: Window, timer: intervalId }
 
     // ============ Helpers ============
 
@@ -142,13 +143,17 @@
         loadWallpaper();
         loadLayout();
         renderAll();
-        renderNavBar();
-        renderSidebar();
+        // renderNavBar() and renderSidebar() removed — #desktop-topbar from EJS is the sole navigation
         _loadDeviceSearchCache();
+        // Init canvas area baseline for proportional repositioning
+        _prevCanvasArea = getCanvasArea();
     }
 
     function destroy() {
         stopAllTimers();
+        // Close all popup windows
+        _popouts.forEach(function (p, id) { _cleanupPopout(id); });
+        _popouts.clear();
         _widgets.forEach(function (w) { destroyWidget(w.id, true); });
         _widgets.clear();
         if (_canvas) _canvas.innerHTML = '';
@@ -388,6 +393,9 @@
     }
 
     function removeWidget(id) {
+        // Close popup if widget is popped out
+        if (_popouts.has(id)) _cleanupPopout(id);
+
         var el = document.getElementById(id);
         if (el) {
             el.classList.remove('widget-entering');
@@ -466,6 +474,7 @@
                     '<div class="widget-kebab-menu">' +
                         '<div class="widget-kebab-item" data-action="config"><span class="material-icons">settings</span>' + esc(t('desktop.configure')) + '</div>' +
                         '<div class="widget-kebab-item" data-action="refresh"><span class="material-icons">refresh</span>' + esc(t('desktop.refresh')) + '</div>' +
+                        '<div class="widget-kebab-item" data-action="popout"><span class="material-icons">open_in_new</span>' + esc(t('desktop.pop_out_widget')) + '</div>' +
                         '<div class="widget-kebab-divider"></div>' +
                         '<div class="widget-kebab-item danger" data-action="remove"><span class="material-icons">delete</span>' + esc(t('desktop.remove_widget')) + '</div>' +
                     '</div>' +
@@ -507,6 +516,7 @@
                 var action = item.dataset.action;
                 if (action === 'remove') removeWidget(w.id);
                 else if (action === 'config') openWidgetConfig(w.id);
+                else if (action === 'popout') popOutWidget(w.id);
                 else if (action === 'refresh') {
                     var p = getPlugin(w.id);
                     if (p && p.update) {
@@ -627,9 +637,21 @@
         if (el) el.classList.add('widget-dragging');
     }
 
+    var _widgetRafPending = false;
+    var _widgetLastMove = null;
+
     function onMouseMove(e) {
-        if (_dragState) handleDragMove(e.clientX, e.clientY);
-        if (_resizeState) handleResizeMove(e.clientX, e.clientY);
+        if (!_dragState && !_resizeState) return;
+        _widgetLastMove = { cx: e.clientX, cy: e.clientY };
+        if (_widgetRafPending) return;
+        _widgetRafPending = true;
+        requestAnimationFrame(function () {
+            _widgetRafPending = false;
+            if (!_widgetLastMove) return;
+            var m = _widgetLastMove;
+            if (_dragState) handleDragMove(m.cx, m.cy);
+            if (_resizeState) handleResizeMove(m.cx, m.cy);
+        });
     }
 
     function onTouchMove(e) {
@@ -804,8 +826,8 @@
         if (_canvas) {
             return { w: _canvas.offsetWidth, h: _canvas.offsetHeight };
         }
-        // Account for topnav (42px), sidebar (48px)
-        return { w: window.innerWidth - 48, h: window.innerHeight - 42 };
+        // Fallback: topbar 36px, taskbar 10px
+        return { w: window.innerWidth, h: window.innerHeight - 46 };
     }
 
     function findOpenPosition(w, h, area) {
@@ -1973,34 +1995,53 @@
 
     // ============ Responsive Auto-Reposition ============
 
+    var _prevCanvasArea = null;
+
     function autoReposition() {
         var area = getCanvasArea();
-        if (area.w < 400 || area.h < 300) return; // Too small — skip
+        if (area.w < 200 || area.h < 200) return;
+
+        // Proportional scaling when canvas size changes significantly
+        var scaleX = 1, scaleY = 1;
+        if (_prevCanvasArea && _prevCanvasArea.w > 0 && _prevCanvasArea.h > 0) {
+            scaleX = area.w / _prevCanvasArea.w;
+            scaleY = area.h / _prevCanvasArea.h;
+        }
+        var useScale = _prevCanvasArea && (Math.abs(scaleX - 1) > 0.05 || Math.abs(scaleY - 1) > 0.05);
 
         _widgets.forEach(function (w) {
             var el = document.getElementById(w.id);
             if (!el) return;
-
-            // Clamp: keep widget fully inside canvas area
-            var maxX = area.w - w.w;
-            var maxY = area.h - w.h;
             var changed = false;
 
-            if (w.x > maxX) { w.x = Math.max(0, maxX); changed = true; }
-            if (w.y > maxY) { w.y = Math.max(0, maxY); changed = true; }
+            // Scale positions proportionally on significant resize
+            if (useScale) {
+                w.x = snap(w.x * scaleX);
+                w.y = snap(w.y * scaleY);
+                changed = true;
+            }
 
-            // If widget is larger than canvas, shrink it
-            if (w.w > area.w) { w.w = Math.max(MIN_W, area.w - 20); changed = true; }
-            if (w.h > area.h) { w.h = Math.max(MIN_H, area.h - 20); changed = true; }
+            // Shrink if widget is larger than canvas
+            if (w.w > area.w - 20) { w.w = Math.max(MIN_W, area.w - 20); changed = true; }
+            if (w.h > area.h - 20) { w.h = Math.max(MIN_H, area.h - 20); changed = true; }
+
+            // Clamp to canvas bounds
+            var maxX = Math.max(0, area.w - w.w);
+            var maxY = Math.max(0, area.h - w.h);
+            if (w.x < 0) { w.x = 0; changed = true; }
+            if (w.y < 0) { w.y = 0; changed = true; }
+            if (w.x > maxX) { w.x = maxX; changed = true; }
+            if (w.y > maxY) { w.y = maxY; changed = true; }
 
             if (changed) {
                 el.style.left = w.x + 'px';
-                el.style.top = w.y + 'px';
-                el.style.width = w.w + 'px';
+                el.style.top  = w.y + 'px';
+                el.style.width  = w.w + 'px';
                 el.style.height = w.h + 'px';
             }
         });
 
+        _prevCanvasArea = { w: area.w, h: area.h };
         saveLayout();
     }
 
@@ -2010,6 +2051,189 @@
         clearTimeout(_repositionTimeout);
         _repositionTimeout = setTimeout(autoReposition, 300);
     });
+
+    // ============ Pop-Out Floating Windows ============
+
+    /**
+     * Pop out a widget into an independent browser popup window.
+     * The popup communicates with the parent via postMessage for state updates.
+     */
+    function popOutWidget(widgetId) {
+        var w = _widgets.get(widgetId);
+        if (!w) return;
+        // Already popped out — focus existing popup
+        var existing = _popouts.get(widgetId);
+        if (existing && existing.win && !existing.win.closed) {
+            existing.win.focus();
+            return;
+        }
+
+        var plugin = window.WidgetPlugins && window.WidgetPlugins.get(w.type);
+        if (!plugin) return;
+
+        var popW = Math.max(w.w + 32, 280);
+        var popH = Math.max(w.h + 60, 220);
+        var left = (window.screenX || window.screenLeft) + 80;
+        var top  = (window.screenY || window.screenTop) + 80;
+
+        var popup = window.open('', '_blank',
+            'width=' + popW + ',height=' + popH +
+            ',left=' + left + ',top=' + top +
+            ',resizable=yes,scrollbars=no,menubar=no,toolbar=no,location=no,status=no'
+        );
+        if (!popup) return; // Blocked by browser
+
+        var iconColor = plugin.color || '#58a6ff';
+        var title = esc(plugin.name || w.type);
+        var theme = document.documentElement.getAttribute('data-desktop-theme') || 'dark';
+
+        // Build self-contained popup HTML
+        popup.document.open();
+        popup.document.write(
+            '<!DOCTYPE html><html lang="en" data-desktop-theme="' + esc(theme) + '">' +
+            '<head><meta charset="utf-8"><title>' + title + ' — BetterDesk Widget</title>' +
+            '<link rel="stylesheet" href="https://fonts.googleapis.com/icon?family=Material+Icons">' +
+            '<style>' + _getPopoutCSS() + '</style></head>' +
+            '<body>' +
+            '<div class="popout-header">' +
+                '<span class="material-icons popout-icon" style="color:' + esc(iconColor) + '">' + esc(plugin.icon || 'widgets') + '</span>' +
+                '<span class="popout-title">' + title + '</span>' +
+                '<button class="popout-pop-in" title="' + esc(t('desktop.pop_in_widget')) + '">' +
+                    '<span class="material-icons">pip_exit</span>' +
+                '</button>' +
+            '</div>' +
+            '<div id="widget-body" class="popout-body"></div>' +
+            '<script>' +
+                'var _widgetId = ' + JSON.stringify(widgetId) + ';' +
+                'document.querySelector(".popout-pop-in").addEventListener("click", function () {' +
+                    'window.opener && window.opener.postMessage({type:"widget-popin",widgetId:_widgetId},"*");' +
+                    'window.close();' +
+                '});' +
+                'window.addEventListener("beforeunload", function () {' +
+                    'window.opener && window.opener.postMessage({type:"widget-popin",widgetId:_widgetId},"*");' +
+                '});' +
+            '<\/script>' +
+            '</body></html>'
+        );
+        popup.document.close();
+
+        // Hide widget on main canvas
+        var el = document.getElementById(widgetId);
+        if (el) el.style.display = 'none';
+
+        // Render plugin content into popup body
+        var popupBody = popup.document.getElementById('widget-body');
+        if (plugin.render && popupBody) {
+            try { plugin.render(popupBody, w.config, w); } catch (err) {
+                popupBody.innerHTML = '<div style="padding:16px;color:#f85149;">Render error</div>';
+            }
+        }
+
+        // Start update cycle in popup
+        var updateTimer = null;
+        if (plugin.update) {
+            var interval = plugin.updateInterval || UPDATE_INTERVAL;
+            var doUpdate = function () {
+                if (popup.closed) { _cleanupPopout(widgetId); return; }
+                var body = popup.document.getElementById('widget-body');
+                if (body) {
+                    try { plugin.update(body, w.config, w); } catch (_) {}
+                }
+            };
+            doUpdate();
+            updateTimer = setInterval(doUpdate, interval);
+        }
+
+        // Track popup with close-detection interval
+        var closeCheck = setInterval(function () {
+            if (!popup || popup.closed) {
+                _cleanupPopout(widgetId);
+            }
+        }, 1000);
+
+        // Stop main canvas timer for this widget (popup owns updates now)
+        stopWidgetTimer(widgetId);
+
+        _popouts.set(widgetId, { win: popup, timer: updateTimer, closeCheck: closeCheck });
+    }
+
+    /**
+     * Restore a popped-out widget back to the main canvas.
+     */
+    function popInWidget(widgetId) {
+        _cleanupPopout(widgetId);
+        var el = document.getElementById(widgetId);
+        if (el) {
+            el.style.display = '';
+            // Restart data updates on main canvas
+            var w = _widgets.get(widgetId);
+            if (w) startWidgetTimer(w);
+        }
+    }
+
+    function _cleanupPopout(widgetId) {
+        var p = _popouts.get(widgetId);
+        if (!p) return;
+        if (p.timer) clearInterval(p.timer);
+        if (p.closeCheck) clearInterval(p.closeCheck);
+        if (p.win && !p.win.closed) p.win.close();
+        _popouts.delete(widgetId);
+
+        // Restore widget visibility on main canvas
+        var el = document.getElementById(widgetId);
+        if (el) el.style.display = '';
+
+        // Restart main canvas update timer
+        var w = _widgets.get(widgetId);
+        if (w) startWidgetTimer(w);
+    }
+
+    /** Listen for pop-in messages from popup windows */
+    window.addEventListener('message', function (e) {
+        if (!e.data || e.data.type !== 'widget-popin') return;
+        var widgetId = e.data.widgetId;
+        if (widgetId && _popouts.has(widgetId)) popInWidget(widgetId);
+    });
+
+    /** Minimal CSS for the popup window */
+    function _getPopoutCSS() {
+        var isDark = (document.documentElement.getAttribute('data-desktop-theme') || 'dark') !== 'light';
+        var bg = isDark ? '#0d1117' : '#ffffff';
+        var fg = isDark ? '#e6edf3' : '#1f2328';
+        var border = isDark ? '#30363d' : '#d1d9e0';
+        var headerBg = isDark ? 'rgba(22,27,34,0.92)' : 'rgba(245,248,255,0.92)';
+        var accent = '#58a6ff';
+
+        return '' +
+            '*, *::before, *::after { box-sizing: border-box; }' +
+            'body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif; ' +
+                'background: ' + bg + '; color: ' + fg + '; overflow: hidden; height: 100vh; display: flex; flex-direction: column; }' +
+            '.popout-header { display: flex; align-items: center; gap: 8px; padding: 6px 12px; ' +
+                'background: ' + headerBg + '; border-bottom: 1px solid ' + border + '; ' +
+                '-webkit-app-region: drag; user-select: none; flex-shrink: 0; }' +
+            '.popout-icon { font-size: 18px; }' +
+            '.popout-title { font-size: 13px; font-weight: 600; flex: 1; }' +
+            '.popout-pop-in { background: none; border: none; cursor: pointer; color: ' + fg + '; ' +
+                'padding: 4px; border-radius: 4px; -webkit-app-region: no-drag; display: flex; align-items: center; }' +
+            '.popout-pop-in:hover { background: ' + (isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.06)') + '; }' +
+            '.popout-body { flex: 1; overflow: auto; padding: 8px; }' +
+            /* Widget body styling resets for popup context */
+            '.widget-empty { display: flex; flex-direction: column; align-items: center; justify-content: center; ' +
+                'gap: 8px; height: 100%; color: ' + (isDark ? '#8b949e' : '#656d76') + '; font-size: 13px; }' +
+            '.widget-empty .material-icons { font-size: 32px; opacity: 0.5; }' +
+            /* Common widget content styles */
+            'table { width: 100%; border-collapse: collapse; font-size: 12px; }' +
+            'th, td { padding: 4px 8px; text-align: left; border-bottom: 1px solid ' + border + '; }' +
+            'th { font-weight: 600; font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; color: ' + (isDark ? '#8b949e' : '#656d76') + '; }' +
+            '.gauge-bar { height: 6px; border-radius: 3px; background: ' + (isDark ? '#21262d' : '#eaeef2') + '; overflow: hidden; }' +
+            '.gauge-fill { height: 100%; border-radius: 3px; transition: width 0.4s ease; }' +
+            '.stat-value { font-size: 20px; font-weight: 700; }' +
+            '.stat-label { font-size: 11px; color: ' + (isDark ? '#8b949e' : '#656d76') + '; }' +
+            /* Link and button styling */
+            'a { color: ' + accent + '; text-decoration: none; }' +
+            'button:not(.popout-pop-in) { font-family: inherit; }' +
+            '.material-icons { font-family: "Material Icons"; font-size: 18px; }';
+    }
 
     // ============ Public API ============
 
@@ -2039,6 +2263,9 @@
         ungroupWidgets: ungroupWidgets,
         switchGroupTab: switchGroupTab,
         getGroups: function () { return _groups; },
+        // Floating popup windows (Phase 42)
+        popOutWidget: popOutWidget,
+        popInWidget: popInWidget,
         autoReposition: autoReposition
     };
 

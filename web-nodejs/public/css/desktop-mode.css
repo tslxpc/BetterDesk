@@ -96,19 +96,7 @@ body.desktop-active .desktop-shell {
 /* ============ Desktop Icons Grid ============ */
 
 .desktop-icons {
-    position: absolute;
-    top: 16px;
-    left: 16px;
-    right: 16px;
-    bottom: 56px;
-    z-index: 1;
-    display: grid;
-    grid-template-columns: repeat(auto-fill, 96px);
-    grid-template-rows: repeat(auto-fill, 96px);
-    gap: 8px;
-    align-content: start;
-    padding: 8px;
-    pointer-events: none;
+    display: none; /* Desktop icons removed — apps open via drawer/shortcuts only */
 }
 
 .desktop-icon {
@@ -183,8 +171,7 @@ body.desktop-active .desktop-shell {
 
 .desktop-windows {
     position: absolute;
-    inset: 0;
-    bottom: 48px;
+    inset: 36px 0 10px 0; /* topbar 36px, slim taskbar 10px */
     z-index: 2;
     pointer-events: none;
 }

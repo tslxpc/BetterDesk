@@ -39,26 +39,41 @@
 
     // ============ Wallpaper Preload ============
 
+    var DEFAULT_LOGIN_GRADIENT = 'linear-gradient(135deg, #0d1117 0%, #161b22 40%, #1a1a2e 70%, #0f3460 100%)';
+
     function preloadWallpaper() {
         var saved = localStorage.getItem(WALLPAPER_STORAGE);
-        var url = saved || '/wallpapers/1.png';
         var el = document.getElementById('dl-wallpaper');
         if (!el) return;
 
-        var isSolid = url.indexOf('solid:') === 0;
+        // No saved wallpaper — use gradient immediately (no 404 probe)
+        if (!saved) {
+            el.style.background = DEFAULT_LOGIN_GRADIENT;
+            el.classList.add('loaded');
+            return;
+        }
+
+        var isSolid = saved.indexOf('solid:') === 0;
         if (isSolid) {
-            el.style.background = url.substring(6);
+            el.style.background = saved.substring(6);
+            el.classList.add('loaded');
             return;
         }
 
         var img = new Image();
         img.onload = function () {
-            el.style.backgroundImage = 'url("' + url + '")';
+            el.style.backgroundImage = 'url("' + saved + '")';
             el.style.backgroundSize = 'cover';
             el.style.backgroundPosition = 'center';
             el.classList.add('loaded');
         };
-        img.src = url;
+        img.onerror = function () {
+            // Wallpaper file missing — clear stale pref, use gradient
+            localStorage.removeItem(WALLPAPER_STORAGE);
+            el.style.background = DEFAULT_LOGIN_GRADIENT;
+            el.classList.add('loaded');
+        };
+        img.src = saved;
     }
 
     // ============ Clock ============

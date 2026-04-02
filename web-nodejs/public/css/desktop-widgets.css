@@ -7,7 +7,7 @@
 
 .widget-canvas {
     position: absolute;
-    inset: 42px 0 48px 42px; /* topnav 42px, sidebar 42px, taskbar 48px */
+    inset: 36px 0 10px 0; /* topbar 36px, no sidebar, slim taskbar 10px */
     overflow: hidden;
     z-index: 1;
     pointer-events: none;
@@ -242,7 +242,7 @@
 
 .widget-add-btn {
     position: fixed;
-    bottom: 64px;
+    bottom: 24px;
     right: 20px;
     width: 48px;
     height: 48px;
@@ -273,7 +273,7 @@
 
 .widget-picker {
     position: fixed;
-    bottom: 64px;
+    bottom: 24px;
     right: 20px;
     width: 360px;
     max-height: 520px;
@@ -686,6 +686,35 @@
 
 .wallpaper-thumb.active::after {
     opacity: 1;
+}
+
+.wallpaper-unavailable-notice {
+    grid-column: 1 / -1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    padding: 48px 24px;
+    text-align: center;
+    color: rgba(255, 255, 255, 0.5);
+}
+
+.wallpaper-unavailable-notice .material-icons {
+    font-size: 48px;
+    color: rgba(88, 166, 255, 0.4);
+}
+
+.wallpaper-unavailable-notice p {
+    margin: 0;
+    font-size: 14px;
+    font-weight: 500;
+    color: rgba(255, 255, 255, 0.6);
+}
+
+.wallpaper-unavailable-notice small {
+    font-size: 12px;
+    color: rgba(255, 255, 255, 0.35);
 }
 
 .wallpaper-thumb-placeholder {
@@ -2398,17 +2427,17 @@
 /* ============ Responsive Desktop Mode ============ */
 
 @media (max-width: 1440px) {
-    .widget-canvas { inset: 42px 0 48px 42px; }
+    .widget-canvas { inset: 36px 0 10px 0; }
 }
 
 @media (max-width: 1024px) {
-    .widget-canvas { inset: 42px 0 48px 0; } /* hide sidebar on tablets */
+    .widget-canvas { inset: 36px 0 10px 0; }
     .desktop-widget { min-width: 160px; }
     .widget-picker { width: 320px; }
 }
 
 @media (max-width: 768px) {
-    .widget-canvas { inset: 42px 0 48px 0; }
+    .widget-canvas { inset: 36px 0 10px 0; }
     .desktop-widget {
         border-radius: 10px;
         min-width: 140px;
@@ -2417,22 +2446,22 @@
     .widget-header-icon { width: 20px; height: 20px; font-size: 12px; }
     .widget-header-title { font-size: 10px; }
     .widget-body { padding: 2px 8px 6px; }
-    .widget-picker { width: 280px; max-height: 440px; bottom: 56px; right: 8px; }
-    .widget-add-btn { width: 40px; height: 40px; bottom: 56px; right: 8px; font-size: 20px; }
+    .widget-picker { width: 280px; max-height: 440px; bottom: 20px; right: 8px; }
+    .widget-add-btn { width: 40px; height: 40px; bottom: 20px; right: 8px; font-size: 20px; }
 }
 
 @media (max-width: 480px) {
-    .widget-canvas { inset: 38px 0 44px 0; }
+    .widget-canvas { inset: 36px 0 10px 0; }
     .desktop-widget {
         border-radius: 8px;
         backdrop-filter: blur(16px);
     }
     .widget-header-actions { opacity: 1; } /* always show on mobile */
     .widget-picker {
-        position: fixed; inset: auto 0 44px 0; width: 100%;
+        position: fixed; inset: auto 0 14px 0; width: 100%;
         border-radius: 16px 16px 0 0; max-height: 60vh;
     }
-    .widget-add-btn { bottom: 52px; right: 8px; width: 36px; height: 36px; }
+    .widget-add-btn { bottom: 18px; right: 8px; width: 36px; height: 36px; }
 }
 
 /* ─── Phase 42: Snap Layout Overlay ─────────────────────────────────────────── */

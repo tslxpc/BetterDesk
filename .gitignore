@@ -143,8 +143,17 @@ _write_readme.py
 web-nodejs/_test_*.sh
 web-nodejs/_fix_*.sh
 
-# --- BetterDesk Desktop Client (dev paused — using RustDesk client) ---
-betterdesk-client/
+# --- BetterDesk MGMT Client (Tauri + SolidJS, build artifacts) ---
+betterdesk-mgmt/node_modules/
+betterdesk-mgmt/dist/
+betterdesk-mgmt/src-tauri/target/
+betterdesk-mgmt/src-tauri/Cargo.lock
+
+# --- BetterDesk Agent Client (Tauri + SolidJS, build artifacts) ---
+betterdesk-agent-client/node_modules/
+betterdesk-agent-client/dist/
+betterdesk-agent-client/src-tauri/target/
+betterdesk-agent-client/src-tauri/Cargo.lock
 
 # --- BetterDesk Agent binaries & config (compiled locally) ---
 betterdesk-agent/betterdesk-agent
