@@ -33,7 +33,8 @@ RUN apk add --no-cache \
     sqlite \
     curl \
     tini \
-    || { sleep 2 && apk add --no-cache sqlite curl tini; } \
+    su-exec \
+    || { sleep 2 && apk add --no-cache sqlite curl tini su-exec; } \
     && addgroup -g 10001 -S betterdesk \
     && adduser -u 10001 -S -G betterdesk betterdesk
 
@@ -42,9 +43,10 @@ RUN apk add --no-cache \
 COPY web-nodejs/ .
 COPY --from=build /app/node_modules ./node_modules/
 
-# Copy entrypoint script
+# Copy entrypoint scripts
 COPY docker-entrypoint.sh /app/docker-entrypoint.sh
-RUN chmod +x /app/docker-entrypoint.sh
+COPY docker/console-entrypoint.sh /console-entrypoint.sh
+RUN chmod +x /app/docker-entrypoint.sh /console-entrypoint.sh
 
 # Create data directories
 RUN mkdir -p /app/data /opt/rustdesk && \
@@ -71,8 +73,9 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
 # 21121 - RustDesk Client API (WAN-facing)
 EXPOSE 5000 21121
 
-USER betterdesk
+# Note: Container starts as root so console-entrypoint.sh can fix volume permissions.
+# It drops to betterdesk user via su-exec before running docker-entrypoint.sh.
 
 # Use tini as init to handle signals properly
 ENTRYPOINT ["/sbin/tini", "--"]
-CMD ["/app/docker-entrypoint.sh"]
+CMD ["/console-entrypoint.sh"]

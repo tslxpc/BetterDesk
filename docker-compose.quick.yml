@@ -55,7 +55,7 @@ services:
       - "5000:5000"             # Web console
       - "21121:21121"           # RustDesk Client API (WAN)
     volumes:
-      - betterdesk-data:/opt/rustdesk:ro
+      - betterdesk-data:/opt/rustdesk
       - console-data:/app/data
     environment:
       - NODE_ENV=production
