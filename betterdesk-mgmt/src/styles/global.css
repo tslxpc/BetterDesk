@@ -1137,6 +1137,22 @@ input::placeholder { color: var(--text-tertiary); }
   color: var(--text-secondary);
 }
 
+.remote-password-form {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+}
+
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+.spinning {
+  animation: spin 1.2s linear infinite;
+}
+
 /* ---- Chat Panel ---- */
 .chat-panel {
   display: flex;

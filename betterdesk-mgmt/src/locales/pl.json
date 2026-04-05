@@ -75,6 +75,12 @@
     "status_offline": "Offline",
     "no_devices": "Nie znaleziono urządzeń",
     "loading": "Ładowanie urządzeń...",
+    "count": {
+      "one": "{{count}} urządzenie",
+      "few": "{{count}} urządzenia",
+      "many": "{{count}} urządzeń",
+      "other": "{{count}} urządzenia"
+    },
     "actions": "Akcje",
     "action_lock": "Zablokuj ekran",
     "action_restart": "Uruchom ponownie",
@@ -98,7 +104,12 @@
     "connect_failed": "Nie udało się połączyć",
     "retry": "Ponów",
     "refresh": "Odśwież",
-    "ctrl_alt_del": "Ctrl+Alt+Del"
+    "ctrl_alt_del": "Ctrl+Alt+Del",
+    "enter_password": "Podaj hasło urządzenia",
+    "password_placeholder": "Hasło",
+    "connect_btn": "Połącz",
+    "auth_failed": "Uwierzytelnianie nie powiodło się",
+    "starting_session": "Uruchamianie sesji zdalnej..."
   },
   "chat": {
     "title": "Czat",
@@ -108,7 +119,11 @@
     "contacts": "Kontakty",
     "load_error": "Nie udało się załadować kontaktów",
     "no_contacts": "Brak urządzeń online",
-    "select_contact": "Wybierz kontakt, aby rozpocząć rozmowę"
+    "select_contact": "Wybierz kontakt, aby rozpocząć rozmowę",
+    "send_error": "Nie udało się wysłać wiadomości",
+    "connection_error": "Nie udało się połączyć z czatem",
+    "reconnect": "Połącz ponownie",
+    "is_typing": "pisze..."
   },
   "settings": {
     "title": "Ustawienia",
@@ -154,7 +169,11 @@
     "confirm": "Potwierdź",
     "yes": "Tak",
     "no": "Nie",
-    "save": "Zapisz"
+    "save": "Zapisz",
+    "details": "Szczegóły"
+  },
+  "connection": {
+    "connected_to": "Połączono z {{name}}"
   },
   "server": {
     "title": "Zarządzanie serwerem",
@@ -167,6 +186,9 @@
     "peers_online": "Urządzenia online",
     "relay_sessions": "Sesje relay",
     "memory": "Pamięć",
+    "hostname": "Nazwa hosta",
+    "platform": "Platforma",
+    "last_online": "Ostatnio online",
     "no_clients": "Brak połączonych klientów",
     "protocol": "Protokół",
     "connected_at": "Połączono o",

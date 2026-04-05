@@ -82,6 +82,25 @@
 
 .org-card-meta { font-size: 0.8rem; color: var(--text-secondary); }
 .org-card-actions { display: flex; gap: 4px; }
+.org-card-actions .btn-icon {
+    background: transparent;
+    border: 1px solid var(--border-primary, #30363d);
+    color: var(--text-secondary, #8b949e);
+    border-radius: 6px;
+    transition: background 0.15s, color 0.15s;
+}
+.org-card-actions .btn-icon:hover {
+    background: var(--bg-tertiary, #21262d);
+    color: var(--text-primary, #e6edf3);
+}
+.org-card-actions .btn-danger {
+    color: var(--accent-red, #f85149);
+    border-color: var(--accent-red, #f85149);
+}
+.org-card-actions .btn-danger:hover {
+    background: rgba(248, 81, 73, 0.15);
+    color: var(--accent-red, #f85149);
+}
 
 /* Organization detail page */
 .org-detail-page { padding: 0; }

@@ -820,6 +820,250 @@
     75% { transform: translateX(4px); }
 }
 
+/* ---- File Transfer Panel ---- */
+
+.session-file-panel {
+    position: absolute;
+    bottom: 16px;
+    right: 16px;
+    width: 380px;
+    height: 480px;
+    background: var(--bg-secondary, #161b22);
+    border: 1px solid var(--border-primary, #30363d);
+    border-radius: 12px;
+    display: flex;
+    flex-direction: column;
+    z-index: 55;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3);
+    overflow: hidden;
+}
+
+.file-panel-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 10px 14px;
+    border-bottom: 1px solid var(--border-primary, #30363d);
+    font-size: 14px;
+    font-weight: 600;
+    gap: 6px;
+}
+
+.file-panel-header-title {
+    flex: 1;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.file-panel-header-actions {
+    display: flex;
+    align-items: center;
+    gap: 2px;
+}
+
+.file-btn-icon {
+    width: 30px;
+    height: 30px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    background: transparent;
+    border: none;
+    border-radius: 6px;
+    color: var(--text-secondary, #8b949e);
+    cursor: pointer;
+    padding: 0;
+    transition: background 0.15s, color 0.15s;
+}
+
+.file-btn-icon .material-icons { font-size: 18px; }
+
+.file-btn-icon:hover {
+    background: var(--bg-tertiary, #21262d);
+    color: var(--text-primary, #e6edf3);
+}
+
+.file-btn-icon.active {
+    color: var(--accent-blue, #58a6ff);
+}
+
+.file-panel-path {
+    display: flex;
+    align-items: center;
+    padding: 6px 14px;
+    gap: 6px;
+    border-bottom: 1px solid var(--border-secondary, #21262d);
+    background: var(--bg-tertiary, #0d1117);
+}
+
+.file-path-text {
+    flex: 1;
+    font-size: 12px;
+    color: var(--text-secondary, #8b949e);
+    font-family: 'JetBrains Mono', 'Fira Code', monospace;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.file-panel-list {
+    flex: 1;
+    overflow-y: auto;
+    padding: 4px 0;
+}
+
+.file-panel-list::-webkit-scrollbar { width: 6px; }
+.file-panel-list::-webkit-scrollbar-thumb {
+    background: var(--border-primary, #30363d);
+    border-radius: 3px;
+}
+
+.file-panel-empty {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    height: 100%;
+    color: var(--text-tertiary, #484f58);
+    font-size: 13px;
+    gap: 8px;
+}
+
+.file-panel-empty .material-icons { font-size: 40px; opacity: 0.4; }
+
+.file-entry {
+    display: flex;
+    align-items: center;
+    padding: 6px 14px;
+    gap: 10px;
+    cursor: pointer;
+    font-size: 13px;
+    transition: background 0.1s;
+    position: relative;
+}
+
+.file-entry:hover {
+    background: var(--bg-tertiary, #21262d);
+}
+
+.file-entry-icon {
+    flex-shrink: 0;
+    color: var(--text-secondary, #8b949e);
+}
+
+.file-entry-icon .material-icons { font-size: 20px; }
+
+.file-entry-dir .file-entry-icon { color: var(--accent-blue, #58a6ff); }
+.file-entry-drive .file-entry-icon { color: var(--accent-yellow, #d29922); }
+
+.file-entry-name {
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: var(--text-primary, #e6edf3);
+}
+
+.file-entry-dir .file-entry-name { font-weight: 600; }
+
+.file-entry-meta {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    font-size: 11px;
+    color: var(--text-tertiary, #484f58);
+    flex-shrink: 0;
+}
+
+.file-entry-actions {
+    display: flex;
+    gap: 2px;
+    opacity: 0;
+    transition: opacity 0.15s;
+}
+
+.file-entry:hover .file-entry-actions { opacity: 1; }
+
+.file-entry-actions .file-btn-icon {
+    width: 24px;
+    height: 24px;
+}
+
+.file-entry-actions .file-btn-icon .material-icons { font-size: 16px; }
+
+/* ---- File Transfers Section ---- */
+
+.file-transfers-section {
+    border-top: 1px solid var(--border-primary, #30363d);
+    max-height: 140px;
+    overflow-y: auto;
+}
+
+.file-transfers-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 6px 14px;
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--text-secondary, #8b949e);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.file-transfer-entry {
+    display: flex;
+    align-items: center;
+    padding: 6px 14px;
+    gap: 10px;
+    font-size: 12px;
+}
+
+.file-transfer-name {
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: var(--text-primary, #e6edf3);
+}
+
+.file-transfer-bar {
+    width: 80px;
+    height: 4px;
+    border-radius: 2px;
+    background: var(--bg-tertiary, #21262d);
+    overflow: hidden;
+    flex-shrink: 0;
+}
+
+.file-transfer-bar-fill {
+    height: 100%;
+    border-radius: 2px;
+    background: var(--accent-blue, #58a6ff);
+    transition: width 0.2s ease;
+}
+
+.file-transfer-pct {
+    font-size: 11px;
+    color: var(--text-secondary, #8b949e);
+    min-width: 36px;
+    text-align: right;
+}
+
+.file-transfer-entry.complete .file-transfer-bar-fill {
+    background: var(--accent-green, #3fb950);
+}
+
+.file-transfer-entry.error .file-transfer-bar-fill {
+    background: var(--accent-red, #f85149);
+}
+
+.file-transfer-entry.complete .file-transfer-pct,
+.file-transfer-entry.error .file-transfer-pct {
+    font-weight: 600;
+}
+
 /* ---- Responsive ---- */
 @media (max-width: 768px) {
     .toolbar-center {

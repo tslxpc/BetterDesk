@@ -69,7 +69,7 @@ pub async fn read_frame<R: AsyncReadExt + Unpin>(reader: &mut R) -> Result<Vec<u
     reader
         .read_exact(&mut first)
         .await
-        .context("Failed to read frame header byte")?;
+        .context("Connection closed — failed to read frame")?;
 
     let tag = first[0] & 0x3;
     let head_len = (tag + 1) as usize; // 1, 2, 3, or 4

@@ -21,16 +21,16 @@
                     data-category="main" title="<%= _('nav.main') %>">
                 <span class="material-icons">home</span>
             </button>
-            <button class="sidebar-rail-btn <%= ['inventory','tickets','help-requests','automation','network','activity','cdap'].includes(currentPage) ? 'active' : '' %>"
+            <button class="sidebar-rail-btn <%= ['inventory','tickets','help-requests','automation','network','activity','cdap','chat'].includes(currentPage) ? 'active' : '' %>"
                     data-category="management" title="<%= _('nav.management') || 'Management' %>">
                 <span class="material-icons">business_center</span>
             </button>
-            <button class="sidebar-rail-btn <%= ['reports','keys','generator','remote'].includes(currentPage) ? 'active' : '' %>"
+            <button class="sidebar-rail-btn <%= ['reports','keys','generator','remote','cdap-studio'].includes(currentPage) ? 'active' : '' %>"
                     data-category="tools" title="<%= _('nav.tools') %>">
                 <span class="material-icons">build</span>
             </button>
             <% if (user && user.role === 'admin') { %>
-            <button class="sidebar-rail-btn <%= ['tokens','organizations','dataguard','users','settings'].includes(currentPage) ? 'active' : '' %>"
+            <button class="sidebar-rail-btn <%= ['tokens','organizations','policies','attestation','dataguard','users','settings'].includes(currentPage) ? 'active' : '' %>"
                     data-category="system" title="<%= _('nav.system') %>">
                 <span class="material-icons">admin_panel_settings</span>
             </button>
@@ -107,6 +107,22 @@
                 <span class="material-icons">developer_board</span>
                 <span class="sidebar-link-text"><%= _('nav.cdap') %></span>
             </a>
+            <a href="/fleet" class="sidebar-link <%= currentPage === 'fleet' ? 'active' : '' %>">
+                <span class="material-icons">hub</span>
+                <span class="sidebar-link-text"><%= _('nav.fleet') || 'Fleet' %></span>
+            </a>
+            <a href="/scaling" class="sidebar-link <%= currentPage === 'scaling' ? 'active' : '' %>">
+                <span class="material-icons">cell_tower</span>
+                <span class="sidebar-link-text"><%= _('nav.scaling') || 'Scaling' %></span>
+            </a>
+            <a href="/cross-platform" class="sidebar-link <%= currentPage === 'cross-platform' ? 'active' : '' %>">
+                <span class="material-icons">devices</span>
+                <span class="sidebar-link-text"><%= _('nav.cross_platform') || 'Cross-Platform' %></span>
+            </a>
+            <a href="/chat" class="sidebar-link <%= currentPage === 'chat' ? 'active' : '' %>">
+                <span class="material-icons">chat</span>
+                <span class="sidebar-link-text"><%= _('nav.chat') %></span>
+            </a>
         </div>
 
         <!-- Tools category links -->
@@ -131,6 +147,10 @@
                 <span class="material-icons">handyman</span>
                 <span class="sidebar-link-text"><%= _('nav.toolkit') || 'Toolkit' %></span>
             </a>
+            <a href="/cdap-studio" class="sidebar-link <%= currentPage === 'cdap-studio' ? 'active' : '' %>">
+                <span class="material-icons">account_tree</span>
+                <span class="sidebar-link-text"><%= _('nav.sdk_studio') || 'SDK Studio' %></span>
+            </a>
         </div>
 
         <!-- System category links -->
@@ -144,6 +164,14 @@
                 <span class="material-icons">corporate_fare</span>
                 <span class="sidebar-link-text"><%= _('nav.organizations') %></span>
             </a>
+            <a href="/policies" class="sidebar-link <%= currentPage === 'policies' ? 'active' : '' %>">
+                <span class="material-icons">policy</span>
+                <span class="sidebar-link-text"><%= _('nav.policies') || 'Policies' %></span>
+            </a>
+            <a href="/attestation" class="sidebar-link <%= currentPage === 'attestation' ? 'active' : '' %>">
+                <span class="material-icons">fingerprint</span>
+                <span class="sidebar-link-text"><%= _('nav.attestation') || 'Attestation' %></span>
+            </a>
             <a href="/dataguard" class="sidebar-link <%= currentPage === 'dataguard' ? 'active' : '' %>">
                 <span class="material-icons">shield</span>
                 <span class="sidebar-link-text"><%= _('nav.dataguard') %></span>
@@ -153,14 +181,31 @@
                 <span class="sidebar-link-text"><%= _('nav.users') %></span>
             </a>
             <% } %>
+            <% if (user && user.role === 'admin') { %>
+            <a href="/security-audit" class="sidebar-link <%= currentPage === 'security-audit' ? 'active' : '' %>">
+                <span class="material-icons">security</span>
+                <span class="sidebar-link-text"><%= _('nav.security_audit') %></span>
+            </a>
+            <a href="/languages" class="sidebar-link <%= currentPage === 'languages' ? 'active' : '' %>">
+                <span class="material-icons">translate</span>
+                <span class="sidebar-link-text"><%= _('nav.languages') %></span>
+            </a>
+            <a href="/resource-control" class="sidebar-link <%= currentPage === 'resource-control' ? 'active' : '' %>">
+                <span class="material-icons">tune</span>
+                <span class="sidebar-link-text"><%= _('nav.resource_control') %></span>
+            </a>
+            <% } %>
             <a href="/settings" class="sidebar-link <%= currentPage === 'settings' ? 'active' : '' %>">
                 <span class="material-icons">settings</span>
                 <span class="sidebar-link-text"><%= _('nav.settings') %></span>
             </a>
         </div>
 
-        <!-- Sidebar footer - User -->
+        <!-- Sidebar footer - Theme + User -->
         <div class="sidebar-footer">
+            <button class="sidebar-theme-toggle" id="theme-toggle-btn" title="<%= _('nav.toggle_theme') %>">
+                <span class="material-icons" id="theme-toggle-icon">dark_mode</span>
+            </button>
             <div class="sidebar-user" id="user-menu-trigger">
                 <div class="sidebar-user-avatar">
                     <%= user && user.username ? user.username.charAt(0).toUpperCase() : 'A' %>
@@ -280,6 +325,24 @@
         }
         window.addEventListener('beforeunload', function() {
             try { sessionStorage.setItem(STORAGE_SCROLL, String(nav.scrollTop)); } catch(e) {}
+        });
+    }
+
+    // Theme toggle
+    var themeBtn = document.getElementById('theme-toggle-btn');
+    var themeIcon = document.getElementById('theme-toggle-icon');
+    function applyTheme(t) {
+        document.documentElement.setAttribute('data-theme', t);
+        try { localStorage.setItem('bd_theme', t); } catch(e) {}
+        if (themeIcon) themeIcon.textContent = t === 'light' ? 'light_mode' : 'dark_mode';
+    }
+    function getStoredTheme() {
+        try { return localStorage.getItem('bd_theme') || 'dark'; } catch(e) { return 'dark'; }
+    }
+    applyTheme(getStoredTheme());
+    if (themeBtn) {
+        themeBtn.addEventListener('click', function() {
+            applyTheme(getStoredTheme() === 'dark' ? 'light' : 'dark');
         });
     }
 })();

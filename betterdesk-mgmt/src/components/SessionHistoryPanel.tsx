@@ -1,51 +1,23 @@
 /**
  * SessionHistoryPanel — displays past remote desktop session logs
  *
- * Fetches from `operator_get_session_history` Tauri IPC → Go server audit log.
+ * Fetches from api.ts (session-cookie auth) → Node.js audit log.
  */
 import { createSignal, createResource, Show, For } from 'solid-js';
 import { t } from '../lib/i18n';
-
-interface Session {
-    id?: number;
-    device_id?: string;
-    peer_id?: string;
-    operator?: string;
-    action?: string;
-    details?: string;
-    ip?: string;
-    created_at?: string;
-    duration?: number;
-}
+import { getSessionHistory, type SessionRecord } from '../lib/api';
 
 export default function SessionHistoryPanel() {
     const [page, setPage] = createSignal(0);
     const PAGE_SIZE = 50;
 
     const [sessions, { refetch }] = createResource(async () => {
-        try {
-            const { invoke } = await import('@tauri-apps/api/core');
-            const result = await invoke<Session[]>('operator_get_session_history', {
-                limit: PAGE_SIZE, offset: page() * PAGE_SIZE,
-            });
-            return Array.isArray(result) ? result : [];
-        } catch {
-            return [];
-        }
+        return await getSessionHistory(PAGE_SIZE, page() * PAGE_SIZE);
     });
 
     function formatTime(iso?: string): string {
         if (!iso) return '—';
         try { return new Date(iso).toLocaleString(); } catch { return iso; }
-    }
-
-    function formatDuration(secs?: number): string {
-        if (!secs || secs <= 0) return '—';
-        if (secs < 60) return `${secs}s`;
-        if (secs < 3600) return `${Math.floor(secs / 60)}m ${secs % 60}s`;
-        const h = Math.floor(secs / 3600);
-        const m = Math.floor((secs % 3600) / 60);
-        return `${h}h ${m}m`;
     }
 
     return (
@@ -71,7 +43,7 @@ export default function SessionHistoryPanel() {
                                     <th>{t('sessions.operator')}</th>
                                     <th>{t('sessions.action')}</th>
                                     <th>{t('sessions.started')}</th>
-                                    <th>{t('sessions.duration')}</th>
+                                    <th>{t('common.details')}</th>
                                     <th>IP</th>
                                 </tr>
                             </thead>
@@ -83,7 +55,7 @@ export default function SessionHistoryPanel() {
                                             <td>{s.operator || '—'}</td>
                                             <td><span class={`action-badge action-${s.action?.includes('start') ? 'green' : 'blue'}`}>{s.action || '—'}</span></td>
                                             <td>{formatTime(s.created_at)}</td>
-                                            <td>{formatDuration(s.duration)}</td>
+                                            <td style="max-width: 200px; overflow: hidden; text-overflow: ellipsis;">{s.details || '—'}</td>
                                             <td style="font-family: var(--font-mono);">{s.ip || '—'}</td>
                                         </tr>
                                     )}

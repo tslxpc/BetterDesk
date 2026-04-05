@@ -165,7 +165,11 @@ async fn session_loop<R: Runtime>(
                         ).await;
                     }
                     None => {
-                        info!("SessionManager: relay channel closed");
+                        info!("SessionManager: relay channel closed — connection lost");
+                        let _ = app.emit("remote-viewer-status", serde_json::json!({
+                            "connected": false,
+                            "error": "Connection lost — relay channel closed"
+                        }));
                         break;
                     }
                 }
@@ -176,6 +180,9 @@ async fn session_loop<R: Runtime>(
                 match cmd {
                     Some(SessionCommand::Stop) | None => {
                         info!("SessionManager: stop requested");
+                        let _ = app.emit("remote-viewer-status", serde_json::json!({
+                            "connected": false
+                        }));
                         break;
                     }
                     Some(cmd) => {

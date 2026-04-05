@@ -204,6 +204,11 @@
         } else {
             top = rect.top - menuHeight - 4;
         }
+        // Clamp to viewport bounds
+        if (top < 8) top = 8;
+        if (top + menuHeight > window.innerHeight - 8) {
+            top = window.innerHeight - menuHeight - 8;
+        }
 
         // Horizontal: align right edge to button right edge
         left = rect.right - menuWidth;
@@ -259,6 +264,7 @@
                 const q = searchQuery.toLowerCase();
                 const match = 
                     device.id?.toLowerCase().includes(q) ||
+                    device.display_name?.toLowerCase().includes(q) ||
                     device.hostname?.toLowerCase().includes(q) ||
                     device.username?.toLowerCase().includes(q) ||
                     device.platform?.toLowerCase().includes(q) ||
@@ -342,7 +348,7 @@
                         </button>
                     </div>
                 </td>
-                <td data-column="hostname">${Utils.escapeHtml(device.hostname || device.note || '-')}</td>
+                <td data-column="hostname">${Utils.escapeHtml(device.display_name || device.hostname || device.note || '-')}</td>
                 <td data-column="device_type">
                     <div class="platform-icon">
                         <span class="material-icons">${getDeviceTypeIcon(device.device_type)}</span>
@@ -571,7 +577,7 @@
                     </div>
                     <div class="detail-row">
                         <span class="detail-label">${_('devices.hostname')}:</span>
-                        <span class="detail-value">${Utils.escapeHtml(device.hostname || device.note || '-')}</span>
+                        <span class="detail-value">${Utils.escapeHtml(device.display_name || device.hostname || device.note || '-')}</span>
                     </div>
                     <div class="detail-row">
                         <span class="detail-label">${_('devices.platform')}:</span>
@@ -919,6 +925,17 @@
                         <label>${_('devices.hostname')}</label>
                         <span>${Utils.escapeHtml(device.hostname || '-')}</span>
                     </div>
+                    <div class="device-info-item full-width">
+                        <label for="edit-display-name">${_('devices.display_name')}</label>
+                        <input type="text" id="edit-display-name" class="form-input" 
+                               value="${Utils.escapeHtml(device.display_name || '')}" 
+                               placeholder="${_('devices.display_name_placeholder')}" maxlength="128" />
+                    </div>
+                    <div class="device-info-item full-width">
+                        <label for="edit-note">${_('devices.note')}</label>
+                        <textarea id="edit-note" class="form-input" rows="2" 
+                                  placeholder="${_('devices.note_placeholder')}" maxlength="512">${Utils.escapeHtml(device.note || '')}</textarea>
+                    </div>
                     <div class="device-info-item">
                         <label>${_('devices.username')}</label>
                         <span>${Utils.escapeHtml(device.username || '-')}</span>
@@ -942,6 +959,26 @@
                 </div>
             `,
             buttons: [
+                { label: _('actions.save'), class: 'btn-primary', onClick: async () => {
+                    const displayName = document.getElementById('edit-display-name').value.trim();
+                    const note = document.getElementById('edit-note').value.trim();
+                    try {
+                        const resp = await Utils.api(`/api/devices/${encodeURIComponent(device.id)}`, {
+                            method: 'PATCH',
+                            body: JSON.stringify({ display_name: displayName, note }),
+                            headers: { 'Content-Type': 'application/json' }
+                        });
+                        if (resp.success) {
+                            Toast.success(_('devices.display_name'), _('actions.saved'));
+                            Modal.close();
+                            loadDevices();
+                        } else {
+                            Toast.error(_('errors.error'), resp.error || _('errors.server_error'));
+                        }
+                    } catch (err) {
+                        Toast.error(_('errors.error'), err.message);
+                    }
+                }},
                 { label: _('actions.close'), class: 'btn-secondary', onClick: () => Modal.close() }
             ],
             size: 'medium'

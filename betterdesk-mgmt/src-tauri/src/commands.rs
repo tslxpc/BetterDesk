@@ -20,6 +20,7 @@ use crate::inventory::InventoryCollector;
 use crate::inventory::collector::InventoryStatus;
 use crate::chat::ChatService;
 use crate::remote::RemoteAgent;
+use crate::remote::{SessionManager, SessionCommand};
 
 /// A single activity log entry.
 #[derive(Debug, Clone, Serialize)]
@@ -88,6 +89,12 @@ pub struct AppState {
     pub cdap_agent: Mutex<Option<CdapAgent>>,
     /// In-memory activity tracker.
     pub activity: Mutex<ActivityTracker>,
+    /// Active relay session manager for remote desktop (Phase 43 fix).
+    pub session_manager: Mutex<Option<SessionManager>>,
+    /// Notification state: IDs that have been read.
+    pub read_notifs: Mutex<std::collections::HashSet<String>>,
+    /// Notification state: IDs that have been dismissed.
+    pub dismissed_notifs: Mutex<std::collections::HashSet<String>>,
     /// Shared HTTP client with cookie store for session-based auth.
     /// Used by `api_proxy` to forward WebView requests through Rust,
     /// bypassing CORS and mixed-content restrictions.
@@ -249,6 +256,13 @@ pub async fn connect_to_peer(
 
 #[tauri::command]
 pub fn disconnect(state: State<'_, AppState>) -> Result<(), String> {
+    // Stop SessionManager first (drops relay channels gracefully)
+    {
+        let mut mgr_lock = state.session_manager.lock().map_err(|e| e.to_string())?;
+        if let Some(mgr) = mgr_lock.take() {
+            mgr.stop();
+        }
+    }
     // Disconnect BD native relay if active
     {
         let mut bd_lock = state.bd_relay.lock().map_err(|e| e.to_string())?;
@@ -1370,6 +1384,10 @@ pub struct RemoteInputPayload {
 }
 
 /// Start a relay-based remote session (H.264 decode via openh264).
+///
+/// Expects `connect_to_peer` + `authenticate` to have been called first.
+/// Takes the relay connection from Session, bridges it into SessionManager
+/// which handles video decode, input forwarding, clipboard sync, etc.
 #[tauri::command]
 pub async fn start_remote_session(
     app: tauri::AppHandle,
@@ -1378,21 +1396,38 @@ pub async fn start_remote_session(
 ) -> Result<(), String> {
     log::info!("Starting relay remote session for {}", peer_id);
 
-    // Ensure we have a connected session with a relay
-    let session_lock = state.session.lock().map_err(|e| e.to_string())?;
-    if session_lock.is_none() {
-        return Err("No active session — connect to a peer first".into());
+    // 1. Extract Session handle (drop std::sync::Mutex guard before await)
+    let session_handle = {
+        let lock = state.session.lock().map_err(|e| e.to_string())?;
+        lock.as_ref()
+            .ok_or("No active session — call connect_to_peer first")?
+            .clone_handle()
+    };
+
+    // 2. Take the relay connection out of Session (async — uses tokio::Mutex)
+    let relay = session_handle
+        .take_relay()
+        .await
+        .ok_or("No relay connection — is the session authenticated?")?;
+
+    // 3. Bridge relay into mpsc channels for SessionManager
+    let (msg_tx, msg_rx) = relay.into_channels();
+
+    // 4. Create and start SessionManager
+    let session_mgr = SessionManager::start(app.clone(), msg_rx, msg_tx)
+        .map_err(|e| format!("Failed to start session manager: {}", e))?;
+
+    // 5. Store in AppState
+    {
+        let mut mgr_lock = state.session_manager.lock().map_err(|e| e.to_string())?;
+        *mgr_lock = Some(session_mgr);
     }
 
-    // For now, emit a "connecting" status. The actual relay message pump
-    // integration requires splitting the relay connection from Session into
-    // a message channel pair — this is started when Session reaches Connected
-    // state and the frontend invokes start_remote_session.
     let _ = app.emit("remote-viewer-status", serde_json::json!({
         "connected": true, "device_id": peer_id, "mode": "relay"
     }));
 
-    log::info!("Relay remote session started for {}", peer_id);
+    log::info!("Relay remote session active for {}", peer_id);
     Ok(())
 }
 
@@ -1402,79 +1437,89 @@ pub async fn stop_remote_session(
     state: State<'_, AppState>,
 ) -> Result<(), String> {
     log::info!("Stopping relay remote session");
+    // Stop SessionManager
+    {
+        let mut mgr_lock = state.session_manager.lock().map_err(|e| e.to_string())?;
+        if let Some(mgr) = mgr_lock.take() {
+            mgr.stop();
+        }
+    }
     // Disconnect the session
-    let session_lock = state.session.lock().map_err(|e| e.to_string())?;
-    if let Some(session) = session_lock.as_ref() {
-        session.disconnect();
+    {
+        let session_lock = state.session.lock().map_err(|e| e.to_string())?;
+        if let Some(session) = session_lock.as_ref() {
+            session.disconnect();
+        }
     }
     Ok(())
 }
 
-/// Send an input event (mouse/key/wheel) through the relay session.
+/// Send an input event (mouse/key/wheel) through the SessionManager relay.
 #[tauri::command]
 pub async fn send_remote_input(
     state: State<'_, AppState>,
     input: RemoteInputPayload,
 ) -> Result<(), String> {
-    let session_lock = state.session.lock().map_err(|e| e.to_string())?;
-    let session = session_lock.as_ref().ok_or("No active session")?;
-    let mods = input.modifiers.as_deref().unwrap_or(&[]);
+    let mgr_lock = state.session_manager.lock().map_err(|e| e.to_string())?;
+    let mgr = mgr_lock.as_ref().ok_or("No active remote session")?;
+    let mods = input.modifiers.clone().unwrap_or_default();
 
-    match input.kind.as_str() {
-        "mouse_move" => {
-            if let (Some(x), Some(y)) = (input.x, input.y) {
-                // Build and send via existing session
-                let _ = session.send_mouse(&MouseEventPayload {
-                    x, y, mask: 0x8000, modifiers: mods.to_vec(),
-                });
-            }
+    let cmd = match input.kind.as_str() {
+        "mouse_move" => SessionCommand::MouseMove {
+            x: input.x.unwrap_or(0),
+            y: input.y.unwrap_or(0),
+        },
+        "mouse_down" => SessionCommand::MouseButton {
+            x: input.x.unwrap_or(0),
+            y: input.y.unwrap_or(0),
+            button: input.button.unwrap_or(0),
+            down: true,
+            modifiers: mods,
+        },
+        "mouse_up" => SessionCommand::MouseButton {
+            x: input.x.unwrap_or(0),
+            y: input.y.unwrap_or(0),
+            button: input.button.unwrap_or(0),
+            down: false,
+            modifiers: mods,
+        },
+        "wheel" => SessionCommand::MouseWheel {
+            x: input.x.unwrap_or(0),
+            y: input.y.unwrap_or(0),
+            delta_x: input.delta_x.unwrap_or(0),
+            delta_y: input.delta_y.unwrap_or(0),
+        },
+        "key_down" => SessionCommand::Key {
+            key: input.key.clone().unwrap_or_default(),
+            down: true,
+            modifiers: mods,
+        },
+        "key_up" => SessionCommand::Key {
+            key: input.key.clone().unwrap_or_default(),
+            down: false,
+            modifiers: mods,
+        },
+        "refresh_video" => SessionCommand::RefreshVideo,
+        other => {
+            log::debug!("Unknown remote input type: {}", other);
+            return Ok(());
         }
-        "mouse_down" | "mouse_up" => {
-            if let (Some(x), Some(y)) = (input.x, input.y) {
-                let button = input.button.unwrap_or(0);
-                let btn_val: u32 = match button {
-                    2 => 2, // right
-                    1 => 4, // middle
-                    _ => 1, // left
-                };
-                let kind: u32 = if input.kind == "mouse_down" { 1 } else { 2 };
-                let mask = kind | (btn_val << 3);
-                let _ = session.send_mouse(&MouseEventPayload {
-                    x, y, mask, modifiers: mods.to_vec(),
-                });
-            }
-        }
-        "wheel" => {
-            if let (Some(dx), Some(dy)) = (input.delta_x, input.delta_y) {
-                let _ = session.send_mouse(&MouseEventPayload {
-                    x: dx, y: dy, mask: 3, modifiers: Vec::new(),
-                });
-            }
-        }
-        "key_down" | "key_up" => {
-            if let Some(key) = &input.key {
-                let down = input.kind == "key_down";
-                let _ = session.send_key(&KeyEventPayload {
-                    key: key.clone(), down, modifiers: mods.to_vec(),
-                });
-            }
-        }
-        "refresh_video" => {
-            // Request keyframe
-            log::debug!("Refresh video requested");
-        }
-        _ => {
-            log::debug!("Unknown remote input type: {}", input.kind);
-        }
-    }
+    };
+
+    mgr.send(cmd);
     Ok(())
 }
 
 /// Toggle clipboard sync for the active remote session.
 #[tauri::command]
-pub async fn toggle_clipboard_sync(enabled: bool) -> Result<(), String> {
-    log::info!("Clipboard sync: {}", if enabled { "enabled" } else { "disabled" });
-    // Clipboard sync state is managed by SessionManager when relay session is active
+pub async fn toggle_clipboard_sync(
+    state: State<'_, AppState>,
+    enabled: bool,
+) -> Result<(), String> {
+    let mgr_lock = state.session_manager.lock().map_err(|e| e.to_string())?;
+    if let Some(mgr) = mgr_lock.as_ref() {
+        mgr.send(SessionCommand::ToggleClipboard { enabled });
+    }
     Ok(())
 }
 
@@ -1484,32 +1529,50 @@ pub async fn send_special_key(
     state: State<'_, AppState>,
     key: String,
 ) -> Result<(), String> {
-    log::info!("Special key: {}", key);
-    let session_lock = state.session.lock().map_err(|e| e.to_string())?;
-    let _session = session_lock.as_ref().ok_or("No active session")?;
-    // The actual protobuf message is built by input_pipeline::build_ctrl_alt_del()
-    // and sent via the session manager when fully wired
+    let mgr_lock = state.session_manager.lock().map_err(|e| e.to_string())?;
+    if let Some(mgr) = mgr_lock.as_ref() {
+        mgr.send(SessionCommand::SpecialKey { key });
+    }
     Ok(())
 }
 
 /// Switch to a different display on the remote machine.
 #[tauri::command]
-pub async fn switch_display(index: i32) -> Result<(), String> {
-    log::info!("Switch display: {}", index);
+pub async fn switch_display(
+    state: State<'_, AppState>,
+    index: i32,
+) -> Result<(), String> {
+    let mgr_lock = state.session_manager.lock().map_err(|e| e.to_string())?;
+    if let Some(mgr) = mgr_lock.as_ref() {
+        mgr.send(SessionCommand::SwitchDisplay { index });
+    }
     Ok(())
 }
 
 /// Set video quality options.
 #[tauri::command]
-pub async fn set_quality(image_quality: String, fps: u32) -> Result<(), String> {
-    log::info!("Set quality: {} @ {} FPS", image_quality, fps);
+pub async fn set_quality(
+    state: State<'_, AppState>,
+    image_quality: String,
+    fps: u32,
+) -> Result<(), String> {
+    let mgr_lock = state.session_manager.lock().map_err(|e| e.to_string())?;
+    if let Some(mgr) = mgr_lock.as_ref() {
+        mgr.send(SessionCommand::SetQuality { image_quality, fps });
+    }
     Ok(())
 }
 
 /// Toggle session recording.
 #[tauri::command]
-pub async fn toggle_recording(enabled: bool) -> Result<(), String> {
-    log::info!("Recording: {}", if enabled { "started" } else { "stopped" });
+pub async fn toggle_recording(
+    state: State<'_, AppState>,
+    enabled: bool,
+) -> Result<(), String> {
+    let mgr_lock = state.session_manager.lock().map_err(|e| e.to_string())?;
+    if let Some(mgr) = mgr_lock.as_ref() {
+        mgr.send(SessionCommand::ToggleRecording { enabled });
+    }
     Ok(())
 }
 
@@ -2793,13 +2856,18 @@ pub async fn server_revoke_api_key(
 pub fn get_notifications(
     state: State<'_, AppState>,
 ) -> Result<serde_json::Value, String> {
-    // Notifications are stored in AppState — returns local notification list
+    // Read dismissed / read sets from AppState
+    let dismissed = state.dismissed_notifs.lock().map_err(|e| e.to_string())?;
+    let read_set = state.read_notifs.lock().map_err(|e| e.to_string())?;
+
     let tracker = state.activity.lock().map_err(|e| e.to_string())?;
     let recent = tracker.get_recent(50);
     // Map activity entries to notification format
-    let notifs: Vec<serde_json::Value> = recent.iter().enumerate().map(|(i, e)| {
-        serde_json::json!({
-            "id": format!("notif-{}", i),
+    let notifs: Vec<serde_json::Value> = recent.iter().enumerate().filter_map(|(i, e)| {
+        let id = format!("notif-{}", i);
+        if dismissed.contains(&id) { return None; }
+        Some(serde_json::json!({
+            "id": id,
             "type": match e.action.as_str() {
                 "help_request" => "help_request",
                 "login" | "login_failed" => "alert",
@@ -2812,25 +2880,42 @@ pub fn get_notifications(
             "timestamp": chrono::NaiveDateTime::parse_from_str(&e.timestamp, "%Y-%m-%d %H:%M:%S")
                 .map(|dt| dt.and_utc().timestamp_millis())
                 .unwrap_or(0),
-            "read": false,
+            "read": read_set.contains(&id),
             "device_id": if e.target.is_empty() { serde_json::Value::Null } else { serde_json::Value::String(e.target.clone()) },
-        })
+        }))
     }).collect();
     Ok(serde_json::json!(notifs))
 }
 
 #[tauri::command]
-pub fn mark_notification_read(_notif_id: String) -> Result<(), String> {
-    // Local notification state — for now just acknowledge
+pub fn mark_notification_read(
+    state: State<'_, AppState>,
+    notification_id: String,
+) -> Result<(), String> {
+    let mut read_set = state.read_notifs.lock().map_err(|e| e.to_string())?;
+    read_set.insert(notification_id);
     Ok(())
 }
 
 #[tauri::command]
-pub fn mark_all_notifications_read() -> Result<(), String> {
+pub fn mark_all_notifications_read(
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    let tracker = state.activity.lock().map_err(|e| e.to_string())?;
+    let recent = tracker.get_recent(50);
+    let mut read_set = state.read_notifs.lock().map_err(|e| e.to_string())?;
+    for i in 0..recent.len() {
+        read_set.insert(format!("notif-{}", i));
+    }
     Ok(())
 }
 
 #[tauri::command]
-pub fn dismiss_notification(_notif_id: String) -> Result<(), String> {
+pub fn dismiss_notification(
+    state: State<'_, AppState>,
+    notification_id: String,
+) -> Result<(), String> {
+    let mut dismissed = state.dismissed_notifs.lock().map_err(|e| e.to_string())?;
+    dismissed.insert(notification_id);
     Ok(())
 }

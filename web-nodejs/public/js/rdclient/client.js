@@ -40,6 +40,11 @@ class RDClient {
         this.audio = new RDAudio();
         this.renderer = new RDRenderer(canvas);
         this.input = new RDInput(canvas, this.renderer, (msg) => this._sendPeerMessage(msg));
+        this.fileTransfer = new RDFileTransfer({
+            proto: this.proto,
+            sendMessage: (msg) => this._sendPeerMessage(msg),
+            emit: (event, ...args) => this._emit(event, ...args)
+        });
 
         // State
         this._state = 'idle'; // idle | connecting | waiting_password | authenticating | streaming | disconnected | error
@@ -699,6 +704,12 @@ class RDClient {
             return;
         }
 
+        // File response (directory listing, transfer blocks, digest, done, error)
+        if (msg.fileResponse) {
+            this.fileTransfer.handleFileResponse(msg.fileResponse);
+            return;
+        }
+
         // Signed ID from peer
         if (msg.signedId) {
             this._handleSignedId(msg.signedId);
@@ -952,6 +963,9 @@ class RDClient {
         this._setState('streaming');
         this.conn.setConnected();
 
+        // Enable file transfer
+        this.fileTransfer.enable();
+
         // Initialize video decoder callbacks
         this.video.onFrame = (frame) => this.renderer.pushFrame(frame);
         this.video.onError = (err) => this._emit('log', 'Video error: ' + err.message);
@@ -1089,6 +1103,7 @@ class RDClient {
         this.renderer.stopRenderLoop();
         this.video.close();
         this.audio.close();
+        this.fileTransfer.disable();
         this.conn.close();
     }
 

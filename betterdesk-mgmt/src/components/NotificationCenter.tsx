@@ -8,12 +8,13 @@ import { t } from '../lib/i18n';
 import { toastSuccess, toastError } from '../stores/toast';
 
 interface Notification {
-    id: number;
+    id: string;
     type: string;
     title: string;
     message?: string;
     read?: boolean;
-    created_at?: string;
+    timestamp?: number;
+    device_id?: string | null;
 }
 
 async function invokeCmd<T>(cmd: string, args?: Record<string, unknown>): Promise<T> {
@@ -69,10 +70,10 @@ export default function NotificationCenter() {
         }
     }
 
-    function formatTime(iso?: string): string {
-        if (!iso) return '';
+    function formatTime(ts?: number): string {
+        if (!ts) return '';
         try {
-            const d = new Date(iso);
+            const d = new Date(ts);
             const now = Date.now();
             const diff = now - d.getTime();
             if (diff < 60_000) return 'just now';
@@ -84,8 +85,11 @@ export default function NotificationCenter() {
 
     function typeIcon(type: string): string {
         switch (type) {
-            case 'error': return 'error';
+            case 'alert': case 'error': return 'error';
             case 'warning': return 'warning';
+            case 'help_request': return 'support_agent';
+            case 'connection': return 'cable';
+            case 'chat': return 'chat';
             case 'success': return 'check_circle';
             default: return 'info';
         }
@@ -93,8 +97,11 @@ export default function NotificationCenter() {
 
     function typeColor(type: string): string {
         switch (type) {
-            case 'error': return 'var(--accent-red)';
+            case 'alert': case 'error': return 'var(--accent-red)';
             case 'warning': return 'var(--accent-orange)';
+            case 'help_request': return 'var(--accent-purple, #a855f7)';
+            case 'connection': return 'var(--accent-green)';
+            case 'chat': return 'var(--accent-blue)';
             case 'success': return 'var(--accent-green)';
             default: return 'var(--accent-blue)';
         }
@@ -147,7 +154,7 @@ export default function NotificationCenter() {
                                         <div class="notif-body" onClick={() => !notif.read && markRead(notif.id)}>
                                             <div class="notif-title">{notif.title}</div>
                                             <Show when={notif.message}><div class="notif-message">{notif.message}</div></Show>
-                                            <div class="notif-time">{formatTime(notif.created_at)}</div>
+                                            <div class="notif-time">{formatTime(notif.timestamp)}</div>
                                         </div>
                                         <button class="btn-icon notif-dismiss" title={t('common.close')} onClick={() => dismiss(notif.id)}>
                                             <span class="material-symbols-rounded" style="font-size: 14px;">close</span>

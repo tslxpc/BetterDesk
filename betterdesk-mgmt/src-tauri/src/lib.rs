@@ -98,6 +98,9 @@ pub fn run() {
             remote_agent: Mutex::new(None),
             cdap_agent: Mutex::new(None),
             activity: Mutex::new(commands::ActivityTracker::new()),
+            session_manager: Mutex::new(None),
+            read_notifs: Mutex::new(std::collections::HashSet::new()),
+            dismissed_notifs: Mutex::new(std::collections::HashSet::new()),
             http_client: reqwest::Client::builder()
                 .cookie_store(true)
                 .timeout(std::time::Duration::from_secs(15))
@@ -153,6 +156,7 @@ pub fn run() {
             commands::reconnect_chat,
             // Remote desktop
             commands::get_remote_status,
+            commands::start_remote_viewer,
             // Relay remote session (Phase 43)
             commands::start_remote_session,
             commands::stop_remote_session,
@@ -235,9 +239,10 @@ pub fn run() {
                 log::warn!("Failed to create system tray: {}", e);
             }
 
-            // Hide main window on startup (tray-centric mode).
+            // Show main window on startup.
             if let Some(window) = app.get_webview_window("main") {
-                let _ = window.hide();
+                let _ = window.show();
+                let _ = window.set_focus();
             }
 
             // Enable autostart on first run — the plugin is already registered

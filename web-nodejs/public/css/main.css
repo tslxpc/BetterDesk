@@ -6,7 +6,7 @@
 @import url('./variables.css');
 
 /* Google Material Icons */
-@import url('https://fonts.googleapis.com/icon?family=Material+Icons|Material+Icons+Outlined');
+@import url('https://fonts.googleapis.com/icon?family=Material+Icons|Material+Icons+Outlined|Material+Icons+Round');
 
 /* ═══════════════════════════════════════════════════════════════════════════
    CSS RESET
@@ -354,11 +354,36 @@ table {
     text-overflow: ellipsis;
 }
 
-/* --- Footer (user card) --- */
+/* --- Footer (user card + theme toggle) --- */
 .sidebar-footer {
     padding: var(--space-sm) var(--space-md);
     border-top: 1px solid var(--border-primary);
     flex-shrink: 0;
+}
+
+.sidebar-theme-toggle {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 100%;
+    padding: var(--space-xs) var(--space-sm);
+    margin-bottom: var(--space-xs);
+    background: none;
+    border: 1px solid var(--border-primary);
+    border-radius: var(--radius-md);
+    color: var(--text-secondary);
+    cursor: pointer;
+    transition: all var(--transition-fast);
+}
+
+.sidebar-theme-toggle:hover {
+    background: var(--bg-tertiary);
+    color: var(--text-primary);
+    border-color: var(--border-hover);
+}
+
+.sidebar-theme-toggle .material-icons {
+    font-size: 18px;
 }
 
 .sidebar-user {

@@ -10,9 +10,10 @@
 ![Go](https://img.shields.io/badge/Go-1.21+-00ADD8.svg)
 ![Node.js](https://img.shields.io/badge/Node.js-18+-339933.svg)
 ![Version](https://img.shields.io/badge/version-3.0.0-brightgreen.svg)
-![Security](https://img.shields.io/badge/Security-TLS%20%2B%20NaCl%20%2B%20TOTP-green.svg)
+![Security](https://img.shields.io/badge/Security-TLS%20%2B%20NaCl%20%2B%20TOTP%20%2B%20E2EE-green.svg)
 ![Database](https://img.shields.io/badge/DB-SQLite%20%2B%20PostgreSQL-blue.svg)
 ![CDAP](https://img.shields.io/badge/CDAP-v1.0-orange.svg)
+![i18n](https://img.shields.io/badge/i18n-25%2B%20languages-purple.svg)
 
 **A clean-room RustDesk-compatible server written in Go — single binary replacing hbbs + hbbr — with full protocol support, TLS everywhere, PostgreSQL backend, CDAP (Custom Device API Protocol) for IoT/SCADA/network devices, and a modern Node.js web management console.**
 
@@ -57,6 +58,8 @@
 - [Monitoring & Metrics](#-monitoring--metrics)
 - [Troubleshooting](#-troubleshooting)
 - [E2E Encryption](#-e2e-encryption)
+- [Chat E2E Encryption](#-chat-e2e-encryption)
+- [Unattended Access & Wake-on-LAN](#-unattended-access--wake-on-lan)
 - [Technology Stack](#-technology-stack)
 - [Contributing](#-contributing)
 - [License](#-license)
@@ -89,6 +92,10 @@
 | **Hot reload** | Restart required | **SIGHUP** config reload |
 | **Multi-instance** | File-based only | **PostgreSQL LISTEN/NOTIFY** for real-time sync |
 | **Web panel** | None | **Full Node.js console** with TOTP 2FA |
+| **User roles** | Single admin | **4-tier RBAC** (Admin, Operator, Viewer, Pro) |
+| **Chat** | None | **E2E encrypted** operator↔device chat |
+| **Wake-on-LAN** | None | **Built-in WOL** via magic packet |
+| **Access policies** | None | **Unattended access** schedules + operator restrictions |
 
 > **🤖 AI-Assisted Development**: This project was developed with significant assistance from AI coding tools (Claude/GitHub Copilot). All code has been reviewed, tested, and validated for production use.
 
@@ -374,11 +381,26 @@ The web console (`web-nodejs/`) is an Express.js application providing a full-fe
 - **Device management** — Responsive devices page with horizontal folder chips, unified toolbar with segmented filters, slim table, and kebab context menu (⋮). Four breakpoints: desktop, tablet (≤768px), phone card layout (≤600px), small phone (≤400px)
 - **Device details** — Hardware tab (sysinfo), metrics tab (live CPU/RAM/disk bars + history charts)
 - **TOTP 2FA** — Two-factor authentication with `otplib`
-- **RBAC** — Admin, Operator, Viewer roles with permission enforcement
+- **RBAC** — Admin, Operator, Viewer, and Pro (API-only) roles with permission enforcement
 - **Address book sync** — Full AB storage with `address_books` table
 - **RustDesk Client API** — Dedicated WAN port (21121) with 7-layer security
 - **Desktop connect** — One-click connect via `rustdesk://` URI handler
-- **i18n** — JSON-based translations (English + Polish built-in)
+- **i18n** — JSON-based translations, 25+ languages (auto-discovery from `lang/` directory)
+- **Desktop widget dashboard** — Drag-and-drop dashboard mode with 20+ widget types (weather, calendar, system monitor, disk usage, log viewer, alert feed, speed test, Docker containers, world clock, bookmarks, device map, and more), Windows 11-style snap layouts with edge snapping, draggable zone borders, Aero Shake, widget groups/stacking, glassmorphism theme, presets/templates
+- **Fleet management** — Device groups, tags, batch operations, scaling policies
+- **Chat 2.0** — Operator↔device messaging with E2E encryption (ECDH P-256 + AES-256-GCM), read receipts, file sharing, typing indicators
+- **Web remote client** — Browser-based remote desktop (H.264 via WebCodecs on HTTPS, JMuxer fallback on HTTP), session recording (WebM VP9+Opus), monitor switching, quality presets (Speed/Balanced/Quality/Best)
+- **File transfer** — Browser-based file transfer with progress tracking
+- **Security audit** — Built-in security scanner with compliance reporting
+- **CDAP panel** — Connected Device Automation Protocol widget rendering + commands
+- **Resource control** — USB, optical drive, monitor, disk, quota policy management
+- **Unattended access** — Access policies with day/time schedules, operator restrictions, device passwords
+- **Wake-on-LAN** — Remote power-on via magic packet (UDP broadcast)
+- **Pro-only accounts** — API-only user role that activates RustDesk Pro features without web panel access
+- **OS-style login screen** — Windows 11-style login page with frosted glass, clock overlay, multi-user selector, TOTP flow
+- **Toast notifications** — Slide-in notifications with progress bar auto-dismiss
+- **Light/dark/auto theme** — Full theme system with `prefers-color-scheme` auto-detection
+- **Skeleton loading** — Shimmer pulse placeholders during data loading
 - **CSRF protection** — Double-submit cookie pattern with `csrf-csrf`
 - **WebSocket** — Real-time status updates from Go server event bus
 
@@ -659,6 +681,17 @@ RustDesk desktop clients can **log in** to the BetterDesk server using their use
 | **User Identity** | Connections are associated with your user account in audit logs |
 | **Device Groups** | Access to pre-configured device groups and strategies |
 | **Heartbeat + Sysinfo** | The client periodically sends system information (CPU, RAM, OS) to the server |
+
+#### User Roles and API Access
+
+| Role | Web Panel | RustDesk Client Login | Address Book | Device Groups | Device List |
+|------|:---------:|:--------------------:|:------------:|:-------------:|:-----------:|
+| **Admin** | ✅ Full access | ✅ | ✅ | ✅ | ✅ |
+| **Operator** | ✅ Device management | ✅ | ✅ | ✅ | ✅ |
+| **Viewer** | ✅ Read-only | ✅ | ✅ | ✅ | ✅ |
+| **Pro** | ❌ Blocked | ✅ | ✅ | ❌ Empty | ❌ Empty |
+
+> **Pro accounts** are designed for end-users who need RustDesk Pro features (address book sync, heartbeat, sysinfo) without access to the web management panel or visibility into other devices/groups. Create Pro users via the Web Console → Users page.
 
 #### Troubleshooting Login
 
@@ -992,6 +1025,7 @@ These endpoints are served on the Go server's management API port because the Ru
 | `PUT` | `/api/peers/{id}/tags` | Set peer tags |
 | `GET` | `/api/tags/{tag}/peers` | Peers by tag (LIKE pattern, `%_` escaped) |
 | `GET` | `/api/audit/events` | Recent events (`?limit=50&action=peer_banned`) |
+| `GET` | `/api/peers/{id}/metrics` | Historical CPU/RAM/disk metrics (`?limit=100`, max 1000) |
 | `GET` | `/api/ws/events` | WebSocket real-time events (`?filter=peer_online`) |
 | `GET` | `/api/auth/me` | Current user info |
 
@@ -1015,6 +1049,8 @@ These endpoints are served on the Go server's management API port because the Ru
 | `POST` | `/api/tokens/generate-bulk` | Bulk generate enrollment tokens |
 | `POST` | `/api/tokens/{id}/bind` | Bind token to specific peer ID |
 | `GET/PUT` | `/api/enrollment/mode` | Enrollment mode management |
+| `POST` | `/api/peers/{id}/wol` | Wake-on-LAN magic packet (UDP broadcast) |
+| `GET/POST/PUT/DELETE` | `/api/access-policies`, `/api/access-policies/{id}` | Unattended access policies (schedules, operator restrictions) |
 
 ### Example: Login Flow
 
@@ -1261,7 +1297,91 @@ RustDesk clients support end-to-end encryption for remote desktop sessions. Bett
 
 ---
 
-## 🛠️ Technology Stack
+## � Chat E2E Encryption
+
+BetterDesk includes a built-in chat system between operators and end-user devices with full end-to-end encryption.
+
+### Protocol
+
+| Component | Implementation |
+|-----------|---------------|
+| **Key exchange** | P-256 ECDH via WebCrypto API |
+| **Key derivation** | HKDF-SHA256 |
+| **Message encryption** | AES-256-GCM with per-message IV |
+| **File encryption** | AES-256-GCM with encrypted metadata (filename, size, timestamp) |
+| **Key persistence** | localStorage (auto-generated key pair per device) |
+| **Key rotation** | Every 24 hours or 1000 messages (whichever comes first) |
+
+### Features
+
+- **1:1 chat** — Operator ↔ end-user device messaging
+- **Read receipts** — Message ID arrays for read confirmation
+- **Typing indicators** — Real-time typing status
+- **Presence** — Online/away/busy status updates
+- **File sharing** — Encrypted file transfer up to 50 MB per file
+- **Fallback contacts** — If Go server is unavailable, operator + connected agents are returned as contacts
+
+### Message Types
+
+| Type | Direction | Description |
+|------|-----------|-------------|
+| `key_exchange` | Bidirectional | Public key relay for ECDH |
+| `read_receipt` | Bidirectional | Message ID arrays marking read |
+| `presence_update` | Bidirectional | Online/away/busy status |
+| `file_share` | Bidirectional | Encrypted file metadata relay |
+| `chat_message` | Bidirectional | E2E encrypted text message |
+
+---
+
+## 🔓 Unattended Access & Wake-on-LAN
+
+### Unattended Access Management
+
+Administrators can configure unattended access policies per device, controlling who can connect and when.
+
+```bash
+# Create an access policy
+curl -X POST http://localhost:21114/api/access-policies \
+  -H "Authorization: Bearer <jwt>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "peer_id": "ABC123",
+    "password": "secret",
+    "enabled": true,
+    "allowed_operators": ["operator1", "operator2"],
+    "schedule": {
+      "days": ["mon", "tue", "wed", "thu", "fri"],
+      "start_time": "08:00",
+      "end_time": "18:00",
+      "timezone": "Europe/Warsaw"
+    }
+  }'
+```
+
+**Features:**
+- Set/change device passwords (bcrypt hashed)
+- Enable/disable unattended access per device
+- Configure access schedules (day/time/timezone)
+- Restrict allowed operators
+- Web Console UI: modal on device detail page with full schedule editor
+
+### Wake-on-LAN
+
+Power on offline devices remotely via magic packet:
+
+```bash
+# Wake device by peer ID (MAC address provided in request body)
+curl -X POST http://localhost:21114/api/peers/ABC123/wol \
+  -H "Authorization: Bearer <jwt>" \
+  -H "Content-Type: application/json" \
+  -d '{"mac": "AA:BB:CC:DD:EE:FF"}'
+```
+
+The Go server sends a UDP broadcast magic packet (6× `0xFF` + 16× MAC address) to `255.255.255.255:9`. Available from the MGMT desktop client and Web Console (offline devices only).
+
+---
+
+## �🛠️ Technology Stack
 
 ### BetterDesk Go Server
 
@@ -1344,17 +1464,154 @@ npm start
 
 ## 🌍 Internationalization (i18n)
 
-BetterDesk Console supports multiple languages through JSON-based translations.
+BetterDesk Console supports 25+ languages through JSON-based translations with auto-discovery.
 
-**Built-in languages**: 🇬🇧 English (default), 🇵🇱 Polish
+**Included languages**: 🇬🇧 English, 🇵🇱 Polish, 🇩🇪 German, 🇫🇷 French, 🇪🇸 Spanish, 🇮🇹 Italian, 🇵🇹 Portuguese, 🇳🇱 Dutch, 🇨🇳 Chinese (Simplified), 🇯🇵 Japanese, 🇰🇷 Korean, 🇸🇦 Arabic, 🇮🇱 Hebrew, 🇺🇦 Ukrainian, 🇹🇷 Turkish, 🇮🇳 Hindi, 🇸🇪 Swedish, 🇳🇴 Norwegian, 🇩🇰 Danish, 🇫🇮 Finnish, 🇨🇿 Czech, 🇭🇺 Hungarian, 🇷🇴 Romanian, 🇹🇭 Thai, 🇻🇳 Vietnamese, 🇮🇩 Indonesian
+
+Languages are auto-discovered from the `lang/` directory — no code changes needed.
 
 **Adding a new language**:
 1. Copy `web-nodejs/lang/en.json` → `web-nodejs/lang/{code}.json`
 2. Translate all string values
 3. Update the `_meta` section with language info
-4. Upload via Settings → Language Settings or place in the `lang/` folder
+4. Run `npm run i18n:check --fix` to validate 100% key coverage
 
 See [Contributing Translations](docs/development/CONTRIBUTING_TRANSLATIONS.md) for details.
+
+---
+
+## 🤖 CDAP — Connected Device Automation Protocol
+
+CDAP enables managing IoT, ICS, and custom devices alongside standard RustDesk desktops.
+
+### Architecture
+
+```
+CDAP Device (Agent/Bridge)  ──WebSocket──►  Go Server (:21122/cdap)
+                                              │
+                                     REST API + WS proxy
+                                              │
+                                      Node.js Console ──► Browser
+```
+
+### Features
+
+- **Widget rendering** — 8 widget types (gauge, toggle, button, LED, text, slider, select, chart)
+- **Real-time telemetry** — Heartbeat with CPU/memory/disk metrics, bulk state updates
+- **Remote commands** — Send commands to devices with confirmation and cooldown
+- **Terminal** — Browser-based terminal sessions to CDAP agents
+- **File browser** — Browse and transfer files from CDAP agents
+- **Clipboard sync** — Bidirectional clipboard between browser and device
+- **Audio streaming** — Two-way audio via WebSocket (PCM + Opus)
+- **Multi-monitor** — Remote display selection and switching
+
+### SDKs & Bridges
+
+| SDK | Language | Status |
+|-----|----------|--------|
+| [Python SDK](sdks/python/) | Python 3.9+ | ✅ Stable |
+| [Node.js SDK](sdks/nodejs/) | Node.js 18+ | ✅ Stable |
+
+| Bridge | Protocol | Status |
+|--------|----------|--------|
+| [Modbus](bridges/modbus/) | Modbus TCP/RTU | ✅ Reference |
+| [SNMP](bridges/snmp/) | SNMP v2c/v3 | ✅ Reference |
+| [REST/Webhook](bridges/rest-webhook/) | HTTP polling + webhooks | ✅ Reference |
+
+See [CDAP Documentation](docs/cdap/OVERVIEW.md) and [SDK Documentation](docs/sdk/OVERVIEW.md) for details.
+
+---
+
+## 🖥️ Desktop Clients
+
+### BetterDesk MGMT Client (Operator/Admin)
+
+A Tauri v2 + SolidJS desktop application for operators and administrators.
+
+- Operator login with TOTP 2FA and JWT token management
+- Device list with live status, search, filter, group chips, and CPU/RAM metrics
+- One-click remote connect to any device (H.264/VP9 video pipeline)
+- Full remote desktop with multi-monitor selection, clipboard sync, file transfer, session recording
+- Help request management inbox with accept & auto-connect
+- Session history dashboard with audit trail
+- Server management panel (admin) — clients, operators, audit, API keys, config
+- Notification center with real-time push (30s polling)
+- Unattended access management — set passwords, schedules, operator restrictions
+- Wake-on-LAN for offline devices
+- Device actions — restart, shutdown, lock screen, log off, send message
+- File transfer panel with local file browsing
+- Input injection via `enigo` crate (keyboard, mouse, text)
+- Single-instance enforcement (Windows mutex)
+- Full i18n (English + Polish, ~60 keys)
+
+**Build**: `cd betterdesk-mgmt && pnpm install && pnpm tauri build`
+
+### BetterDesk Agent Client (Endpoint Device)
+
+A lightweight Tauri v2 agent installed on end-user devices.
+
+- 5-step setup wizard with sequential server validation (availability → protocol → registration → certificate → complete)
+- Device registration with machine UID-based device ID (`BD-{hash}`) and OS keyring token storage
+- System info collection (hostname, OS, CPU, RAM, disk, username)
+- Help request submission (4-state flow: idle → composing → sending → sent)
+- Operator chat with E2E encryption
+- Settings panel (connection, privacy, general, about)
+- Tray icon with autostart, single-instance enforcement
+- Minimal UI (480×520 single window)
+- Full i18n (English + Polish, ~120 keys)
+
+**Build**: `cd betterdesk-agent-client && pnpm install && pnpm tauri build`
+
+### Native CDAP Agent (Go)
+
+A headless Go binary for servers and IoT devices.
+
+- 9 system widgets (CPU, memory, disk, hostname, uptime)
+- Terminal, file browser, clipboard, screenshot capabilities
+- Systemd / NSSM service installers
+
+**Build**: `cd betterdesk-agent && go build -o betterdesk-agent .`
+
+---
+
+## 🌐 Web Remote Desktop
+
+BetterDesk includes a browser-based remote desktop client accessible from the Web Console.
+
+### Features
+
+| Feature | HTTPS | HTTP |
+|---------|:-----:|:----:|
+| **Video codec** | WebCodecs (H.264, VP9, AV1, VP8) | JMuxer (H.264 only) |
+| **Target FPS** | 60 fps | 30 fps |
+| **Image quality** | Best (configurable) | Best (configurable) |
+| **Session recording** | ✅ WebM VP9+Opus at 15fps | ✅ |
+| **Monitor switching** | ✅ Display list with resolutions | ✅ |
+| **Quality presets** | Speed / Balanced / Quality / Best | Same |
+| **Keyboard/mouse** | ✅ Full input (modifiers, F-keys, wheel) | ✅ |
+| **Clipboard sync** | ✅ Bidirectional via navigator.clipboard | ❌ (HTTPS required) |
+| **Special keys** | Ctrl+Alt+Del, Win, PrintScreen, Alt+Tab | Same |
+| **Fullscreen** | ✅ F11 / button toggle | ✅ |
+| **Scale modes** | Fit / Fill / Original (1:1) | Same |
+
+### Session Recording
+
+```javascript
+// Start recording during a remote session
+client.startRecording();  // Canvas capture stream + audio at 15fps, WebM VP9+Opus
+
+// Stop and auto-download
+client.stopRecording();   // Produces .webm file download
+```
+
+### Quality Presets
+
+| Preset | Image Quality | FPS | Use Case |
+|--------|:------------:|:---:|----------|
+| **Speed** | Low | 30 | Slow connections, text work |
+| **Balanced** | Balanced | 30 | General use |
+| **Quality** | Quality | 60 | Design work, presentations |
+| **Best** | Best | 60 | LAN, maximum fidelity |
 
 ---
 
@@ -1391,12 +1648,16 @@ Rustdesk-FreeConsole/
 │   ├── views/                   # EJS templates
 │   ├── public/                  # Static assets (CSS, JS)
 │   └── lang/                    # i18n translations (EN, PL)
+├── betterdesk-mgmt/             # MGMT Desktop Client (Tauri v2 + SolidJS)
+├── betterdesk-agent-client/     # Agent Client (Tauri v2 + SolidJS)
+├── betterdesk-agent/            # Native CDAP Agent (Go)
+├── sdks/                        # CDAP Bridge SDKs (Python + Node.js)
+├── bridges/                     # Reference CDAP Bridges (Modbus, SNMP, REST)
 ├── betterdesk.sh                # Linux ALL-IN-ONE installer (v2.4.0)
 ├── betterdesk.ps1               # Windows ALL-IN-ONE installer (v2.4.0)
 ├── betterdesk-docker.sh         # Docker installer (v2.4.0)
 ├── docker-compose.yml           # Docker orchestration
-├── migrations/                  # Database migration scripts
-├── docs/                        # Documentation
+├── docs/                        # Documentation (architecture, CDAP, SDK, security)
 ├── dev_modules/                 # Development & testing utilities
 └── archive/                     # Archived: Rust binaries, Flask console
 ```

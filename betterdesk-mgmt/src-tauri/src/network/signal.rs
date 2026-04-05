@@ -6,14 +6,14 @@
 //! - Framing via varint-prefixed protobuf
 
 use anyhow::{bail, Context, Result};
-use log::{debug, info, warn};
+use log::{info, warn};
 use prost::Message;
 use tokio::io::AsyncWriteExt;
 use tokio::net::TcpStream;
 
 use crate::proto::{
     rendezvous_message::Union as RdzUnion, ConnType, NatType, PunchHoleRequest,
-    RegisterPeer, RendezvousMessage,
+    RendezvousMessage,
 };
 use crate::protocol::{read_frame, write_frame};
 
@@ -42,7 +42,7 @@ pub async fn punch_hole(
     force_relay: bool,
 ) -> Result<PunchResult> {
     info!(
-        "Connecting to signal server {} (my_id={}, peer_id={}, force_relay={})",
+        "[SIGNAL] === PunchHole START === server={} my_id={} peer_id={} force_relay={}",
         server_addr, my_id, peer_id, force_relay
     );
 
@@ -53,24 +53,23 @@ pub async fn punch_hole(
     .await
     .context("Signal server connection timed out (10s)")?
     .context("Failed to connect to signal server")?;
+    info!("[SIGNAL] TCP connected to {}", server_addr);
 
-    // Step 1: Register ourselves
-    let reg = RendezvousMessage {
-        union: Some(RdzUnion::RegisterPeer(RegisterPeer {
-            id: my_id.to_string(),
-            serial: 0,
-        })),
-    };
-    stream.write_all(&write_frame(&reg)).await?;
-    debug!("Sent RegisterPeer");
-
-    // Read RegisterPeerResponse (we don't need it for connection)
-    let resp_bytes = read_frame(&mut stream).await?;
-    let resp = RendezvousMessage::decode(resp_bytes.as_slice())
-        .context("Failed to decode RegisterPeerResponse")?;
-    debug!("Received: {:?}", resp);
-
-    // Step 2: Send PunchHoleRequest
+    // Send PunchHoleRequest directly as the FIRST message.
+    //
+    // Why not read server's KeyExchange first?
+    //   - If DualModeListener (TLS auto-detect) is active, the server peeks the
+    //     first byte from the client to detect TLS vs plain. If we try to read
+    //     first, both sides block waiting for each other → deadlock.
+    //
+    // Flow:
+    // 1. Client sends PunchHoleRequest
+    // 2. DualModeListener peeks first byte → not 0x16 → plain TCP
+    // 3. NegotiateSecureTCP sends KeyExchange (buffered in TCP)
+    // 4. NegotiateSecureTCP reads our PunchHoleRequest → not KeyExchange → plain mode
+    // 5. Server sets FirstMsg = PunchHoleRequest → handlePunchHoleRequestTCP
+    // 6. Server responds with PunchHoleResponse/RelayResponse
+    // 7. Client reads: KeyExchange (skipped by wait loop), then the actual response
     let phr = RendezvousMessage {
         union: Some(RdzUnion::PunchHoleRequest(PunchHoleRequest {
             id: peer_id.to_string(),
@@ -86,7 +85,8 @@ pub async fn punch_hole(
         })),
     };
     stream.write_all(&write_frame(&phr)).await?;
-    info!("Sent PunchHoleRequest for peer {}", peer_id);
+    info!("[SIGNAL] Step 1: Sent PunchHoleRequest (peer_id={}, force_relay={})", peer_id, force_relay);
+    info!("[SIGNAL] Step 2: Waiting for PunchHoleResponse/RelayResponse...");
 
     // Step 3: Wait for response (PunchHoleResponse or RelayResponse)
     let result = wait_for_punch_response(&mut stream).await?;
@@ -120,6 +120,10 @@ async fn wait_for_punch_response(stream: &mut TcpStream) -> Result<PunchResult> 
 
         match msg.union {
             Some(RdzUnion::PunchHoleResponse(phr)) => {
+                info!(
+                    "[SIGNAL] Got PunchHoleResponse: failure={}, relay_server='{}', pk_len={}, socket_addr_len={}, other_failure='{}'",
+                    phr.failure, phr.relay_server, phr.pk.len(), phr.socket_addr.len(), phr.other_failure
+                );
                 // Check for other_failure text first
                 if !phr.other_failure.is_empty() {
                     return Ok(PunchResult::Failure(phr.other_failure));
@@ -142,10 +146,15 @@ async fn wait_for_punch_response(stream: &mut TcpStream) -> Result<PunchResult> 
 
                 // Check if relay is provided
                 if !phr.relay_server.is_empty() {
+                    let uuid = uuid::Uuid::new_v4().to_string();
+                    info!(
+                        "[SIGNAL] === PunchHole RELAY === relay_server='{}', pk_len={}, generated uuid='{}'",
+                        phr.relay_server, phr.pk.len(), uuid
+                    );
                     return Ok(PunchResult::Relay {
                         relay_server: phr.relay_server,
                         peer_pk: phr.pk,
-                        uuid: String::new(),
+                        uuid,
                     });
                 }
 
@@ -164,8 +173,8 @@ async fn wait_for_punch_response(stream: &mut TcpStream) -> Result<PunchResult> 
             }
             Some(RdzUnion::RelayResponse(rr)) => {
                 info!(
-                    "Got RelayResponse: relay_server={}, uuid={}",
-                    rr.relay_server, rr.uuid
+                    "[SIGNAL] Got RelayResponse: relay_server='{}', uuid='{}', has_pk={}",
+                    rr.relay_server, rr.uuid, rr.union.is_some()
                 );
                 let peer_pk = match rr.union {
                     Some(crate::proto::relay_response::Union::Pk(pk)) => pk,
@@ -178,11 +187,11 @@ async fn wait_for_punch_response(stream: &mut TcpStream) -> Result<PunchResult> 
                 });
             }
             Some(RdzUnion::KeyExchange(_)) | Some(RdzUnion::Hc(_)) => {
-                debug!("Skipping intermediate message");
+                info!("[SIGNAL] Skipping intermediate message (KeyExchange/HealthCheck)");
                 continue;
             }
             other => {
-                warn!("Unexpected rendezvous message: {:?}", other);
+                warn!("[SIGNAL] Unexpected rendezvous message: {:?}", other);
                 continue;
             }
         }

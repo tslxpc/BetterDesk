@@ -40,7 +40,9 @@ interface Command {
 
 async function invokeCmd<T>(cmd: string, args?: Record<string, unknown>): Promise<T> {
     const { invoke } = await import('@tauri-apps/api/core');
-    return invoke<T>(cmd, args);
+    // Automation IPC commands require access_token param for operator_json_request
+    const token = localStorage.getItem('bd_access_token') || '';
+    return invoke<T>(cmd, { accessToken: token, ...args });
 }
 
 export default function AutomationPanel() {
@@ -50,7 +52,7 @@ export default function AutomationPanel() {
         () => tab() === 'rules',
         async (active) => {
             if (!active) return [];
-            try { return await invokeCmd<Rule[]>('get_rules') || []; } catch { return []; }
+            try { return await invokeCmd<Rule[]>('operator_automation_get_rules') || []; } catch { return []; }
         }
     );
 
@@ -58,7 +60,7 @@ export default function AutomationPanel() {
         () => tab() === 'alerts',
         async (active) => {
             if (!active) return [];
-            try { return await invokeCmd<Alert[]>('get_alerts') || []; } catch { return []; }
+            try { return await invokeCmd<Alert[]>('operator_automation_get_alerts') || []; } catch { return []; }
         }
     );
 
@@ -66,13 +68,13 @@ export default function AutomationPanel() {
         () => tab() === 'commands',
         async (active) => {
             if (!active) return [];
-            try { return await invokeCmd<Command[]>('get_commands') || []; } catch { return []; }
+            try { return await invokeCmd<Command[]>('operator_automation_get_commands') || []; } catch { return []; }
         }
     );
 
     async function toggleRule(rule: Rule) {
         try {
-            await invokeCmd('save_rule', { rule: { ...rule, enabled: !rule.enabled } });
+            await invokeCmd('operator_automation_save_rule', { rule: { ...rule, enabled: !rule.enabled } });
             toastSuccess(t('automation.rule_updated'));
             refetchRules();
         } catch { toastError(t('automation.action_failed')); }
@@ -81,7 +83,7 @@ export default function AutomationPanel() {
     async function deleteRule(id: number) {
         if (!confirm(t('automation.confirm_delete'))) return;
         try {
-            await invokeCmd('delete_rule', { ruleId: id });
+            await invokeCmd('operator_automation_delete_rule', { ruleId: id });
             toastSuccess(t('automation.rule_deleted'));
             refetchRules();
         } catch { toastError(t('automation.action_failed')); }
@@ -89,7 +91,7 @@ export default function AutomationPanel() {
 
     async function ackAlert(id: number) {
         try {
-            await invokeCmd('ack_alert', { alertId: id });
+            await invokeCmd('operator_automation_ack_alert', { alertId: id });
             refetchAlerts();
         } catch { toastError(t('automation.action_failed')); }
     }

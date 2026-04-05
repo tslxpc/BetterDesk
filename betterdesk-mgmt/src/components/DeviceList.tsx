@@ -3,7 +3,7 @@
  */
 import { createSignal, createMemo, onMount, Show, For } from 'solid-js';
 import { t } from '../lib/i18n';
-import { getDevices, type Device } from '../lib/api';
+import { getDevices, banDevice, sendDeviceAction, wakeOnLan, type Device } from '../lib/api';
 import { toastSuccess, toastError } from '../stores/toast';
 
 interface DeviceListProps {
@@ -90,13 +90,15 @@ export default function DeviceList(props: DeviceListProps) {
     async function deviceAction(deviceId: string, action: string) {
         setActionMenu(null);
         try {
-            const { invoke } = await import('@tauri-apps/api/core');
             if (action === 'wol') {
-                await invoke('operator_wake_on_lan', { deviceId });
+                await wakeOnLan(deviceId);
+            } else if (action === 'ban') {
+                await banDevice(deviceId);
             } else {
-                await invoke('operator_send_device_action', { deviceId, action });
+                await sendDeviceAction(deviceId, action);
             }
             toastSuccess(t('devices.action_sent'), action);
+            if (action === 'ban') await loadDevices();
         } catch {
             toastError(t('devices.action_failed'));
         }

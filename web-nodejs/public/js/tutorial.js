@@ -227,8 +227,169 @@
             case 'desktop': return getDesktopTutorialSteps();
             case 'devices': return getDevicesTutorialSteps();
             case 'settings': return getSettingsTutorialSteps();
+            case 'remote': return getRemoteTutorialSteps();
+            case 'organization': return getOrganizationTutorialSteps();
+            case 'cdap': return getCDAPTutorialSteps();
+            case 'chat': return getChatTutorialSteps();
             default: return getConsoleTutorialSteps();
         }
+    }
+
+    function getRemoteTutorialSteps() {
+        return [
+            {
+                selector: '.remote-toolbar, .toolbar',
+                title: t('tutorial.remote_toolbar_title', 'Remote Toolbar'),
+                text: t('tutorial.remote_toolbar_text', 'Access display controls, clipboard sync, special keys, and quality settings from the toolbar. Toggle fullscreen with F11.'),
+                position: 'bottom',
+                highlight: true
+            },
+            {
+                selector: '#remote-canvas, .remote-canvas',
+                title: t('tutorial.remote_canvas_title', 'Remote Display'),
+                text: t('tutorial.remote_canvas_text', 'This is the remote screen. Click inside to start controlling the remote device. Mouse and keyboard input are forwarded automatically.'),
+                position: 'center',
+                highlight: false
+            },
+            {
+                selector: '.clipboard-btn, .toolbar-clipboard',
+                title: t('tutorial.remote_clipboard_title', 'Clipboard Sync'),
+                text: t('tutorial.remote_clipboard_text', 'Copy and paste text between your computer and the remote device. Use Ctrl+C / Ctrl+V as normal while focused on the remote display.'),
+                position: 'bottom',
+                highlight: true
+            },
+            {
+                selector: null,
+                title: t('tutorial.remote_complete_title', 'Remote Session Ready!'),
+                text: t('tutorial.remote_complete_text', 'Use the toolbar buttons for special keys (Ctrl+Alt+Del, PrintScreen) and monitor switching. Press Escape or click Disconnect to end the session.'),
+                position: 'center',
+                highlight: false,
+                final: true
+            }
+        ];
+    }
+
+    function getOrganizationTutorialSteps() {
+        return [
+            {
+                selector: '.org-header, .organizations-page h1',
+                title: t('tutorial.org_overview_title', 'Organizations'),
+                text: t('tutorial.org_overview_text', 'Organizations let you group users, devices, and policies. Each organization has its own admin, operators, and settings.'),
+                position: 'bottom',
+                highlight: true
+            },
+            {
+                selector: '.org-create-btn, .btn-create-org',
+                title: t('tutorial.org_create_title', 'Create Organization'),
+                text: t('tutorial.org_create_text', 'Click here to create a new organization. Provide a name, slug, and optional description. You will be the owner of the new organization.'),
+                position: 'bottom',
+                highlight: true
+            },
+            {
+                selector: '.org-members, .org-users-tab',
+                title: t('tutorial.org_members_title', 'Manage Members'),
+                text: t('tutorial.org_members_text', 'Invite users by email, assign roles (admin, operator, user), and manage access. Members can see devices assigned to their organization.'),
+                position: 'right',
+                highlight: true
+            },
+            {
+                selector: '.org-devices, .org-devices-tab',
+                title: t('tutorial.org_devices_title', 'Assign Devices'),
+                text: t('tutorial.org_devices_text', 'Add devices to the organization. Devices assigned here will inherit the organization\'s policies and be visible to its members.'),
+                position: 'right',
+                highlight: true
+            },
+            {
+                selector: '.org-policies, .org-settings-tab',
+                title: t('tutorial.org_policies_title', 'Organization Policies'),
+                text: t('tutorial.org_policies_text', 'Set security policies like password requirements, session timeouts, 2FA enforcement, and device enrollment rules for the organization.'),
+                position: 'right',
+                highlight: true
+            },
+            {
+                selector: null,
+                title: t('tutorial.org_complete_title', 'Organization Setup Complete!'),
+                text: t('tutorial.org_complete_text', 'Invite your team and assign devices to start using organization-scoped management. Policies apply automatically to all members.'),
+                position: 'center',
+                highlight: false,
+                final: true
+            }
+        ];
+    }
+
+    function getCDAPTutorialSteps() {
+        return [
+            {
+                selector: '.cdap-device-list, .cdap-devices',
+                title: t('tutorial.cdap_devices_title', 'CDAP Devices'),
+                text: t('tutorial.cdap_devices_text', 'View all connected CDAP devices — IoT sensors, PLCs, bridges, and custom agents. Green indicators show live connections.'),
+                position: 'bottom',
+                highlight: true
+            },
+            {
+                selector: '.cdap-widget-grid, .cdap-widgets',
+                title: t('tutorial.cdap_widgets_title', 'Widget Dashboard'),
+                text: t('tutorial.cdap_widgets_text', 'Widgets display real-time data from devices. Gauges, toggles, LEDs, charts — each widget type visualizes a different kind of data.'),
+                position: 'center',
+                highlight: false
+            },
+            {
+                selector: '.cdap-command-panel, .cdap-commands',
+                title: t('tutorial.cdap_commands_title', 'Send Commands'),
+                text: t('tutorial.cdap_commands_text', 'Interact with devices by sending commands. Some commands need confirmation. The command log keeps a history of all sent commands.'),
+                position: 'left',
+                highlight: true
+            },
+            {
+                selector: '.cdap-terminal-btn, .cdap-terminal',
+                title: t('tutorial.cdap_terminal_title', 'Device Terminal'),
+                text: t('tutorial.cdap_terminal_text', 'Open a terminal session to CDAP agents for advanced diagnostics or manual configuration. Type commands directly.'),
+                position: 'bottom',
+                highlight: true
+            },
+            {
+                selector: null,
+                title: t('tutorial.cdap_complete_title', 'CDAP Overview Complete!'),
+                text: t('tutorial.cdap_complete_text', 'Explore device widgets, send commands, and use the terminal or file browser for deeper management. CDAP agents report metrics automatically.'),
+                position: 'center',
+                highlight: false,
+                final: true
+            }
+        ];
+    }
+
+    function getChatTutorialSteps() {
+        return [
+            {
+                selector: '.chat-contacts, .chat-sidebar',
+                title: t('tutorial.chat_contacts_title', 'Contacts & Groups'),
+                text: t('tutorial.chat_contacts_text', 'See your contacts and chat groups. Click any contact to open a conversation. Green dots indicate online users.'),
+                position: 'right',
+                highlight: true
+            },
+            {
+                selector: '.chat-messages, .chat-area',
+                title: t('tutorial.chat_send_title', 'Send Messages'),
+                text: t('tutorial.chat_send_text', 'Type your message and press Enter to send. Messages are end-to-end encrypted when both parties support E2E.'),
+                position: 'center',
+                highlight: false
+            },
+            {
+                selector: '.chat-file-btn, .chat-attach',
+                title: t('tutorial.chat_file_title', 'Share Files'),
+                text: t('tutorial.chat_file_text', 'Click the attachment icon to share files. Files are encrypted and can be up to 50 MB.'),
+                position: 'top',
+                highlight: true
+            },
+            {
+                selector: null,
+                title: t('tutorial.chat_complete_title', 'Chat Ready!'),
+                text: t('tutorial.chat_complete_text', 'Chat with operators and end users in real time. Create groups for team communication. All messages support read receipts.'),
+                position: 'center',
+                highlight: false,
+                final: true
+            }
+        ];
     }
 
     // ============ DOM Creation ============
@@ -572,10 +733,14 @@
         _helpMenu.className = 'tutorial-help-menu';
 
         var tutorials = [
-            { type: 'console',  icon: 'dashboard',       label: t('tutorial.tour_console', 'Console Tour') },
-            { type: 'desktop',  icon: 'desktop_windows',  label: t('tutorial.tour_desktop', 'Desktop Mode Tour') },
-            { type: 'devices',  icon: 'devices',          label: t('tutorial.tour_devices', 'Devices Tour') },
-            { type: 'settings', icon: 'settings',         label: t('tutorial.tour_settings', 'Settings Tour') }
+            { type: 'console',      icon: 'dashboard',       label: t('tutorial.tour_console', 'Console Tour') },
+            { type: 'desktop',      icon: 'desktop_windows',  label: t('tutorial.tour_desktop', 'Desktop Mode Tour') },
+            { type: 'devices',      icon: 'devices',          label: t('tutorial.tour_devices', 'Devices Tour') },
+            { type: 'remote',       icon: 'connected_tv',     label: t('tutorial.tour_remote', 'Remote Session Tour') },
+            { type: 'organization', icon: 'corporate_fare',   label: t('tutorial.tour_organization', 'Organization Setup') },
+            { type: 'cdap',         icon: 'sensors',          label: t('tutorial.tour_cdap', 'CDAP Overview') },
+            { type: 'chat',         icon: 'chat',             label: t('tutorial.tour_chat', 'Chat Basics') },
+            { type: 'settings',     icon: 'settings',         label: t('tutorial.tour_settings', 'Settings Tour') }
         ];
 
         tutorials.forEach(function(tut) {

@@ -88,9 +88,12 @@ app.use(express.urlencoded({ extended: false, limit: '2mb' }));
 app.use(cookieParser());
 
 // Session management — also kept as a standalone middleware ref for WebSocket upgrades
+// Use a different cookie name in HTTP mode to avoid collision with stale
+// Secure cookies left over from a previous HTTPS configuration (Issue #82).
+const SESSION_COOKIE = config.httpsEnabled ? 'betterdesk.sid' : 'bd.sid';
 const sessionMiddleware = session({
     secret: config.sessionSecret,
-    name: 'betterdesk.sid',
+    name: SESSION_COOKIE,
     resave: false,
     saveUninitialized: false,
     cookie: {
@@ -179,18 +182,23 @@ app.use('/', routes);
 app.use((err, req, res, next) => {
     if (err.code === 'EBADCSRFTOKEN' || err.message?.includes('csrf') || err.message?.includes('CSRF')) {
         res.status(403);
+        // Detect likely SSL→HTTP transition: cookie missing because browser held Secure cookie
+        const likelySslTransition = !config.httpsEnabled && !req.secure;
+        const hint = likelySslTransition
+            ? ' If you recently disabled SSL, clear your browser cookies for this site and reload.'
+            : '';
         // Always return JSON for API routes (fetch sends Accept: */*)
         if (req.path.startsWith('/api/') || (req.headers['content-type'] && req.headers['content-type'].includes('application/json'))) {
-            return res.json({ success: false, error: 'Invalid CSRF token. Please refresh the page and try again.' });
+            return res.json({ success: false, error: 'Invalid CSRF token. Please refresh the page and try again.' + hint });
         }
         if (req.accepts('html')) {
             return res.render('errors/500', {
                 title: 'Forbidden',
                 activePage: 'error',
-                error: 'Invalid or missing CSRF token. Please refresh the page and try again.'
+                error: 'Invalid or missing CSRF token. Please refresh the page and try again.' + hint
             });
         }
-        return res.json({ success: false, error: 'Invalid CSRF token' });
+        return res.json({ success: false, error: 'Invalid CSRF token' + hint });
     }
     next(err);
 });

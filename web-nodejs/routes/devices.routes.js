@@ -137,11 +137,11 @@ router.get('/api/devices/:id', requireAuth, async (req, res) => {
 });
 
 /**
- * PATCH /api/devices/:id - Update device (name, note)
+ * PATCH /api/devices/:id - Update device (name, note, display_name)
  */
 router.patch('/api/devices/:id', requireAuth, requireRole('operator'), async (req, res) => {
     try {
-        const { user, note } = req.body;
+        const { user, note, display_name } = req.body;
         const id = req.params.id;
         
         // Check device exists
@@ -153,7 +153,7 @@ router.patch('/api/devices/:id', requireAuth, requireRole('operator'), async (re
             });
         }
         
-        const result = await serverBackend.updateDevice(id, { user, note });
+        const result = await serverBackend.updateDevice(id, { user, note, display_name });
         
         // Log action
         await db.logAction(req.session.userId, 'device_updated', `Device ${id} updated`, req.ip);

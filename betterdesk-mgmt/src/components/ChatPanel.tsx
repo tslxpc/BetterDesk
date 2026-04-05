@@ -1,139 +1,153 @@
 /**
  * ChatPanel — operator chat with device users
  *
- * Connects to chat relay WebSocket for real-time messaging.
+ * Uses Tauri IPC commands to communicate with the Rust ChatService backend.
+ * ChatService maintains a persistent WebSocket connection to the server.
  * Shows contact list on the left, conversation on the right.
  */
 import { createSignal, onMount, onCleanup, Show, For } from 'solid-js';
+import { invoke } from '@tauri-apps/api/core';
+import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 import { t } from '../lib/i18n';
-import { getDevices, type Device } from '../lib/api';
 import { toastError } from '../stores/toast';
-import { user } from '../stores/auth';
 
 interface ChatMessage {
-    id: string;
+    id: number;
     from: string;
+    to?: string;
+    conversation_id: string;
     text: string;
     timestamp: number;
-    sent: boolean;
+    read: boolean;
+    sent?: boolean;
 }
 
-interface Contact {
+interface ChatContact {
     id: string;
     name: string;
+    hostname: string;
     online: boolean;
-    lastMessage?: string;
+    last_seen: number;
+    unread: number;
+    avatar_color: string;
+}
+
+interface ChatStatus {
+    connected: boolean;
+    unread_count: number;
+    messages: ChatMessage[];
+    contacts: ChatContact[];
+    groups: unknown[];
 }
 
 export default function ChatPanel() {
-    const [contacts, setContacts] = createSignal<Contact[]>([]);
+    const [contacts, setContacts] = createSignal<ChatContact[]>([]);
     const [activeContact, setActiveContact] = createSignal<string | null>(null);
     const [messages, setMessages] = createSignal<ChatMessage[]>([]);
     const [messageText, setMessageText] = createSignal('');
     const [loading, setLoading] = createSignal(true);
-    const [wsConnected, setWsConnected] = createSignal(false);
-    let ws: WebSocket | null = null;
+    const [connected, setConnected] = createSignal(false);
+    const [typing, setTyping] = createSignal<string | null>(null);
     let messagesEndRef: HTMLDivElement | undefined;
+    const unlisteners: UnlistenFn[] = [];
 
     onMount(async () => {
-        await loadContacts();
-        connectWS();
+        // Listen Tauri events from ChatService
+        unlisteners.push(await listen<ChatStatus>('chat-status', (e) => {
+            setConnected(e.payload.connected);
+            setContacts(e.payload.contacts);
+        }));
+        unlisteners.push(await listen<ChatMessage>('chat-message', (e) => {
+            const msg = e.payload;
+            setMessages(prev => [...prev, msg]);
+            scrollToBottom();
+        }));
+        unlisteners.push(await listen<ChatContact[]>('chat-contacts', (e) => {
+            setContacts(e.payload);
+        }));
+        unlisteners.push(await listen<ChatMessage[]>('chat-history', (e) => {
+            setMessages(e.payload);
+            scrollToBottom();
+        }));
+        unlisteners.push(await listen<string>('chat-typing', (e) => {
+            setTyping(e.payload);
+            setTimeout(() => setTyping(null), 3000);
+        }));
+        unlisteners.push(await listen<number>('chat-unread', () => {
+            // Refresh contacts to update unread counts
+            refreshContacts();
+        }));
+
+        // Get initial status from ChatService
+        await loadInitialState();
     });
 
     onCleanup(() => {
-        if (ws) {
-            ws.close();
-            ws = null;
-        }
+        unlisteners.forEach(fn => fn());
     });
 
-    async function loadContacts() {
+    async function loadInitialState() {
         setLoading(true);
         try {
-            const devices = await getDevices();
-            const contactList: Contact[] = devices
-                .filter(d => d.online || d.status === 'online')
-                .map(d => ({
-                    id: d.id,
-                    name: d.hostname || d.id,
-                    online: d.online || d.status === 'online',
-                }));
-            setContacts(contactList);
+            const status = await invoke<ChatStatus>('get_chat_status');
+            setConnected(status.connected);
+            setContacts(status.contacts);
+            setMessages(status.messages);
+            if (!status.connected) {
+                // Try reconnecting
+                await invoke('reconnect_chat').catch(() => {});
+            }
         } catch {
-            toastError(t('common.error'), t('chat.load_error'));
+            // ChatService may not be started yet
         } finally {
             setLoading(false);
         }
     }
 
-    function connectWS() {
-        const serverUrl = localStorage.getItem('bd_mgmt_server_url') || '';
-        if (!serverUrl) return;
-
-        const wsUrl = serverUrl.replace(/^http/, 'ws') + '/ws/chat';
+    async function refreshContacts() {
         try {
-            ws = new WebSocket(wsUrl);
-            ws.onopen = () => {
-                setWsConnected(true);
-                // Send auth
-                ws?.send(JSON.stringify({
-                    type: 'auth',
-                    operator: user()?.username || 'operator',
-                }));
-            };
-            ws.onmessage = (event) => {
-                try {
-                    const data = JSON.parse(event.data);
-                    if (data.type === 'message') {
-                        const msg: ChatMessage = {
-                            id: `${Date.now()}-${Math.random()}`,
-                            from: data.from,
-                            text: data.text,
-                            timestamp: data.timestamp || Date.now(),
-                            sent: false,
-                        };
-                        setMessages(prev => [...prev, msg]);
-                        scrollToBottom();
-                    }
-                } catch {
-                    // ignore malformed messages
-                }
-            };
-            ws.onclose = () => setWsConnected(false);
-            ws.onerror = () => setWsConnected(false);
-        } catch {
-            setWsConnected(false);
-        }
+            const res = await invoke<{ contacts: ChatContact[] }>('get_chat_contacts');
+            if (res?.contacts) setContacts(res.contacts);
+        } catch { /* ignore */ }
+    }
+
+    async function selectContact(id: string) {
+        setActiveContact(id);
+        setMessages([]);
+        try {
+            await invoke('load_chat_conversation', { conversationId: id });
+            await invoke('mark_chat_read', { conversationId: id });
+        } catch { /* ignore */ }
     }
 
     function scrollToBottom() {
         setTimeout(() => messagesEndRef?.scrollIntoView({ behavior: 'smooth' }), 50);
     }
 
-    function sendMessage() {
+    async function sendMessage() {
         const text = messageText().trim();
         const contact = activeContact();
-        if (!text || !contact || !ws || ws.readyState !== WebSocket.OPEN) return;
+        if (!text || !contact) return;
 
-        ws.send(JSON.stringify({
-            type: 'message',
-            to: contact,
-            text,
-        }));
+        try {
+            await invoke('send_chat_message', { text, conversationId: contact });
+            setMessageText('');
+            scrollToBottom();
+        } catch {
+            toastError(t('common.error'), t('chat.send_error'));
+        }
+    }
 
-        const msg: ChatMessage = {
-            id: `${Date.now()}-${Math.random()}`,
-            from: 'me',
-            text,
-            timestamp: Date.now(),
-            sent: true,
-        };
-        setMessages(prev => [...prev, msg]);
-        setMessageText('');
-        scrollToBottom();
+    async function reconnect() {
+        try {
+            await invoke('reconnect_chat');
+        } catch {
+            toastError(t('common.error'), t('chat.connection_error'));
+        }
     }
 
     function formatTime(ts: number): string {
+        if (!ts) return '';
         return new Date(ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
     }
 
@@ -144,7 +158,12 @@ export default function ChatPanel() {
                 <div class="chat-sidebar-header">
                     <span class="material-symbols-rounded" style="font-size: 18px;">chat</span>
                     <span>{t('chat.title')}</span>
-                    <span class={`status-dot ${wsConnected() ? 'online' : 'offline'}`} style="margin-left: auto;" />
+                    <Show when={!connected()}>
+                        <button class="btn-icon" onClick={reconnect} title={t('chat.reconnect')} style="margin-left: auto;">
+                            <span class="material-symbols-rounded" style="font-size: 16px;">refresh</span>
+                        </button>
+                    </Show>
+                    <span class={`status-dot ${connected() ? 'online' : 'offline'}`} style="margin-left: auto;" />
                 </div>
                 <div class="chat-contact-list">
                     <Show when={!loading()} fallback={<div class="loading-center"><div class="spinner" /></div>}>
@@ -158,15 +177,18 @@ export default function ChatPanel() {
                                 {(contact) => (
                                     <button
                                         class={`chat-contact ${activeContact() === contact.id ? 'active' : ''}`}
-                                        onClick={() => { setActiveContact(contact.id); setMessages([]); }}
+                                        onClick={() => selectContact(contact.id)}
                                     >
-                                        <div class="chat-contact-avatar">
-                                            {contact.name.charAt(0).toUpperCase()}
+                                        <div class="chat-contact-avatar" style={contact.avatar_color ? `background: ${contact.avatar_color}` : undefined}>
+                                            {(contact.name || contact.id).charAt(0).toUpperCase()}
                                         </div>
                                         <div class="chat-contact-info">
-                                            <div class="chat-contact-name">{contact.name}</div>
+                                            <div class="chat-contact-name">{contact.name || contact.id}</div>
                                             <div class="chat-contact-id">{contact.id}</div>
                                         </div>
+                                        <Show when={contact.unread > 0}>
+                                            <span class="notif-badge">{contact.unread}</span>
+                                        </Show>
                                         <span class={`status-dot ${contact.online ? 'online' : 'offline'}`} />
                                     </button>
                                 )}
@@ -187,7 +209,7 @@ export default function ChatPanel() {
                     <div class="chat-messages">
                         <For each={messages()}>
                             {(msg) => (
-                                <div class={`chat-message ${msg.sent ? 'sent' : 'received'}`}>
+                                <div class={`chat-message ${msg.from === 'me' || msg.sent ? 'sent' : 'received'}`}>
                                     <div class="chat-bubble">
                                         <div class="chat-text">{msg.text}</div>
                                         <div class="chat-time">{formatTime(msg.timestamp)}</div>
@@ -195,6 +217,13 @@ export default function ChatPanel() {
                                 </div>
                             )}
                         </For>
+                        <Show when={typing()}>
+                            <div class="chat-message received">
+                                <div class="chat-bubble" style="opacity: 0.6; font-style: italic;">
+                                    <div class="chat-text">{typing()} {t('chat.is_typing')}</div>
+                                </div>
+                            </div>
+                        </Show>
                         <div ref={messagesEndRef} />
                     </div>
                     <div class="chat-input-bar">

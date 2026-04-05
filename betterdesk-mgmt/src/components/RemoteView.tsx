@@ -1,10 +1,13 @@
 /**
- * RemoteView — remote desktop viewer with live JPEG stream + mouse/keyboard input
+ * RemoteView — H.264 relay-based remote desktop viewer
  *
- * Uses `start_remote_viewer` Tauri IPC (WS management endpoint) for video,
- * and `send_remote_input` for mouse/keyboard forwarding.
+ * Connection flow:
+ *   connect_to_peer → poll get_connection_state → password prompt →
+ *   authenticate → start_remote_session → SessionManager (RGBA frames)
  */
-import { createSignal, onMount, onCleanup, Show } from 'solid-js';
+import { createSignal, onMount, onCleanup, Show, batch } from 'solid-js';
+import { invoke } from '@tauri-apps/api/core';
+import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 import { t } from '../lib/i18n';
 import { getDevice, type Device } from '../lib/api';
 import { toastError, toastInfo } from '../stores/toast';
@@ -14,72 +17,238 @@ interface RemoteViewProps {
     onDisconnect: () => void;
 }
 
-type ConnectionState = 'connecting' | 'connected' | 'disconnected' | 'error';
+type ViewState =
+    | 'connecting'      // signal → punch hole → relay
+    | 'authenticating'  // waiting for password
+    | 'starting'        // relay → SessionManager handoff
+    | 'connected'       // streaming
+    | 'disconnected'
+    | 'error';
+
+interface FramePayload { width: number; height: number; rgba_b64: string; }
+interface QualityPayload { fps: number; latency_ms: number; bandwidth_kbps: number; codec: string; }
 
 export default function RemoteView(props: RemoteViewProps) {
-    const [state, setState] = createSignal<ConnectionState>('connecting');
+    const [state, setState] = createSignal<ViewState>('connecting');
     const [device, setDevice] = createSignal<Device | null>(null);
     const [errorMsg, setErrorMsg] = createSignal('');
+    const [password, setPassword] = createSignal('');
+    const [passwordError, setPasswordError] = createSignal('');
     const [fps, setFps] = createSignal(0);
     const [latency, setLatency] = createSignal(0);
+    const [peerInfo, setPeerInfo] = createSignal<Record<string, unknown> | null>(null);
     const [isFullscreen, setIsFullscreen] = createSignal(false);
+
     let canvasRef: HTMLCanvasElement | undefined;
     let containerRef: HTMLDivElement | undefined;
-    let frameUnlisten: (() => void) | undefined;
-    let statusUnlisten: (() => void) | undefined;
+    let passwordRef: HTMLInputElement | undefined;
+    const unlisteners: UnlistenFn[] = [];
+    let pollTimer: ReturnType<typeof setInterval> | undefined;
     let fpsCounter = 0;
     let fpsInterval: ReturnType<typeof setInterval> | undefined;
-    let lastFrameTime = 0;
+
+    // ---- Lifecycle ----
 
     onMount(async () => {
         try {
             const d = await getDevice(props.deviceId);
             setDevice(d);
-            if (!d.online && d.status !== 'online') {
-                setState('error');
-                setErrorMsg(t('remote.device_offline'));
-                return;
-            }
-            await startConnection();
         } catch {
-            setState('error');
-            setErrorMsg(t('remote.connect_failed'));
+            // Device info is optional — proceed with connection anyway
         }
+        await startConnection();
     });
 
     onCleanup(() => {
-        disconnect();
-        if (fpsInterval) clearInterval(fpsInterval);
+        cleanupAll();
     });
 
+    function cleanupAll() {
+        for (const fn of unlisteners) fn();
+        unlisteners.length = 0;
+        if (pollTimer) { clearInterval(pollTimer); pollTimer = undefined; }
+        if (fpsInterval) { clearInterval(fpsInterval); fpsInterval = undefined; }
+        // Fire-and-forget is fine here — called from onCleanup (sync)
+        invoke('stop_remote_session').catch(() => {});
+        invoke('disconnect').catch(() => {});
+    }
+
+    /** Async cleanup that waits for backend to fully tear down before returning. */
+    async function cleanupAsync() {
+        for (const fn of unlisteners) fn();
+        unlisteners.length = 0;
+        if (pollTimer) { clearInterval(pollTimer); pollTimer = undefined; }
+        if (fpsInterval) { clearInterval(fpsInterval); fpsInterval = undefined; }
+        await invoke('stop_remote_session').catch(() => {});
+        await invoke('disconnect').catch(() => {});
+    }
+
+    // ---- Phase 1: Connect to peer (signal → relay) ----
+
     async function startConnection() {
-        setState('connecting');
+        batch(() => {
+            setState('connecting');
+            setErrorMsg('');
+            setPassword('');
+            setPasswordError('');
+        });
+
         try {
-            const { invoke } = await import('@tauri-apps/api/core');
-            const { listen } = await import('@tauri-apps/api/event');
+            // Fully tear down any previous session before reconnecting
+            await cleanupAsync();
 
-            // Listen for JPEG frames (base64 encoded)
-            frameUnlisten = await listen<string>('remote-viewer-frame', (event) => {
-                if (!canvasRef) return;
-                const now = performance.now();
-                if (lastFrameTime > 0) {
-                    setLatency(Math.round(now - lastFrameTime));
+            // Initiate RustDesk protocol connection
+            const result = await invoke<{
+                state: string;
+                peer_id?: string;
+                peer_info?: Record<string, unknown>;
+                error?: string;
+            }>('connect_to_peer', { peerId: props.deviceId });
+
+            if (result.state.startsWith('error')) {
+                batch(() => {
+                    setState('error');
+                    setErrorMsg(result.error || result.state);
+                });
+                return;
+            }
+
+            // Poll connection state until we reach authenticating
+            startPolling();
+        } catch (err: unknown) {
+            const msg = err instanceof Error ? err.message : String(err);
+            batch(() => {
+                setState('error');
+                setErrorMsg(msg || t('remote.connect_failed'));
+            });
+            toastError(t('remote.connect_failed'), msg);
+        }
+    }
+
+    function startPolling() {
+        if (pollTimer) clearInterval(pollTimer);
+        pollTimer = setInterval(async () => {
+            try {
+                const cs = await invoke<{
+                    state: string;
+                    peer_id?: string;
+                    peer_info?: Record<string, unknown>;
+                    latency_ms?: number;
+                    error?: string;
+                }>('get_connection_state');
+
+                if (cs.peer_info) setPeerInfo(cs.peer_info);
+                if (cs.latency_ms) setLatency(cs.latency_ms);
+
+                if (cs.state === 'authenticating') {
+                    clearInterval(pollTimer!);
+                    pollTimer = undefined;
+                    setState('authenticating');
+                    setTimeout(() => passwordRef?.focus(), 50);
+                } else if (cs.state === 'connected') {
+                    // Already authenticated (e.g. no password required)
+                    clearInterval(pollTimer!);
+                    pollTimer = undefined;
+                    await startSession();
+                } else if (cs.state.startsWith('error') || cs.state === 'disconnected') {
+                    clearInterval(pollTimer!);
+                    pollTimer = undefined;
+                    batch(() => {
+                        setState('error');
+                        setErrorMsg(cs.error || t('remote.connect_failed'));
+                    });
                 }
-                lastFrameTime = now;
+                // else: still 'connecting' — keep polling
+            } catch {
+                // Transient error — keep polling
+            }
+        }, 300);
+    }
+
+    // ---- Phase 2: Authenticate ----
+
+    async function submitPassword() {
+        const pw = password().trim();
+        if (!pw) return;
+        setPasswordError('');
+        setState('starting');
+
+        try {
+            const result = await invoke<{
+                state: string;
+                peer_info?: Record<string, unknown>;
+                error?: string;
+            }>('authenticate', { password: pw });
+
+            if (result.peer_info) setPeerInfo(result.peer_info);
+
+            if (result.state === 'connected' || result.state.includes('connected')) {
+                await startSession();
+            } else if (result.state.startsWith('error')) {
+                batch(() => {
+                    setState('authenticating');
+                    setPasswordError(result.error || t('remote.auth_failed'));
+                    setPassword('');
+                });
+                setTimeout(() => passwordRef?.focus(), 50);
+            } else {
+                // Unexpected state — poll for a bit
+                startPolling();
+            }
+        } catch (err: unknown) {
+            const msg = err instanceof Error ? err.message : String(err);
+            batch(() => {
+                setState('authenticating');
+                setPasswordError(msg || t('remote.auth_failed'));
+                setPassword('');
+            });
+            setTimeout(() => passwordRef?.focus(), 50);
+        }
+    }
+
+    function handlePasswordKeyDown(e: KeyboardEvent) {
+        if (e.key === 'Enter') submitPassword();
+    }
+
+    // ---- Phase 3: Start relay session (SessionManager) ----
+
+    async function startSession() {
+        setState('starting');
+
+        try {
+            // Register event listeners before starting session
+            unlisteners.push(await listen<FramePayload>('remote-frame', (ev) => {
+                renderRgbaFrame(ev.payload);
                 fpsCounter++;
-                renderFrame(event.payload);
-            });
+            }));
 
-            // Listen for status changes
-            statusUnlisten = await listen<{ status: string; message?: string }>('remote-viewer-status', (event) => {
-                const { status, message } = event.payload;
-                if (status === 'connected') {
-                    setState('connected');
-                } else if (status === 'disconnected' || status === 'error') {
-                    setState(status === 'error' ? 'error' : 'disconnected');
-                    if (message) setErrorMsg(message);
+            unlisteners.push(await listen<QualityPayload>('remote-quality', (ev) => {
+                setFps(Math.round(ev.payload.fps));
+                setLatency(ev.payload.latency_ms);
+            }));
+
+            unlisteners.push(await listen<{ reason?: string }>('remote-closed', (ev) => {
+                batch(() => {
+                    setState('disconnected');
+                    setErrorMsg(ev.payload.reason || '');
+                });
+            }));
+
+            // Also listen for status events from start_remote_session
+            unlisteners.push(await listen<{ connected: boolean; error?: string }>('remote-viewer-status', (ev) => {
+                if (!ev.payload.connected && state() === 'connected') {
+                    batch(() => {
+                        setState('disconnected');
+                        setErrorMsg(ev.payload.error || '');
+                    });
                 }
-            });
+            }));
+
+            // Bridge relay → SessionManager
+            await invoke('start_remote_session', { peerId: props.deviceId });
+
+            setState('connected');
+            toastInfo(t('remote.connected'), peerInfo()?.hostname as string || props.deviceId);
 
             // FPS counter — update every second
             fpsInterval = setInterval(() => {
@@ -87,58 +256,58 @@ export default function RemoteView(props: RemoteViewProps) {
                 fpsCounter = 0;
             }, 1000);
 
-            // Start the WS viewer (sends JPEG frames via events)
-            await invoke('start_remote_viewer', {
-                deviceId: props.deviceId,
-                serverUrl: localStorage.getItem('bd_mgmt_server_url') || '',
-            });
-            setState('connected');
-            toastInfo(t('remote.connected'), props.deviceId);
-
             // Focus canvas for keyboard input
             setTimeout(() => canvasRef?.focus(), 100);
         } catch (err: unknown) {
-            setState('error');
             const msg = err instanceof Error ? err.message : String(err);
-            setErrorMsg(msg || t('remote.connect_failed'));
+            batch(() => {
+                setState('error');
+                setErrorMsg(msg || t('remote.connect_failed'));
+            });
             toastError(t('remote.connect_failed'), msg);
         }
     }
 
-    function renderFrame(base64: string) {
+    // ---- RGBA Frame Rendering ----
+
+    function renderRgbaFrame(frame: FramePayload) {
         if (!canvasRef) return;
-        const img = new Image();
-        img.onload = () => {
-            const ctx = canvasRef!.getContext('2d');
-            if (!ctx) return;
-            // Resize canvas to match frame dimensions
-            if (canvasRef!.width !== img.width || canvasRef!.height !== img.height) {
-                canvasRef!.width = img.width;
-                canvasRef!.height = img.height;
-            }
-            ctx.drawImage(img, 0, 0);
-        };
-        img.src = `data:image/jpeg;base64,${base64}`;
+        const ctx = canvasRef.getContext('2d');
+        if (!ctx) return;
+
+        // Resize canvas to match remote display
+        if (canvasRef.width !== frame.width || canvasRef.height !== frame.height) {
+            canvasRef.width = frame.width;
+            canvasRef.height = frame.height;
+        }
+
+        // Decode base64 RGBA → ImageData
+        const raw = atob(frame.rgba_b64);
+        const expected = frame.width * frame.height * 4;
+        if (raw.length < expected) return; // Incomplete frame
+
+        const arr = new Uint8ClampedArray(expected);
+        for (let i = 0; i < expected; i++) arr[i] = raw.charCodeAt(i);
+
+        const imgData = new ImageData(arr, frame.width, frame.height);
+        ctx.putImageData(imgData, 0, 0);
     }
 
+    // ---- Disconnect ----
+
     function disconnect() {
-        frameUnlisten?.();
-        statusUnlisten?.();
-        frameUnlisten = undefined;
-        statusUnlisten = undefined;
-        if (fpsInterval) { clearInterval(fpsInterval); fpsInterval = undefined; }
-        import('@tauri-apps/api/core').then(({ invoke }) => {
-            invoke('stop_remote_session', { deviceId: props.deviceId }).catch(() => {});
-        }).catch(() => {});
+        cleanupAll();
         setState('disconnected');
     }
 
-    function handleDisconnect() {
-        disconnect();
+    async function handleDisconnect() {
+        await cleanupAsync();
+        setState('disconnected');
         props.onDisconnect();
     }
 
     // ---- Mouse / Keyboard Input ----
+
     function canvasCoords(e: MouseEvent): { x: number; y: number } {
         if (!canvasRef) return { x: 0, y: 0 };
         const rect = canvasRef.getBoundingClientRect();
@@ -151,18 +320,15 @@ export default function RemoteView(props: RemoteViewProps) {
     }
 
     function mouseButton(e: MouseEvent): number {
-        // 0=left, 1=middle, 2=right
-        if (e.button === 0) return 1;
-        if (e.button === 1) return 4;
-        if (e.button === 2) return 2;
+        if (e.button === 0) return 1; // left
+        if (e.button === 1) return 4; // middle
+        if (e.button === 2) return 2; // right
         return 1;
     }
 
     function sendInput(payload: Record<string, unknown>) {
         if (state() !== 'connected') return;
-        import('@tauri-apps/api/core').then(({ invoke }) => {
-            invoke('send_remote_input', { payload }).catch(() => {});
-        }).catch(() => {});
+        invoke('send_remote_input', { input: payload }).catch(() => {});
     }
 
     function handleMouseMove(e: MouseEvent) {
@@ -186,8 +352,7 @@ export default function RemoteView(props: RemoteViewProps) {
         e.preventDefault();
         const { x, y } = canvasCoords(e);
         sendInput({
-            type: 'wheel',
-            x, y,
+            type: 'wheel', x, y,
             delta_x: Math.sign(e.deltaX) * -1,
             delta_y: Math.sign(e.deltaY) * -1,
         });
@@ -217,6 +382,7 @@ export default function RemoteView(props: RemoteViewProps) {
     }
 
     // ---- Toolbar Actions ----
+
     function toggleFullscreen() {
         if (!containerRef) return;
         if (!document.fullscreenElement) {
@@ -231,28 +397,32 @@ export default function RemoteView(props: RemoteViewProps) {
     }
 
     function sendCtrlAltDel() {
-        import('@tauri-apps/api/core').then(({ invoke }) => {
-            invoke('send_special_key', { key: 'ctrl_alt_del' }).catch(() => {});
-        }).catch(() => {});
+        invoke('send_special_key', { key: 'ctrl_alt_del' }).catch(() => {});
     }
 
     function stateIcon(): string {
         switch (state()) {
-            case 'connecting': return 'sync';
-            case 'connected': return 'desktop_windows';
-            case 'disconnected': return 'desktop_access_disabled';
-            case 'error': return 'error';
+            case 'connecting':
+            case 'starting':       return 'sync';
+            case 'authenticating': return 'lock';
+            case 'connected':      return 'desktop_windows';
+            case 'disconnected':   return 'desktop_access_disabled';
+            case 'error':          return 'error';
         }
     }
 
     function stateColor(): string {
         switch (state()) {
-            case 'connecting': return 'var(--accent-orange)';
-            case 'connected': return 'var(--accent-green)';
-            case 'disconnected': return 'var(--text-tertiary)';
-            case 'error': return 'var(--accent-red)';
+            case 'connecting':
+            case 'starting':
+            case 'authenticating': return 'var(--accent-orange)';
+            case 'connected':      return 'var(--accent-green)';
+            case 'disconnected':   return 'var(--text-tertiary)';
+            case 'error':          return 'var(--accent-red)';
         }
     }
+
+    const deviceLabel = () => peerInfo()?.hostname as string || device()?.hostname || props.deviceId;
 
     return (
         <div class="remote-view page-enter" ref={containerRef}>
@@ -262,9 +432,7 @@ export default function RemoteView(props: RemoteViewProps) {
                     <span class="material-symbols-rounded" style={`color: ${stateColor()}; font-size: 18px;`}>
                         {stateIcon()}
                     </span>
-                    <span class="remote-device-name">
-                        {device()?.hostname || props.deviceId}
-                    </span>
+                    <span class="remote-device-name">{deviceLabel()}</span>
                     <Show when={state() === 'connected'}>
                         <span class="remote-stats">
                             {fps()} FPS · {latency()}ms
@@ -292,25 +460,66 @@ export default function RemoteView(props: RemoteViewProps) {
                 </div>
             </div>
 
-            {/* Canvas / Status */}
+            {/* Canvas / Status / Password */}
             <div class="remote-canvas-container">
-                <Show when={state() === 'connected'} fallback={
+                {/* Password prompt */}
+                <Show when={state() === 'authenticating'}>
+                    <div class="remote-status-overlay">
+                        <span class="material-symbols-rounded" style="font-size: 56px; color: var(--accent-orange);">lock</span>
+                        <div class="remote-status-text" style="margin-bottom: 12px;">
+                            {t('remote.enter_password')}
+                        </div>
+                        <div class="remote-password-form">
+                            <input
+                                ref={passwordRef}
+                                type="password"
+                                class="input"
+                                style="width: 260px; text-align: center;"
+                                placeholder={t('remote.password_placeholder')}
+                                value={password()}
+                                onInput={(e) => setPassword(e.currentTarget.value)}
+                                onKeyDown={handlePasswordKeyDown}
+                                autocomplete="off"
+                            />
+                            <Show when={passwordError()}>
+                                <div style="color: var(--accent-red); font-size: var(--font-size-sm); margin-top: 6px;">
+                                    {passwordError()}
+                                </div>
+                            </Show>
+                            <button class="btn-primary" style="width: auto; padding: 8px 24px; margin-top: 10px;" onClick={submitPassword}>
+                                {t('remote.connect_btn')}
+                            </button>
+                        </div>
+                    </div>
+                </Show>
+
+                {/* Connecting / Starting spinner */}
+                <Show when={state() === 'connecting' || state() === 'starting'}>
+                    <div class="remote-status-overlay">
+                        <span class="material-symbols-rounded spinning" style="font-size: 56px; color: var(--accent-orange);">sync</span>
+                        <div class="remote-status-text">
+                            {state() === 'connecting' ? t('remote.connecting') : t('remote.starting_session')}
+                        </div>
+                    </div>
+                </Show>
+
+                {/* Error / Disconnected */}
+                <Show when={state() === 'error' || state() === 'disconnected'}>
                     <div class="remote-status-overlay">
                         <span class="material-symbols-rounded" style={`font-size: 64px; color: ${stateColor()};`}>
                             {stateIcon()}
                         </span>
                         <div class="remote-status-text">
-                            {state() === 'connecting' && t('remote.connecting')}
-                            {state() === 'disconnected' && t('remote.disconnected')}
-                            {state() === 'error' && (errorMsg() || t('remote.connect_failed'))}
+                            {state() === 'disconnected' ? t('remote.disconnected') : (errorMsg() || t('remote.connect_failed'))}
                         </div>
-                        <Show when={state() === 'error'}>
-                            <button class="btn-primary" style="width: auto; padding: 8px 20px; margin-top: 12px;" onClick={startConnection}>
-                                {t('common.retry')}
-                            </button>
-                        </Show>
+                        <button class="btn-primary" style="width: auto; padding: 8px 20px; margin-top: 12px;" onClick={startConnection}>
+                            {t('common.retry')}
+                        </button>
                     </div>
-                }>
+                </Show>
+
+                {/* Remote Canvas */}
+                <Show when={state() === 'connected'}>
                     <canvas
                         ref={canvasRef}
                         class="remote-canvas"

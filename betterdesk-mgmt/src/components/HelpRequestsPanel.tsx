@@ -1,44 +1,18 @@
 /**
  * HelpRequestsPanel — manage incoming help requests from end users
  *
- * Uses Tauri IPC commands:
- * - operator_get_help_requests
- * - operator_accept_help_request
+ * Uses api.ts session-cookie auth to fetch/manage help requests.
  */
 import { createSignal, createResource, Show, For } from 'solid-js';
 import { t } from '../lib/i18n';
+import { getHelpRequestsList, acceptHelpRequest, type HelpRequest } from '../lib/api';
 import { toastSuccess, toastError } from '../stores/toast';
-
-interface HelpRequest {
-    id?: string;
-    device_id?: string;
-    hostname?: string;
-    user?: string;
-    message?: string;
-    status?: string;
-    priority?: string;
-    timestamp?: string;
-    created_at?: string;
-    accepted_by?: string;
-}
-
-async function invokeCmd<T>(cmd: string, args?: Record<string, unknown>): Promise<T> {
-    const { invoke } = await import('@tauri-apps/api/core');
-    return invoke<T>(cmd, args);
-}
-
-function getToken(): string {
-    try { return localStorage.getItem('bd_access_token') || ''; } catch { return ''; }
-}
 
 export default function HelpRequestsPanel() {
     const [filter, setFilter] = createSignal<'all' | 'pending' | 'accepted'>('all');
 
     const [requests, { refetch }] = createResource(async () => {
-        try {
-            const res = await invokeCmd<any>('operator_get_help_requests', { accessToken: getToken() });
-            return (res?.requests || res || []) as HelpRequest[];
-        } catch { return []; }
+        return await getHelpRequestsList();
     });
 
     const filtered = () => {
@@ -51,9 +25,9 @@ export default function HelpRequestsPanel() {
 
     const pendingCount = () => (requests() || []).filter(r => !r.status || r.status === 'pending').length;
 
-    async function acceptRequest(id: string) {
+    async function doAccept(id: string) {
         try {
-            await invokeCmd('operator_accept_help_request', { accessToken: getToken(), requestId: id });
+            await acceptHelpRequest(id);
             toastSuccess(t('help_requests.accepted'));
             refetch();
         } catch { toastError(t('help_requests.action_failed')); }
@@ -62,12 +36,6 @@ export default function HelpRequestsPanel() {
     function formatTime(iso?: string): string {
         if (!iso) return '—';
         try { return new Date(iso).toLocaleString(); } catch { return iso; }
-    }
-
-    function priorityColor(p?: string): string {
-        if (p === 'urgent' || p === 'high') return 'red';
-        if (p === 'medium') return 'orange';
-        return 'blue';
     }
 
     function statusColor(s?: string): string {
@@ -115,14 +83,11 @@ export default function HelpRequestsPanel() {
                                             <div class="help-request-device">
                                                 <span class="material-symbols-rounded" style="font-size: 18px; color: var(--text-tertiary); margin-right: 6px;">devices</span>
                                                 <code style="font-size: var(--font-size-sm);">{req.device_id || '—'}</code>
-                                                <Show when={req.hostname}>
-                                                    <span style="color: var(--text-secondary); margin-left: 8px;">{req.hostname}</span>
+                                                <Show when={req.device_name}>
+                                                    <span style="color: var(--text-secondary); margin-left: 8px;">{req.device_name}</span>
                                                 </Show>
                                             </div>
                                             <div class="help-request-meta">
-                                                <Show when={req.priority}>
-                                                    <span class={`action-badge action-${priorityColor(req.priority)}`}>{req.priority}</span>
-                                                </Show>
                                                 <span class={`action-badge action-${statusColor(req.status)}`}>{req.status || 'pending'}</span>
                                             </div>
                                         </div>
@@ -133,14 +98,8 @@ export default function HelpRequestsPanel() {
 
                                         <div class="help-request-footer">
                                             <div class="help-request-info">
-                                                <Show when={req.user}>
-                                                    <span style="color: var(--text-secondary); font-size: var(--font-size-xs);">
-                                                        <span class="material-symbols-rounded" style="font-size: 14px; vertical-align: -2px; margin-right: 2px;">person</span>
-                                                        {req.user}
-                                                    </span>
-                                                </Show>
                                                 <span style="color: var(--text-tertiary); font-size: var(--font-size-xs);">
-                                                    {formatTime(req.timestamp || req.created_at)}
+                                                    {formatTime(req.created_at)}
                                                 </span>
                                                 <Show when={req.accepted_by}>
                                                     <span style="color: var(--text-secondary); font-size: var(--font-size-xs);">
@@ -149,7 +108,7 @@ export default function HelpRequestsPanel() {
                                                 </Show>
                                             </div>
                                             <Show when={!req.status || req.status === 'pending'}>
-                                                <button class="btn-primary btn-sm" onClick={() => acceptRequest(req.id || '')}>
+                                                <button class="btn-primary btn-sm" onClick={() => doAccept(req.id || '')}>
                                                     <span class="material-symbols-rounded" style="font-size: 16px; vertical-align: -3px; margin-right: 4px;">check_circle</span>
                                                     {t('help_requests.accept')}
                                                 </button>

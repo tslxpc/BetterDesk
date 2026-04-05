@@ -31,6 +31,12 @@
             this.chatPanel = panel.querySelector('.session-chat-panel');
             this.chatMessages = panel.querySelector('.session-chat-messages');
             this.chatInput = panel.querySelector('.session-chat-input');
+            this.filePanel = panel.querySelector('.session-file-panel');
+            this.fileList = panel.querySelector('.session-file-list');
+            this.filePathText = panel.querySelector('.session-file-path-text');
+            this.fileTransfersPanel = panel.querySelector('.session-file-transfers');
+            this.fileTransfersList = panel.querySelector('.session-file-transfers-list');
+            this.fileUploadInput = panel.querySelector('.session-file-upload-input');
             this.client = null;
             this.state = 'idle';
             this.latency = 0;
@@ -189,6 +195,7 @@
 
         wireSessionEvents(session);
         wireSessionDomEvents(session);
+        wireFileTransferEvents(session);
         sessions.set(deviceId, session);
         createTab(deviceId, deviceName);
         switchSession(deviceId);
@@ -268,6 +275,7 @@
             disableAudio: false
         });
         wireSessionEvents(session);
+        wireFileTransferEvents(session);
         session.client.renderer.resize();
         session.client.connect().catch(err => {
             setSessionStatus(session, 'error', err.message);
@@ -412,6 +420,235 @@
             if (e.key === 'Enter') sendChat(session);
             e.stopPropagation();
         });
+
+        // File transfer panel listeners
+        session.panel.querySelector('.session-file-btn-close')
+            ?.addEventListener('click', () => {
+                session.filePanel.style.display = 'none';
+                document.getElementById('btn-file-transfer')?.classList.remove('active');
+            });
+
+        session.panel.querySelector('.session-file-btn-up')
+            ?.addEventListener('click', () => {
+                if (session.client) session.client.fileTransfer.browseParent();
+            });
+
+        session.panel.querySelector('.session-file-btn-home')
+            ?.addEventListener('click', () => {
+                if (session.client) session.client.fileTransfer.browseDir('');
+            });
+
+        session.panel.querySelector('.session-file-btn-hidden')
+            ?.addEventListener('click', function () {
+                if (!session.client) return;
+                const ft = session.client.fileTransfer;
+                ft._showHidden = !ft._showHidden;
+                this.classList.toggle('active', ft._showHidden);
+                ft.browseDir(ft.currentPath);
+            });
+
+        session.panel.querySelector('.session-file-btn-newdir')
+            ?.addEventListener('click', () => {
+                if (!session.client) return;
+                const name = prompt(_('remote.file_new_folder_prompt') || 'Enter folder name:');
+                if (name && name.trim()) {
+                    const ft = session.client.fileTransfer;
+                    const sep = ft.currentPath.includes('\\') ? '\\' : '/';
+                    ft.createDir(ft.currentPath + sep + name.trim());
+                    setTimeout(() => ft.browseDir(ft.currentPath), 500);
+                }
+            });
+
+        session.panel.querySelector('.session-file-btn-upload')
+            ?.addEventListener('click', () => {
+                session.fileUploadInput?.click();
+            });
+
+        session.fileUploadInput?.addEventListener('change', (e) => {
+            if (!session.client || !e.target.files.length) return;
+            const ft = session.client.fileTransfer;
+            for (const file of e.target.files) {
+                ft.uploadFile(file, ft.currentPath);
+            }
+            e.target.value = '';
+        });
+    }
+
+    /**
+     * Wire file transfer events from RDClient to UI
+     */
+    function wireFileTransferEvents(session) {
+        const client = session.client;
+        if (!client) return;
+
+        client.on('file_dir', (data) => {
+            renderFileList(session, data.path, data.entries);
+        });
+
+        client.on('file_transfer_start', (data) => {
+            showTransferEntry(session, data);
+        });
+
+        client.on('file_transfer_progress', (data) => {
+            updateTransferProgress(session, data);
+        });
+
+        client.on('file_transfer_complete', (data) => {
+            completeTransferEntry(session, data);
+        });
+
+        client.on('file_transfer_error', (data) => {
+            errorTransferEntry(session, data);
+        });
+
+        client.on('file_transfer_cancelled', (data) => {
+            removeTransferEntry(session, data.id);
+        });
+    }
+
+    /**
+     * Render file list in file panel
+     */
+    function renderFileList(session, path, entries) {
+        session.filePathText.textContent = path || '/';
+        session.fileList.innerHTML = '';
+
+        if (!entries || entries.length === 0) {
+            session.fileList.innerHTML = '<div class="file-empty">' + (_('remote.file_empty') || 'No files') + '</div>';
+            return;
+        }
+
+        entries.forEach((entry) => {
+            const row = document.createElement('div');
+            row.className = 'file-entry' + (entry.isDir ? ' file-entry-dir' : '');
+            row.innerHTML =
+                '<span class="material-icons file-entry-icon">' + RDFileTransfer.getFileIcon(entry) + '</span>' +
+                '<span class="file-entry-name" title="' + escapeHtml(entry.name) + '">' + escapeHtml(entry.name) + '</span>' +
+                '<span class="file-entry-size">' + (entry.isDir ? '' : RDFileTransfer.formatSize(entry.size)) + '</span>' +
+                '<span class="file-entry-time">' + RDFileTransfer.formatTime(entry.modifiedTime) + '</span>' +
+                '<div class="file-entry-actions">' +
+                    (entry.isDir ? '' : '<button class="file-btn-icon file-btn-download" title="' + (_('remote.file_download') || 'Download') + '"><span class="material-icons">download</span></button>') +
+                    '<button class="file-btn-icon file-btn-rename" title="' + (_('remote.file_rename') || 'Rename') + '"><span class="material-icons">edit</span></button>' +
+                    '<button class="file-btn-icon file-btn-delete" title="' + (_('actions.delete') || 'Delete') + '"><span class="material-icons">delete</span></button>' +
+                '</div>';
+
+            // Double click / click on directory → navigate
+            if (entry.isDir) {
+                row.addEventListener('dblclick', () => {
+                    const ft = session.client?.fileTransfer;
+                    if (!ft) return;
+                    const sep = path.includes('\\') ? '\\' : '/';
+                    ft.browseDir(path + sep + entry.name);
+                });
+            }
+
+            // Download button
+            row.querySelector('.file-btn-download')?.addEventListener('click', (e) => {
+                e.stopPropagation();
+                session.client?.fileTransfer?.downloadFile(path, entry);
+            });
+
+            // Rename button
+            row.querySelector('.file-btn-rename')?.addEventListener('click', (e) => {
+                e.stopPropagation();
+                const newName = prompt(_('remote.file_rename_prompt') || 'New name:', entry.name);
+                if (newName && newName.trim() && newName !== entry.name) {
+                    const ft = session.client?.fileTransfer;
+                    if (!ft) return;
+                    const sep = path.includes('\\') ? '\\' : '/';
+                    ft.rename(path + sep + entry.name, newName.trim());
+                    setTimeout(() => ft.browseDir(ft.currentPath), 500);
+                }
+            });
+
+            // Delete button
+            row.querySelector('.file-btn-delete')?.addEventListener('click', (e) => {
+                e.stopPropagation();
+                if (!confirm((_('remote.file_delete_confirm') || 'Delete') + ' "' + entry.name + '"?')) return;
+                const ft = session.client?.fileTransfer;
+                if (!ft) return;
+                const sep = path.includes('\\') ? '\\' : '/';
+                const fullPath = path + sep + entry.name;
+                if (entry.isDir) {
+                    ft.removeDir(fullPath, true);
+                } else {
+                    ft.removeFile(fullPath);
+                }
+                setTimeout(() => ft.browseDir(ft.currentPath), 500);
+            });
+
+            session.fileList.appendChild(row);
+        });
+    }
+
+    function escapeHtml(text) {
+        const el = document.createElement('span');
+        el.textContent = text;
+        return el.innerHTML;
+    }
+
+    /**
+     * Show new transfer entry in transfers panel
+     */
+    function showTransferEntry(session, data) {
+        session.fileTransfersPanel.style.display = 'block';
+        const entry = document.createElement('div');
+        entry.className = 'file-transfer-entry';
+        entry.id = 'ft-' + data.id;
+        entry.innerHTML =
+            '<span class="material-icons file-transfer-icon">' + (data.type === 'download' ? 'download' : 'upload') + '</span>' +
+            '<div class="file-transfer-info">' +
+                '<div class="file-transfer-name">' + escapeHtml(data.fileName) + '</div>' +
+                '<div class="file-transfer-bar"><div class="file-transfer-bar-fill" style="width:0%"></div></div>' +
+                '<div class="file-transfer-status">0%</div>' +
+            '</div>' +
+            '<button class="file-btn-icon file-transfer-cancel" title="Cancel"><span class="material-icons">close</span></button>';
+
+        entry.querySelector('.file-transfer-cancel')?.addEventListener('click', () => {
+            session.client?.fileTransfer?.cancelTransfer(data.id);
+        });
+        session.fileTransfersList.appendChild(entry);
+    }
+
+    function updateTransferProgress(session, data) {
+        const entry = session.fileTransfersList.querySelector('#ft-' + data.id);
+        if (!entry) return;
+        const fill = entry.querySelector('.file-transfer-bar-fill');
+        const status = entry.querySelector('.file-transfer-status');
+        if (fill) fill.style.width = data.percent + '%';
+        if (status) status.textContent = data.percent + '% — ' + RDFileTransfer.formatSize(data.transferred) + ' / ' + RDFileTransfer.formatSize(data.fileSize);
+    }
+
+    function completeTransferEntry(session, data) {
+        const entry = session.fileTransfersList.querySelector('#ft-' + data.id);
+        if (!entry) return;
+        entry.classList.add('complete');
+        const status = entry.querySelector('.file-transfer-status');
+        if (status) status.textContent = (_('remote.file_complete') || 'Complete') + ' — ' + RDFileTransfer.formatSize(data.fileSize);
+        const cancel = entry.querySelector('.file-transfer-cancel');
+        if (cancel) cancel.style.display = 'none';
+        // Auto-remove after 5s
+        setTimeout(() => {
+            entry.remove();
+            if (!session.fileTransfersList.children.length) {
+                session.fileTransfersPanel.style.display = 'none';
+            }
+        }, 5000);
+    }
+
+    function errorTransferEntry(session, data) {
+        const entry = session.fileTransfersList.querySelector('#ft-' + data.id);
+        if (!entry) return;
+        entry.classList.add('error');
+        const status = entry.querySelector('.file-transfer-status');
+        if (status) status.textContent = (_('remote.file_error') || 'Error') + ': ' + data.error;
+        const cancel = entry.querySelector('.file-transfer-cancel');
+        if (cancel) cancel.style.display = 'none';
+    }
+
+    function removeTransferEntry(id) {
+        const el = document.querySelector('#ft-' + id);
+        if (el) el.remove();
     }
 
     // ---- Session state helpers ----
@@ -714,6 +951,18 @@
         session.chatPanel.style.display = isOpen ? 'none' : 'flex';
         this.classList.toggle('active', !isOpen);
         if (!isOpen && session.chatInput) session.chatInput.focus();
+    });
+
+    // File transfer toggle
+    document.getElementById('btn-file-transfer')?.addEventListener('click', function () {
+        const session = getActiveSession();
+        if (!session) return;
+        const isOpen = session.filePanel.style.display !== 'none';
+        session.filePanel.style.display = isOpen ? 'none' : 'flex';
+        this.classList.toggle('active', !isOpen);
+        if (!isOpen && session.client) {
+            session.client.fileTransfer.browseDir('');
+        }
     });
 
     // Recording

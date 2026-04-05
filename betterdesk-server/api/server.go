@@ -551,9 +551,10 @@ func (s *Server) handleUpdatePeerFields(w http.ResponseWriter, r *http.Request) 
 	id := r.PathValue("id")
 
 	var body struct {
-		Note *string `json:"note"`
-		User *string `json:"user"`
-		Tags *string `json:"tags"`
+		Note        *string `json:"note"`
+		User        *string `json:"user"`
+		Tags        *string `json:"tags"`
+		DisplayName *string `json:"display_name"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Invalid JSON"})
@@ -569,6 +570,9 @@ func (s *Server) handleUpdatePeerFields(w http.ResponseWriter, r *http.Request) 
 	}
 	if body.Tags != nil {
 		fields["tags"] = *body.Tags
+	}
+	if body.DisplayName != nil {
+		fields["display_name"] = *body.DisplayName
 	}
 
 	if len(fields) == 0 {
@@ -1441,9 +1445,9 @@ func (s *Server) handleSaveAccessPolicy(w http.ResponseWriter, r *http.Request) 
 
 	if s.auditLog != nil {
 		s.auditLog.Log(audit.ActionPeerUpdated, s.remoteIP(r), id, map[string]string{
-			"action":    "access_policy_updated",
+			"action":     "access_policy_updated",
 			"unattended": fmt.Sprintf("%v", body.UnattendedEnabled),
-			"schedule":  fmt.Sprintf("%v", body.ScheduleEnabled),
+			"schedule":   fmt.Sprintf("%v", body.ScheduleEnabled),
 		})
 	}
 

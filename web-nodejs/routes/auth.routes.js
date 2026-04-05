@@ -77,6 +77,14 @@ router.post('/api/auth/login', loginLimiter, async (req, res) => {
             });
         }
         
+        // Block pro-only accounts from web panel login
+        if (user.role === 'pro') {
+            return res.status(403).json({
+                success: false,
+                error: req.t('auth.pro_only_account')
+            });
+        }
+        
         // Check if TOTP verification is required
         if (user.totpRequired) {
             // Store pending 2FA session
@@ -139,7 +147,9 @@ router.post('/api/auth/logout', async (req, res) => {
         if (err) {
             console.error('Session destroy error:', err);
         }
+        res.clearCookie(req.sessionID ? req.session?.cookie?.name : 'betterdesk.sid');
         res.clearCookie('betterdesk.sid');
+        res.clearCookie('bd.sid');
         res.json({ success: true });
     });
 });
@@ -207,6 +217,7 @@ router.post('/api/auth/password', requireAuth, passwordChangeLimiter, async (req
 router.get('/logout', (req, res) => {
     req.session.destroy(() => {
         res.clearCookie('betterdesk.sid');
+        res.clearCookie('bd.sid');
         res.redirect('/login');
     });
 });

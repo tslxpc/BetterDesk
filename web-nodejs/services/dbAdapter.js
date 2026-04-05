@@ -2524,12 +2524,11 @@ function createPostgresAdapter() {
 
         await q(`
             CREATE TABLE IF NOT EXISTS address_books (
-                id SERIAL PRIMARY KEY,
-                user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-                ab_type TEXT DEFAULT 'legacy',
-                data JSONB DEFAULT '{}',
+                username TEXT NOT NULL,
+                ab_type TEXT NOT NULL DEFAULT 'legacy',
+                data TEXT NOT NULL DEFAULT '{}',
                 updated_at TIMESTAMPTZ DEFAULT NOW(),
-                UNIQUE(user_id, ab_type)
+                PRIMARY KEY (username, ab_type)
             )
         `);
 
@@ -3374,11 +3373,19 @@ function createPostgresAdapter() {
         },
 
         // ---- Address books ----
+        // Go server creates address_books with (username, ab_type) PK — not user_id FK.
+        // We look up the username from the user ID before querying.
 
-        async getAddressBook(userId, abType = 'legacy') { return one('SELECT * FROM address_books WHERE user_id = $1 AND ab_type = $2', [userId, abType]); },
+        async getAddressBook(userId, abType = 'legacy') {
+            const user = await one('SELECT username FROM users WHERE id = $1', [userId]);
+            if (!user) return null;
+            return one('SELECT * FROM address_books WHERE username = $1 AND ab_type = $2', [user.username, abType]);
+        },
         async saveAddressBook(userId, abType, data) {
-            await q(`INSERT INTO address_books (user_id, ab_type, data, updated_at) VALUES ($1, $2, $3, NOW())
-                ON CONFLICT(user_id, ab_type) DO UPDATE SET data = $3, updated_at = NOW()`, [userId, abType, data]);
+            const user = await one('SELECT username FROM users WHERE id = $1', [userId]);
+            if (!user) return;
+            await q(`INSERT INTO address_books (username, ab_type, data, updated_at) VALUES ($1, $2, $3, NOW())
+                ON CONFLICT(username, ab_type) DO UPDATE SET data = $3, updated_at = NOW()`, [user.username, abType, data]);
         },
 
         // ---- Audit ----
@@ -3441,7 +3448,7 @@ function createPostgresAdapter() {
             return all('SELECT id, username, password_hash, role, created_at, last_login, totp_enabled FROM users ORDER BY id');
         },
         async getAllAddressBooks() {
-            return all('SELECT user_id, ab_type, data, updated_at FROM address_books ORDER BY user_id');
+            return all('SELECT username, ab_type, data, updated_at FROM address_books ORDER BY username');
         },
         async restoreUsers(users) {
             const client = await getPool().connect();
@@ -4520,7 +4527,9 @@ function createPostgresAdapter() {
         // ---- Address Book Tags ----
 
         async getAddressBookTags(userId) {
-            const row = await one('SELECT data FROM address_books WHERE user_id = $1 AND ab_type = $2', [userId, 'legacy']);
+            const user = await one('SELECT username FROM users WHERE id = $1', [userId]);
+            if (!user) return [];
+            const row = await one('SELECT data FROM address_books WHERE username = $1 AND ab_type = $2', [user.username, 'legacy']);
             if (!row) return [];
             try {
                 const data = typeof row.data === 'object' ? row.data : JSON.parse(row.data);

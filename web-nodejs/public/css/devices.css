@@ -96,6 +96,7 @@
     appearance: none;
     position: relative;
     font-family: inherit;
+    overflow: hidden;
 }
 
 .folder-chip:hover {
@@ -542,6 +543,8 @@ td.column-hidden {
     position: fixed;
     z-index: 9999;
     min-width: 180px;
+    max-height: calc(100vh - 32px);
+    overflow-y: auto;
     background: var(--bg-elevated, #2d333b);
     border: 1px solid var(--border-primary);
     border-radius: var(--radius-md, 8px);
@@ -738,6 +741,7 @@ td.column-hidden {
     border: 2px solid transparent;
     cursor: pointer;
     transition: transform 0.15s, border-color 0.15s;
+    transform: scale(1);
     flex-shrink: 0;
     -webkit-appearance: none;
     appearance: none;
@@ -806,6 +810,34 @@ td.column-hidden {
 .device-info-item span {
     font-family: var(--font-mono);
     font-size: var(--font-size-sm);
+}
+
+.device-info-item.full-width {
+    grid-column: 1 / -1;
+    flex-direction: column;
+    gap: var(--space-xs);
+}
+
+.device-info-item .form-input {
+    width: 100%;
+    padding: var(--space-sm) var(--space-md);
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-primary);
+    border-radius: var(--radius-sm);
+    color: var(--text-primary);
+    font-size: var(--font-size-sm);
+    font-family: var(--font-sans);
+    transition: border-color 0.15s ease;
+}
+
+.device-info-item .form-input:focus {
+    outline: none;
+    border-color: var(--accent-blue);
+}
+
+.device-info-item textarea.form-input {
+    resize: vertical;
+    min-height: 48px;
 }
 
 /* ID change warning */

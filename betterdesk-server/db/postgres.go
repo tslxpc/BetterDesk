@@ -298,6 +298,8 @@ func (pg *PostgresDB) Migrate() error {
 		// peers: CDAP device type and linked peer (added in v2.5.0)
 		`ALTER TABLE peers ADD COLUMN IF NOT EXISTS device_type TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE peers ADD COLUMN IF NOT EXISTS linked_peer_id TEXT NOT NULL DEFAULT ''`,
+		// peers: display_name alias (added in v2.6.0)
+		`ALTER TABLE peers ADD COLUMN IF NOT EXISTS display_name TEXT NOT NULL DEFAULT ''`,
 	}
 
 	for _, ddl := range columnMigrations {
@@ -316,7 +318,7 @@ const peerColumns = `id, uuid, pk, ip, "user", hostname, os, version,
 	status, nat_type, last_online, created_at,
 	disabled, banned, ban_reason, banned_at,
 	soft_deleted, deleted_at, note, tags, heartbeat_seq,
-	device_type, linked_peer_id`
+	device_type, linked_peer_id, display_name`
 
 // scanPeer scans a row into a Peer struct using nullable types.
 func scanPeer(row pgx.Row) (*Peer, error) {
@@ -329,7 +331,7 @@ func scanPeer(row pgx.Row) (*Peer, error) {
 		&lastOnline, &p.CreatedAt, &p.Disabled, &p.Banned,
 		&p.BanReason, &bannedAt, &p.SoftDeleted, &deletedAt,
 		&p.Note, &p.Tags, &p.HeartbeatSeq,
-		&p.DeviceType, &p.LinkedPeerID,
+		&p.DeviceType, &p.LinkedPeerID, &p.DisplayName,
 	)
 	if err != nil {
 		return nil, err
@@ -535,7 +537,7 @@ func (pg *PostgresDB) IsPeerSoftDeleted(id string) (bool, error) {
 // Only provided keys are updated; others are left unchanged.
 // Allowed keys: "note", "user", "tags", "device_type", "linked_peer_id".
 func (pg *PostgresDB) UpdatePeerFields(id string, fields map[string]string) error {
-	allowed := map[string]string{"note": "note", "user": `"user"`, "tags": "tags", "device_type": "device_type", "linked_peer_id": "linked_peer_id"}
+	allowed := map[string]string{"note": "note", "user": `"user"`, "tags": "tags", "device_type": "device_type", "linked_peer_id": "linked_peer_id", "display_name": "display_name"}
 	setClauses := []string{}
 	args := []interface{}{}
 	idx := 1
@@ -585,12 +587,12 @@ func (pg *PostgresDB) ChangePeerID(oldID, newID string) error {
 		                    status, nat_type, last_online, created_at,
 		                    disabled, banned, ban_reason, banned_at,
 		                    soft_deleted, deleted_at, note, tags, heartbeat_seq,
-		                    device_type, linked_peer_id)
+		                    device_type, linked_peer_id, display_name)
 		SELECT $1, uuid, pk, ip, "user", hostname, os, version,
 		       status, nat_type, last_online, created_at,
 		       disabled, banned, ban_reason, banned_at,
 		       soft_deleted, deleted_at, note, tags, heartbeat_seq,
-		       device_type, linked_peer_id
+		       device_type, linked_peer_id, display_name
 		FROM peers WHERE id = $2 FOR UPDATE`, newID, oldID)
 	if err != nil {
 		return fmt.Errorf("db: ChangePeerID insert: %w", err)

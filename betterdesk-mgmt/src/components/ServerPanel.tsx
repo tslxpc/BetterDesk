@@ -1,113 +1,66 @@
 /**
- * ServerPanel — server management with tabs: Health, Clients, Operators, API Keys, Audit
+ * ServerPanel — server management with tabs: Health, Clients, Operators, Audit
  *
- * Uses Tauri IPC commands (server_get_*) which proxy to Go server via JWT.
+ * Uses api.ts session-cookie requests (via api_proxy IPC) for all data.
+ * No Bearer tokens needed — the session cookie from login is sufficient.
  */
 import { createSignal, createResource, Show, For, Switch, Match } from 'solid-js';
 import { t } from '../lib/i18n';
 import { toastSuccess, toastError } from '../stores/toast';
+import {
+    getServerHealth, getServerStatus, getServerBandwidth,
+    getDevices, getUsers, getAuditLog,
+    banDevice,
+    type Device, type PanelUser, type AuditLogEntry,
+} from '../lib/api';
 
-type Tab = 'health' | 'clients' | 'operators' | 'keys' | 'audit';
-
-interface HealthData {
-    uptime?: number;
-    version?: string;
-    peers_online?: number;
-    peers_total?: number;
-    relay_sessions?: number;
-    goroutines?: number;
-    memory_mb?: number;
-}
-
-interface Client {
-    id: string;
-    ip?: string;
-    protocol?: string;
-    connected_at?: string;
-    last_seen?: string;
-}
-
-interface Operator {
-    id?: number;
-    username: string;
-    role: string;
-    last_login?: string;
-}
-
-interface ApiKey {
-    id?: number;
-    name: string;
-    key_prefix?: string;
-    created_at?: string;
-    last_used?: string;
-}
-
-interface AuditEntry {
-    id?: number;
-    action: string;
-    actor?: string;
-    details?: string;
-    ip?: string;
-    created_at?: string;
-}
-
-async function invokeCmd<T>(cmd: string, args?: Record<string, unknown>): Promise<T> {
-    const { invoke } = await import('@tauri-apps/api/core');
-    return invoke<T>(cmd, args);
-}
+type Tab = 'health' | 'clients' | 'operators' | 'audit';
 
 export default function ServerPanel() {
     const [tab, setTab] = createSignal<Tab>('health');
 
-    // Resources (lazy-loaded per tab)
+    // Health tab: combined stats + server status + bandwidth
     const [health, { refetch: refetchHealth }] = createResource(
         () => tab() === 'health',
-        async (active) => active ? invokeCmd<HealthData>('server_get_health') : null
+        async (active) => {
+            if (!active) return null;
+            const [stats, status, bandwidth] = await Promise.all([
+                getServerHealth(),
+                getServerStatus(),
+                getServerBandwidth(),
+            ]);
+            return { stats, status, bandwidth };
+        }
     );
+
+    // Clients tab: online devices
     const [clients, { refetch: refetchClients }] = createResource(
         () => tab() === 'clients',
-        async (active) => active ? invokeCmd<Client[]>('server_get_clients') : []
+        async (active) => {
+            if (!active) return [];
+            const devices = await getDevices();
+            return devices.filter(d => d.online || d.status === 'online');
+        }
     );
+
+    // Operators tab: panel users
     const [operators] = createResource(
         () => tab() === 'operators',
-        async (active) => active ? invokeCmd<Operator[]>('server_get_operators') : []
+        async (active) => active ? getUsers() : []
     );
-    const [keys, { refetch: refetchKeys }] = createResource(
-        () => tab() === 'keys',
-        async (active) => active ? invokeCmd<ApiKey[]>('server_get_api_keys') : []
-    );
-    const [audit] = createResource(
+
+    // Audit tab: recent audit log
+    const [audit, { refetch: refetchAudit }] = createResource(
         () => tab() === 'audit',
-        async (active) => active ? invokeCmd<AuditEntry[]>('server_get_audit') : []
+        async (active) => active ? getAuditLog(100) : []
     );
 
-    async function disconnectClient(id: string) {
-        try {
-            await invokeCmd('server_disconnect_client', { clientId: id });
-            toastSuccess(t('server.client_disconnected'));
-            refetchClients();
-        } catch {
-            toastError(t('server.action_failed'));
-        }
-    }
-
-    async function banClient(id: string) {
+    async function doBan(id: string) {
         if (!confirm(t('server.confirm_ban'))) return;
         try {
-            await invokeCmd('server_ban_client', { clientId: id });
+            await banDevice(id);
             toastSuccess(t('server.client_banned'));
             refetchClients();
-        } catch {
-            toastError(t('server.action_failed'));
-        }
-    }
-
-    async function revokeKey(keyId: string) {
-        if (!confirm(t('server.confirm_revoke_key'))) return;
-        try {
-            await invokeCmd('server_revoke_api_key', { keyId });
-            toastSuccess(t('server.key_revoked'));
-            refetchKeys();
         } catch {
             toastError(t('server.action_failed'));
         }
@@ -132,7 +85,6 @@ export default function ServerPanel() {
         { id: 'health', icon: 'monitor_heart', labelKey: 'server.tab_health' },
         { id: 'clients', icon: 'people', labelKey: 'server.tab_clients' },
         { id: 'operators', icon: 'admin_panel_settings', labelKey: 'server.tab_operators' },
-        { id: 'keys', icon: 'key', labelKey: 'server.tab_keys' },
         { id: 'audit', icon: 'history', labelKey: 'server.tab_audit' },
     ];
 
@@ -164,26 +116,45 @@ export default function ServerPanel() {
                             </button>
                         </div>
                         <Show when={health()} fallback={<div class="loading-center"><div class="spinner" /></div>}>
-                            {(h) => (
-                                <div class="stat-grid-4">
-                                    <div class="stat-card">
-                                        <div class="stat-icon green"><span class="material-symbols-rounded">timer</span></div>
-                                        <div class="stat-info"><span class="stat-value">{formatUptime(h()?.uptime)}</span><span class="stat-label">{t('server.uptime')}</span></div>
+                            {(h) => {
+                                const stats = h().stats;
+                                const status = h().status;
+                                const bw = h().bandwidth;
+                                return (
+                                    <div class="stat-grid-4">
+                                        <div class="stat-card">
+                                            <div class={`stat-icon ${stats.status === 'ok' ? 'green' : 'red'}`}>
+                                                <span class="material-symbols-rounded">{stats.status === 'ok' ? 'check_circle' : 'error'}</span>
+                                            </div>
+                                            <div class="stat-info">
+                                                <span class="stat-value">{stats.status === 'ok' ? 'Online' : stats.status}</span>
+                                                <span class="stat-label">{t('server.uptime')}</span>
+                                            </div>
+                                        </div>
+                                        <div class="stat-card">
+                                            <div class="stat-icon blue"><span class="material-symbols-rounded">devices</span></div>
+                                            <div class="stat-info">
+                                                <span class="stat-value">{stats.online_count} / {stats.total_count}</span>
+                                                <span class="stat-label">{t('server.peers_online')}</span>
+                                            </div>
+                                        </div>
+                                        <div class="stat-card">
+                                            <div class="stat-icon green"><span class="material-symbols-rounded">timer</span></div>
+                                            <div class="stat-info">
+                                                <span class="stat-value">{formatUptime(status.uptime)}</span>
+                                                <span class="stat-label">{t('server.uptime')}</span>
+                                            </div>
+                                        </div>
+                                        <div class="stat-card">
+                                            <div class="stat-icon orange"><span class="material-symbols-rounded">swap_horiz</span></div>
+                                            <div class="stat-info">
+                                                <span class="stat-value">{(bw as Record<string, unknown>).relay_active ?? 0}</span>
+                                                <span class="stat-label">{t('server.relay_sessions')}</span>
+                                            </div>
+                                        </div>
                                     </div>
-                                    <div class="stat-card">
-                                        <div class="stat-icon blue"><span class="material-symbols-rounded">devices</span></div>
-                                        <div class="stat-info"><span class="stat-value">{h()?.peers_online ?? 0}</span><span class="stat-label">{t('server.peers_online')}</span></div>
-                                    </div>
-                                    <div class="stat-card">
-                                        <div class="stat-icon orange"><span class="material-symbols-rounded">swap_horiz</span></div>
-                                        <div class="stat-info"><span class="stat-value">{h()?.relay_sessions ?? 0}</span><span class="stat-label">{t('server.relay_sessions')}</span></div>
-                                    </div>
-                                    <div class="stat-card">
-                                        <div class="stat-icon blue"><span class="material-symbols-rounded">memory</span></div>
-                                        <div class="stat-info"><span class="stat-value">{h()?.memory_mb ?? 0} MB</span><span class="stat-label">{t('server.memory')}</span></div>
-                                    </div>
-                                </div>
-                            )}
+                                );
+                            }}
                         </Show>
                     </div>
                 </Match>
@@ -203,22 +174,19 @@ export default function ServerPanel() {
                             }>
                                 <table class="device-table">
                                     <thead><tr>
-                                        <th>ID</th><th>IP</th><th>{t('server.protocol')}</th><th>{t('server.connected_at')}</th><th style="width: 80px;"></th>
+                                        <th>ID</th><th>{t('server.hostname')}</th><th>{t('server.platform')}</th><th>{t('server.last_online')}</th><th style="width: 80px;"></th>
                                     </tr></thead>
                                     <tbody>
                                         <For each={clients() || []}>
-                                            {(c) => (
+                                            {(c: Device) => (
                                                 <tr>
                                                     <td style="font-family: var(--font-mono);">{c.id}</td>
-                                                    <td>{c.ip || '—'}</td>
-                                                    <td>{c.protocol || '—'}</td>
-                                                    <td>{formatTime(c.connected_at)}</td>
+                                                    <td>{c.hostname || '—'}</td>
+                                                    <td>{c.platform || '—'}</td>
+                                                    <td>{formatTime(c.last_online)}</td>
                                                     <td>
                                                         <div style="display: flex; gap: 4px;">
-                                                            <button class="btn-icon" title={t('server.disconnect')} onClick={() => disconnectClient(c.id)}>
-                                                                <span class="material-symbols-rounded" style="font-size: 16px;">link_off</span>
-                                                            </button>
-                                                            <button class="btn-icon" title={t('server.ban')} onClick={() => banClient(c.id)} style="color: var(--accent-red);">
+                                                            <button class="btn-icon" title={t('server.ban')} onClick={() => doBan(c.id)} style="color: var(--accent-red);">
                                                                 <span class="material-symbols-rounded" style="font-size: 16px;">block</span>
                                                             </button>
                                                         </div>
@@ -243,54 +211,19 @@ export default function ServerPanel() {
                             }>
                                 <table class="device-table">
                                     <thead><tr>
-                                        <th>{t('server.username')}</th><th>{t('server.role')}</th><th>{t('server.last_login')}</th>
+                                        <th>{t('server.username')}</th><th>{t('server.role')}</th><th>{t('server.last_login')}</th><th>2FA</th>
                                     </tr></thead>
                                     <tbody>
                                         <For each={operators() || []}>
-                                            {(op) => (
+                                            {(op: PanelUser) => (
                                                 <tr>
                                                     <td>{op.username}</td>
                                                     <td><span class={`role-badge ${op.role}`}>{op.role}</span></td>
                                                     <td>{formatTime(op.last_login)}</td>
-                                                </tr>
-                                            )}
-                                        </For>
-                                    </tbody>
-                                </table>
-                            </Show>
-                        </Show>
-                    </div>
-                </Match>
-
-                {/* API Keys */}
-                <Match when={tab() === 'keys'}>
-                    <div class="panel-card">
-                        <div class="panel-card-header">
-                            <span>{t('server.tab_keys')}</span>
-                            <button class="btn-icon" onClick={() => refetchKeys()} title={t('common.retry')}>
-                                <span class="material-symbols-rounded">refresh</span>
-                            </button>
-                        </div>
-                        <Show when={!keys.loading} fallback={<div class="loading-center"><div class="spinner" /></div>}>
-                            <Show when={(keys() || []).length > 0} fallback={
-                                <div class="empty-state"><span class="material-symbols-rounded">key_off</span><div class="empty-state-text">{t('server.no_keys')}</div></div>
-                            }>
-                                <table class="device-table">
-                                    <thead><tr>
-                                        <th>{t('server.key_name')}</th><th>{t('server.key_prefix')}</th><th>{t('server.created')}</th><th>{t('server.last_used')}</th><th style="width: 48px;"></th>
-                                    </tr></thead>
-                                    <tbody>
-                                        <For each={keys() || []}>
-                                            {(k) => (
-                                                <tr>
-                                                    <td>{k.name}</td>
-                                                    <td style="font-family: var(--font-mono);">{k.key_prefix || '****'}...</td>
-                                                    <td>{formatTime(k.created_at)}</td>
-                                                    <td>{formatTime(k.last_used)}</td>
                                                     <td>
-                                                        <button class="btn-icon" title={t('server.revoke')} onClick={() => revokeKey(String(k.id || k.name))} style="color: var(--accent-red);">
-                                                            <span class="material-symbols-rounded" style="font-size: 16px;">delete</span>
-                                                        </button>
+                                                        <span class="material-symbols-rounded" style={`font-size: 16px; color: ${op.totp_enabled ? 'var(--accent-green)' : 'var(--text-tertiary)'};`}>
+                                                            {op.totp_enabled ? 'verified_user' : 'no_encryption'}
+                                                        </span>
                                                     </td>
                                                 </tr>
                                             )}
@@ -305,7 +238,12 @@ export default function ServerPanel() {
                 {/* Audit */}
                 <Match when={tab() === 'audit'}>
                     <div class="panel-card">
-                        <div class="panel-card-header"><span>{t('server.tab_audit')}</span></div>
+                        <div class="panel-card-header">
+                            <span>{t('server.tab_audit')}</span>
+                            <button class="btn-icon" onClick={() => refetchAudit()} title={t('common.retry')}>
+                                <span class="material-symbols-rounded">refresh</span>
+                            </button>
+                        </div>
                         <Show when={!audit.loading} fallback={<div class="loading-center"><div class="spinner" /></div>}>
                             <Show when={(audit() || []).length > 0} fallback={
                                 <div class="empty-state"><span class="material-symbols-rounded">history</span><div class="empty-state-text">{t('server.no_audit')}</div></div>
@@ -316,7 +254,7 @@ export default function ServerPanel() {
                                     </tr></thead>
                                     <tbody>
                                         <For each={audit() || []}>
-                                            {(entry) => (
+                                            {(entry: AuditLogEntry) => (
                                                 <tr>
                                                     <td><span class={`action-badge action-${actionColor(entry.action)}`}>{entry.action}</span></td>
                                                     <td>{entry.actor || '—'}</td>

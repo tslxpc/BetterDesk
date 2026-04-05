@@ -75,6 +75,10 @@
     "status_offline": "Offline",
     "no_devices": "No devices found",
     "loading": "Loading devices...",
+    "count": {
+      "one": "{{count}} device",
+      "other": "{{count}} devices"
+    },
     "actions": "Actions",
     "action_lock": "Lock screen",
     "action_restart": "Restart",
@@ -98,7 +102,12 @@
     "connect_failed": "Connection failed",
     "retry": "Retry",
     "refresh": "Refresh",
-    "ctrl_alt_del": "Ctrl+Alt+Del"
+    "ctrl_alt_del": "Ctrl+Alt+Del",
+    "enter_password": "Enter device password",
+    "password_placeholder": "Password",
+    "connect_btn": "Connect",
+    "auth_failed": "Authentication failed",
+    "starting_session": "Starting remote session..."
   },
   "chat": {
     "title": "Chat",
@@ -108,7 +117,11 @@
     "contacts": "Contacts",
     "load_error": "Failed to load contacts",
     "no_contacts": "No online devices",
-    "select_contact": "Select a contact to start chatting"
+    "select_contact": "Select a contact to start chatting",
+    "send_error": "Failed to send message",
+    "connection_error": "Failed to connect to chat",
+    "reconnect": "Reconnect",
+    "is_typing": "is typing..."
   },
   "settings": {
     "title": "Settings",
@@ -154,7 +167,11 @@
     "confirm": "Confirm",
     "yes": "Yes",
     "no": "No",
-    "save": "Save"
+    "save": "Save",
+    "details": "Details"
+  },
+  "connection": {
+    "connected_to": "Connected to {{name}}"
   },
   "server": {
     "title": "Server Management",
@@ -167,6 +184,9 @@
     "peers_online": "Peers Online",
     "relay_sessions": "Relay Sessions",
     "memory": "Memory",
+    "hostname": "Hostname",
+    "platform": "Platform",
+    "last_online": "Last Online",
     "no_clients": "No connected clients",
     "protocol": "Protocol",
     "connected_at": "Connected At",

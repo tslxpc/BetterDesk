@@ -283,6 +283,8 @@ func (s *SQLiteDB) Migrate() error {
 		// peers: CDAP device type and linked peer (added in v2.5.0)
 		{"peers", "device_type", `ALTER TABLE peers ADD COLUMN device_type TEXT DEFAULT ''`},
 		{"peers", "linked_peer_id", `ALTER TABLE peers ADD COLUMN linked_peer_id TEXT DEFAULT ''`},
+		// peers: display_name alias (added in v2.6.0)
+		{"peers", "display_name", `ALTER TABLE peers ADD COLUMN display_name TEXT DEFAULT ''`},
 	}
 
 	for _, m := range columnMigrations {
@@ -365,14 +367,14 @@ func (s *SQLiteDB) GetPeer(id string) (*Peer, error) {
 		       status, nat_type, last_online, created_at,
 		       disabled, banned, ban_reason, banned_at,
 		       soft_deleted, deleted_at, note, tags, heartbeat_seq,
-		       device_type, linked_peer_id
+		       device_type, linked_peer_id, display_name
 		FROM peers WHERE id = ?`, id).Scan(
 		&p.ID, &p.UUID, &p.PK, &p.IP, &p.User, &p.Hostname,
 		&p.OS, &p.Version, &p.Status, &p.NATType,
 		&lastOnline, &createdAt, &p.Disabled, &p.Banned,
 		&p.BanReason, &bannedAt, &p.SoftDeleted, &deletedAt,
 		&p.Note, &p.Tags, &p.HeartbeatSeq,
-		&p.DeviceType, &p.LinkedPeerID,
+		&p.DeviceType, &p.LinkedPeerID, &p.DisplayName,
 	)
 	if err == sql.ErrNoRows {
 		return nil, nil
@@ -468,7 +470,7 @@ func (s *SQLiteDB) ListPeers(includeDeleted bool) ([]*Peer, error) {
 	                  status, nat_type, last_online, created_at,
 	                  disabled, banned, ban_reason, banned_at,
 	                  soft_deleted, deleted_at, note, tags, heartbeat_seq,
-	                  device_type, linked_peer_id
+	                  device_type, linked_peer_id, display_name
 	           FROM peers`
 	if !includeDeleted {
 		query += ` WHERE soft_deleted = 0`
@@ -491,7 +493,7 @@ func (s *SQLiteDB) ListPeers(includeDeleted bool) ([]*Peer, error) {
 			&lastOnline, &createdAt, &p.Disabled, &p.Banned,
 			&p.BanReason, &bannedAt, &p.SoftDeleted, &deletedAt,
 			&p.Note, &p.Tags, &p.HeartbeatSeq,
-			&p.DeviceType, &p.LinkedPeerID,
+			&p.DeviceType, &p.LinkedPeerID, &p.DisplayName,
 		); err != nil {
 			return nil, fmt.Errorf("db: ListPeers scan: %w", err)
 		}
@@ -612,14 +614,14 @@ func (s *SQLiteDB) IsPeerSoftDeleted(id string) (bool, error) {
 	return deleted, err
 }
 
-// UpdatePeerFields updates specific peer fields (note, user, tags, device_type, linked_peer_id).
+// UpdatePeerFields updates specific peer fields (note, user, tags, device_type, linked_peer_id, display_name).
 // Only provided keys are updated; others are left unchanged.
 // Allowed keys: "note", "user", "tags", "device_type", "linked_peer_id".
 func (s *SQLiteDB) UpdatePeerFields(id string, fields map[string]string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	allowed := map[string]bool{"note": true, "user": true, "tags": true, "device_type": true, "linked_peer_id": true}
+	allowed := map[string]bool{"note": true, "user": true, "tags": true, "device_type": true, "linked_peer_id": true, "display_name": true}
 	setClauses := []string{}
 	args := []interface{}{}
 	for k, v := range fields {
@@ -664,12 +666,12 @@ func (s *SQLiteDB) ChangePeerID(oldID, newID string) error {
 		                    status, nat_type, last_online, created_at,
 		                    disabled, banned, ban_reason, banned_at,
 		                    soft_deleted, deleted_at, note, tags, heartbeat_seq,
-		                    device_type, linked_peer_id)
+		                    device_type, linked_peer_id, display_name)
 		SELECT ?, uuid, pk, ip, user, hostname, os, version,
 		       status, nat_type, last_online, created_at,
 		       disabled, banned, ban_reason, banned_at,
 		       soft_deleted, deleted_at, note, tags, heartbeat_seq,
-		       device_type, linked_peer_id
+		       device_type, linked_peer_id, display_name
 		FROM peers WHERE id = ?`, newID, oldID)
 	if err != nil {
 		return fmt.Errorf("db: ChangePeerID insert: %w", err)
@@ -725,7 +727,7 @@ func (s *SQLiteDB) GetLinkedPeers(id string) ([]*Peer, error) {
 		SELECT id, uuid, pk, ip, user, hostname, os, version, status, nat_type,
 		       last_online, created_at, disabled, banned, ban_reason, banned_at,
 		       soft_deleted, deleted_at, note, tags, heartbeat_seq,
-		       device_type, linked_peer_id
+		       device_type, linked_peer_id, display_name
 		FROM peers
 		WHERE soft_deleted = 0 AND linked_peer_id = ?
 		ORDER BY id`, id)
@@ -744,7 +746,7 @@ func (s *SQLiteDB) GetLinkedPeers(id string) ([]*Peer, error) {
 			&lastOnline, &createdAt, &p.Disabled, &p.Banned,
 			&p.BanReason, &bannedAt, &p.SoftDeleted, &deletedAt,
 			&p.Note, &p.Tags, &p.HeartbeatSeq,
-			&p.DeviceType, &p.LinkedPeerID,
+			&p.DeviceType, &p.LinkedPeerID, &p.DisplayName,
 		); err != nil {
 			return nil, fmt.Errorf("db: GetLinkedPeers scan: %w", err)
 		}
@@ -843,7 +845,7 @@ func (s *SQLiteDB) ListPeersByTag(tag string) ([]*Peer, error) {
 		SELECT id, uuid, pk, ip, user, hostname, os, version, status, nat_type,
 		       last_online, created_at, disabled, banned, ban_reason, banned_at,
 		       soft_deleted, deleted_at, note, tags, heartbeat_seq,
-		       device_type, linked_peer_id
+		       device_type, linked_peer_id, display_name
 		FROM peers
 		WHERE soft_deleted = 0 AND tags LIKE ? ESCAPE '\'
 		ORDER BY id`, pattern)
@@ -862,7 +864,7 @@ func (s *SQLiteDB) ListPeersByTag(tag string) ([]*Peer, error) {
 			&lastOnline, &createdAt, &p.Disabled, &p.Banned,
 			&p.BanReason, &bannedAt, &p.SoftDeleted, &deletedAt,
 			&p.Note, &p.Tags, &p.HeartbeatSeq,
-			&p.DeviceType, &p.LinkedPeerID,
+			&p.DeviceType, &p.LinkedPeerID, &p.DisplayName,
 		); err != nil {
 			return nil, fmt.Errorf("db: ListPeersByTag scan: %w", err)
 		}

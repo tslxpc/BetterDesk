@@ -13,14 +13,27 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - **Client Organization Login** — `OrgLoginPanel.tsx` with server address + username/password
 - **mDNS/DNS-SD Discovery** — Auto-discover BetterDesk servers on LAN (`_betterdesk._tcp`)
 - **Desktop Widget UI Overhaul** — New window management, taskbar redesign, wallpaper picker with tabs
+- **Chat 2.0** — Operator↔device group chat, E2E encryption (ECDH + AES-256-GCM), read receipts, file sharing, typing indicators
+- **Web Remote File Transfer** — Browser-based bidirectional file transfer with drag-and-drop, progress tracking, resume, history
+- **Security Hardening** — Organization-scoped policies (password, session, IP whitelist, device enrollment, 2FA, data retention)
+- **Fleet Management** — Device groups with tags, batch operations (restart, update, lock, wipe), cascading deletion
+- **Scaling Infrastructure** — Load balancer health checks, horizontal scaling config, region-aware relay selection
+- **Cross-Platform Support** — Platform detection, feature matrix, capabilities API per OS/browser
+- **Security Audit Module** — Built-in scanner with 8 check categories, compliance scoring, scheduled scans, PDF/JSON/CSV reports
+- **i18n Expansion** — 25+ languages (auto-discovery), Language Management admin page, `i18n:check` script with `--fix` mode
+- **Device Resource Control** — USB, optical drive, monitor, disk, quota policy management per device
+- **CDAP Documentation** — Protocol spec, agent guide, bridge guide, API reference (5 docs)
+- **SDK Documentation** — Python + Node.js SDK reference, integration examples, studio guide (5 docs)
+- **Pre-Release Checklist** — 8-section validation checklist for releases
+- **Docker SBOM + Trivy** — SBOM generation and vulnerability scanning in CI
 - **6 New Console Languages** — German, Spanish, French, Italian, Dutch, Portuguese
-- **3 High-Priority Languages** — Japanese, Korean, Russian
+- **3 High-Priority Languages** — Japanese, Korean, Chinese (Simplified)
+- **12 Additional Languages** — Arabic, Hebrew, Ukrainian, Turkish, Hindi, Swedish, Norwegian, Danish, Finnish, Czech, Hungarian, Romanian, Thai, Vietnamese, Indonesian
 - **Desktop Client i18n Framework** — `src/lib/i18n.ts` with `t()` function, plural forms, locale detection
 - **NSIS Multilingual Installer** — 12 languages in NSIS language selector
 - **Light Theme** — `themes/light.json` with WCAG-compliant light colors
 - **Theme API** — `GET /api/settings/themes`, `POST /api/settings/themes/:id/apply`
 - **Page Transition Animations** — `transitions.css` with page enter/exit, stagger, skeleton loading
-- **i18n Check Script** — `npm run i18n:check` / `npm run i18n:fix` for language coverage auditing
 - **GitHub Actions: Client Releases** — Multi-platform Tauri builds (Windows/Linux/macOS)
 - **GitHub Actions: Server Releases** — Go cross-compile (linux-amd64/arm64, windows-amd64)
 - **Security Documentation** — THREAT_MODEL.md, ENCRYPTION_SPEC.md, COMPLIANCE.md, AUDIT_LOG.md

@@ -26,6 +26,7 @@ type Peer struct {
 	DeletedAt    *time.Time `json:"deleted_at,omitempty"`
 	Note         string     `json:"note,omitempty"`
 	Tags         string     `json:"tags,omitempty"`
+	DisplayName  string     `json:"display_name"`             // Admin-set alias (overrides hostname in UI)
 	DeviceType   string     `json:"device_type,omitempty"`    // CDAP: desktop, mobile, headless, kiosk, etc.
 	LinkedPeerID string     `json:"linked_peer_id,omitempty"` // CDAP: paired device (e.g., mobile→desktop)
 	HeartbeatSeq int64      `json:"-"`                        // internal heartbeat counter
@@ -130,12 +131,12 @@ type ChatGroup struct {
 
 // ChatContact represents a peer visible for chat (derived from peers table).
 type ChatContact struct {
-	ID         string `json:"id"`
-	Name       string `json:"name"`
-	Hostname   string `json:"hostname"`
-	Online     bool   `json:"online"`
-	LastSeen   int64  `json:"last_seen"`
-	Unread     int    `json:"unread"`
+	ID          string `json:"id"`
+	Name        string `json:"name"`
+	Hostname    string `json:"hostname"`
+	Online      bool   `json:"online"`
+	LastSeen    int64  `json:"last_seen"`
+	Unread      int    `json:"unread"`
 	AvatarColor string `json:"avatar_color"`
 }
 
@@ -195,18 +196,18 @@ type OrgSetting struct {
 
 // AccessPolicy controls unattended access for a peer device.
 type AccessPolicy struct {
-	PeerID              string `json:"peer_id"`
-	UnattendedEnabled   bool   `json:"unattended_enabled"`          // Whether unattended access is allowed
-	PasswordHash        string `json:"-"`                           // bcrypt hash of unattended password
-	PasswordSet         bool   `json:"password_set"`                // Whether a password is configured (computed, not stored)
-	ScheduleEnabled     bool   `json:"schedule_enabled"`            // Whether access schedule is active
-	ScheduleDays        string `json:"schedule_days,omitempty"`     // Comma-separated days: "mon,tue,wed,thu,fri"
-	ScheduleStartTime   string `json:"schedule_start_time,omitempty"` // HH:MM (24h format)
-	ScheduleEndTime     string `json:"schedule_end_time,omitempty"`   // HH:MM (24h format)
-	ScheduleTimezone    string `json:"schedule_timezone,omitempty"`   // IANA timezone (e.g. "Europe/Warsaw")
-	AllowedOperators    string `json:"allowed_operators,omitempty"` // Comma-separated operator usernames (empty = all)
-	UpdatedAt           string `json:"updated_at,omitempty"`
-	UpdatedBy           string `json:"updated_by,omitempty"`        // Admin/operator who last changed the policy
+	PeerID            string `json:"peer_id"`
+	UnattendedEnabled bool   `json:"unattended_enabled"`            // Whether unattended access is allowed
+	PasswordHash      string `json:"-"`                             // bcrypt hash of unattended password
+	PasswordSet       bool   `json:"password_set"`                  // Whether a password is configured (computed, not stored)
+	ScheduleEnabled   bool   `json:"schedule_enabled"`              // Whether access schedule is active
+	ScheduleDays      string `json:"schedule_days,omitempty"`       // Comma-separated days: "mon,tue,wed,thu,fri"
+	ScheduleStartTime string `json:"schedule_start_time,omitempty"` // HH:MM (24h format)
+	ScheduleEndTime   string `json:"schedule_end_time,omitempty"`   // HH:MM (24h format)
+	ScheduleTimezone  string `json:"schedule_timezone,omitempty"`   // IANA timezone (e.g. "Europe/Warsaw")
+	AllowedOperators  string `json:"allowed_operators,omitempty"`   // Comma-separated operator usernames (empty = all)
+	UpdatedAt         string `json:"updated_at,omitempty"`
+	UpdatedBy         string `json:"updated_by,omitempty"` // Admin/operator who last changed the policy
 }
 
 // OrgRole constants
@@ -306,11 +307,11 @@ type Database interface {
 	CleanupOldMetrics(maxAge time.Duration) (int64, error) // Delete metrics older than maxAge
 
 	// Chat Messages
-	SaveChatMessage(msg *ChatMessage) (int64, error)         // Returns inserted ID
+	SaveChatMessage(msg *ChatMessage) (int64, error) // Returns inserted ID
 	GetChatHistory(conversationID string, limit int) ([]*ChatMessage, error)
 	GetChatHistoryBefore(conversationID string, beforeID int64, limit int) ([]*ChatMessage, error)
-	MarkChatRead(conversationID, readerID string) error       // Mark all messages as read for reader
-	GetUnreadCount(deviceID string) (int, error)              // Total unread messages for device
+	MarkChatRead(conversationID, readerID string) error // Mark all messages as read for reader
+	GetUnreadCount(deviceID string) (int, error)        // Total unread messages for device
 	DeleteChatHistory(conversationID string) error
 
 	// Chat Groups

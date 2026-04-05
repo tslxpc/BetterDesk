@@ -48,11 +48,9 @@ interface DGStats {
 
 async function invokeCmd<T>(cmd: string, args?: Record<string, unknown>): Promise<T> {
     const { invoke } = await import('@tauri-apps/api/core');
-    return invoke<T>(cmd, args);
-}
-
-function getToken(): string {
-    try { return localStorage.getItem('bd_access_token') || ''; } catch { return ''; }
+    // DataGuard IPC commands require access_token param for operator_json_request
+    const token = localStorage.getItem('bd_access_token') || '';
+    return invoke<T>(cmd, { accessToken: token, ...args });
 }
 
 export default function DataGuardPanel() {
@@ -63,7 +61,7 @@ export default function DataGuardPanel() {
         async (active) => {
             if (!active) return [];
             try {
-                const res = await invokeCmd<any>('operator_dataguard_get_policies', { accessToken: getToken() });
+                const res = await invokeCmd<any>('operator_dataguard_get_policies');
                 return (res?.policies || res || []) as Policy[];
             } catch { return []; }
         }
@@ -74,7 +72,7 @@ export default function DataGuardPanel() {
         async (active) => {
             if (!active) return [];
             try {
-                const res = await invokeCmd<any>('operator_dataguard_get_events', { accessToken: getToken() });
+                const res = await invokeCmd<any>('operator_dataguard_get_events');
                 return (res?.events || res || []) as DGEvent[];
             } catch { return []; }
         }
@@ -85,7 +83,7 @@ export default function DataGuardPanel() {
         async (active) => {
             if (!active) return null;
             try {
-                const res = await invokeCmd<any>('operator_dataguard_get_stats', { accessToken: getToken() });
+                const res = await invokeCmd<any>('operator_dataguard_get_stats');
                 return (res || {}) as DGStats;
             } catch { return null; }
         }
@@ -94,7 +92,6 @@ export default function DataGuardPanel() {
     async function togglePolicy(policy: Policy) {
         try {
             await invokeCmd('operator_dataguard_save_policy', {
-                accessToken: getToken(),
                 policy: { ...policy, enabled: !policy.enabled },
             });
             toastSuccess(t('dataguard.policy_updated'));
@@ -106,7 +103,6 @@ export default function DataGuardPanel() {
         if (!confirm(t('dataguard.confirm_delete'))) return;
         try {
             await invokeCmd('operator_dataguard_delete_policy', {
-                accessToken: getToken(),
                 policyId: id,
             });
             toastSuccess(t('dataguard.policy_deleted'));

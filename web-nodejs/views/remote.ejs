@@ -125,6 +125,11 @@
             <span class="material-icons">chat</span>
         </button>
 
+        <!-- File Transfer -->
+        <button class="toolbar-btn" id="btn-file-transfer" title="${_('remote.file_transfer') || 'File Transfer'}">
+            <span class="material-icons">folder_open</span>
+        </button>
+
         <!-- Recording -->
         <button class="toolbar-btn" id="btn-record" title="${_('remote.record')}">
             <span class="material-icons">fiber_manual_record</span>
@@ -223,6 +228,47 @@
                 <input type="text" class="chat-input session-chat-input" placeholder="${_('remote.chat_placeholder')}" />
                 <button class="chat-send session-btn-chat-send"><span class="material-icons">send</span></button>
             </div>
+        </div>
+        <!-- File Transfer Panel -->
+        <div class="file-panel session-file-panel" style="display:none;">
+            <div class="file-panel-header">
+                <span class="material-icons">folder_open</span>
+                <span>${_('remote.file_transfer') || 'File Transfer'}</span>
+                <div class="file-panel-actions">
+                    <button class="file-btn-icon session-file-btn-hidden" title="${_('remote.file_show_hidden') || 'Show Hidden'}">
+                        <span class="material-icons">visibility</span>
+                    </button>
+                    <button class="file-btn-icon session-file-btn-newdir" title="${_('remote.file_new_folder') || 'New Folder'}">
+                        <span class="material-icons">create_new_folder</span>
+                    </button>
+                    <button class="file-btn-icon session-file-btn-upload" title="${_('remote.file_upload') || 'Upload'}">
+                        <span class="material-icons">upload_file</span>
+                    </button>
+                    <button class="file-btn-icon session-file-btn-close">
+                        <span class="material-icons">close</span>
+                    </button>
+                </div>
+            </div>
+            <div class="file-panel-path">
+                <button class="file-btn-icon session-file-btn-up" title="${_('remote.file_parent') || 'Parent Directory'}">
+                    <span class="material-icons">arrow_upward</span>
+                </button>
+                <button class="file-btn-icon session-file-btn-home" title="${_('remote.file_root') || 'Root'}">
+                    <span class="material-icons">home</span>
+                </button>
+                <span class="file-path-text session-file-path-text">/</span>
+            </div>
+            <div class="file-panel-list session-file-list">
+                <div class="file-empty">${_('remote.file_empty') || 'No files'}</div>
+            </div>
+            <div class="file-panel-transfers session-file-transfers" style="display:none;">
+                <div class="file-transfers-header">
+                    <span class="material-icons">swap_vert</span>
+                    <span>${_('remote.file_transfers') || 'Transfers'}</span>
+                </div>
+                <div class="file-transfers-list session-file-transfers-list"></div>
+            </div>
+            <input type="file" class="session-file-upload-input" multiple style="display:none;" />
         </div>
     </div>
 </template>

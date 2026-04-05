@@ -25,8 +25,21 @@ echo ""
 # Ensure data directories exist
 mkdir -p "${DATA_DIR:-/app/data}" 2>/dev/null || true
 
-# Verify SQLite database path is writable (catches :ro volume mounts early)
+# Docker quick-start fix: if DB_PATH is on a read-only volume, relocate to DATA_DIR
 DB_FILE="${DB_PATH:-/opt/rustdesk/db_v2.sqlite3}"
+DB_DIR_CHECK="$(dirname "$DB_FILE")"
+if [ ! -w "$DB_DIR_CHECK" ] && [ -n "${DATA_DIR}" ]; then
+    NEW_DB="${DATA_DIR}/db_v2.sqlite3"
+    echo "  DB path $DB_FILE is read-only, relocating to $NEW_DB"
+    # Copy existing DB from read-only mount if it exists and we don't have one yet
+    if [ -f "$DB_FILE" ] && [ ! -f "$NEW_DB" ]; then
+        cp "$DB_FILE" "$NEW_DB" 2>/dev/null || true
+    fi
+    export DB_PATH="$NEW_DB"
+    DB_FILE="$NEW_DB"
+fi
+
+# Verify SQLite database path is writable (catches :ro volume mounts early)
 DB_DIR="$(dirname "$DB_FILE")"
 if [ "${DB_TYPE:-sqlite}" = "sqlite" ]; then
     if [ -f "$DB_FILE" ] && [ ! -w "$DB_FILE" ]; then

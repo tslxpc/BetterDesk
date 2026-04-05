@@ -402,6 +402,7 @@ function normalisePeer(peer) {
     return {
         id: peer.id || '',
         hostname: peer.hostname || '',
+        display_name: peer.display_name || '',
         username: peer.user || '',
         platform: peer.os || '',
         os: peer.os || '',

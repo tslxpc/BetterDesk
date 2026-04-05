@@ -113,7 +113,7 @@ impl Session {
         let signal_addr = settings.hbbs_address();
 
         // Step 1: Punch hole via signal server
-        info!("Starting punch hole to {}", peer_id);
+        info!("[SESSION] Starting punch hole to {} (server={})", peer_id, signal_addr);
         let result = signal::punch_hole(
             &signal_addr,
             &my_id,
@@ -128,7 +128,7 @@ impl Session {
                 peer_pk,
                 uuid,
             } => {
-                info!("Got relay: {} (uuid={})", relay_server, uuid);
+                info!("[SESSION] Got relay: {} (uuid={})", relay_server, uuid);
 
                 // Step 2: Connect to relay
                 let relay_addr = if relay_server.contains(':') {
@@ -137,9 +137,13 @@ impl Session {
                     format!("{}:21117", relay_server)
                 };
 
+                info!("[SESSION] Relay addr resolved to: {}", relay_addr);
+
                 let (relay_conn, auth_challenge) =
                     RelayConnection::connect(&relay_addr, &my_id, peer_id, &uuid, &peer_pk)
                         .await?;
+
+                info!("[SESSION] Relay connected, state -> Authenticating");
 
                 // Update state to authenticating
                 let mut inner = state.lock().await;
@@ -147,7 +151,7 @@ impl Session {
                 inner.relay = Some(relay_conn);
                 inner.auth_challenge = Some(auth_challenge);
 
-                info!("Relay connected, waiting for authentication");
+                info!("[SESSION] Ready for authentication");
             }
             PunchResult::Direct { .. } => {
                 // Direct UDP connections are not yet supported
@@ -164,6 +168,7 @@ impl Session {
     /// Authenticate with the peer using a password.
     pub async fn authenticate(&self, password: &str) -> Result<()> {
         let mut inner = self.state.lock().await;
+        info!("[SESSION] Authenticate called, current state={}", inner.state);
 
         if inner.state != ConnectionState::Authenticating {
             bail!("Cannot authenticate in state: {}", inner.state);
@@ -175,8 +180,10 @@ impl Session {
             .context("No auth challenge available")?;
 
         let password_hash = hash_password(password, &challenge.salt, &challenge.challenge);
+        info!("[SESSION] Password hashed (salt_len={}, challenge_len={})", challenge.salt.len(), challenge.challenge.len());
 
         let my_id = crate::identity::get_or_create_device_id()?;
+        info!("[SESSION] Sending LoginRequest (my_id={})", my_id);
 
         let relay = inner
             .relay
@@ -187,7 +194,9 @@ impl Session {
         relay.send_login(&my_id, &password_hash).await?;
 
         // Wait for LoginResponse
+        info!("[SESSION] Waiting for LoginResponse...");
         let response = relay.read_message().await?;
+        info!("[SESSION] Got response: {:?}", response.union.as_ref().map(|u| std::mem::discriminant(u)));
 
         match response.union {
             Some(MsgUnion::LoginResponse(lr)) => {
@@ -251,6 +260,16 @@ impl Session {
         // TODO: Build MouseEvent protobuf and send via relay
         debug!("Mouse event: {:?}", event);
         Ok(())
+    }
+
+    /// Take the relay connection out of the session (consumes it).
+    ///
+    /// Used by `start_remote_session` to bridge the relay into `SessionManager`.
+    /// After this call the session enters `Connected` state but no longer owns
+    /// the relay — all I/O goes through the `SessionManager` channels.
+    pub async fn take_relay(&self) -> Option<RelayConnection> {
+        let mut inner = self.state.lock().await;
+        inner.relay.take()
     }
 
     /// Disconnect the session.
