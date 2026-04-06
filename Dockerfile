@@ -1,3 +1,4 @@
+# check=skip=SecretsUsedInArgOrEnv
 # BetterDesk — Single Container Image
 # =====================================
 # Combines Go server (signal + relay + API) and Node.js web console

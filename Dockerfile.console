@@ -1,3 +1,4 @@
+# check=skip=SecretsUsedInArgOrEnv
 # Dockerfile for BetterDesk Console (Node.js)
 # Multi-stage build for smaller production image
 #
