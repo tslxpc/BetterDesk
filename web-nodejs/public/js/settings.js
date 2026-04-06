@@ -955,7 +955,7 @@
     
     // ==================== Self-Update ====================
     
-    let _updateState = { remoteVersion: null, changedFiles: [] };
+    let _updateState = { remoteSHA: null, changedData: null };
     
     function initUpdateSection() {
         const checkBtn = document.getElementById('update-check-btn');
@@ -984,47 +984,33 @@
         try {
             const data = await Utils.api('/api/settings/updates/check');
             
-            if (remoteEl) remoteEl.textContent = 'v' + (data.remoteVersion || '?');
+            // Show commit SHA + message
+            if (remoteEl) {
+                const sha = data.remoteSHA ? data.remoteSHA.slice(0, 7) : '—';
+                remoteEl.textContent = sha;
+                if (data.latestMessage) remoteEl.title = data.latestMessage;
+            }
             if (statusRow) statusRow.style.display = '';
             
-            if (data.updateAvailable) {
-                if (statusBadge) statusBadge.innerHTML = `<span class="badge badge-warning">${_('updates.update_available')}</span>`;
+            if (data.baselineEstablished) {
+                if (statusBadge) statusBadge.innerHTML = `<span class="badge badge-info">${_('updates.baseline_set')}</span>`;
+                if (detailsSection) detailsSection.style.display = 'none';
+                if (installBtn) installBtn.disabled = true;
+            } else if (data.updateAvailable) {
+                const behind = data.commitsBehind > 0 ? ` (${data.commitsBehind} ${_('updates.commits_behind')})` : '';
+                if (statusBadge) statusBadge.innerHTML = `<span class="badge badge-warning">${_('updates.update_available')}${behind}</span>`;
+                
+                _updateState.remoteSHA = data.remoteSHA;
                 
                 // Fetch changed files
-                const localVer = data.localVersion;
-                const remoteVer = data.remoteVersion;
-                _updateState.remoteVersion = remoteVer;
-                
                 try {
-                    const changes = await Utils.api(`/api/settings/updates/changes?local=v${localVer}&remote=v${remoteVer}`);
-                    _updateState.changedFiles = changes.files || [];
-                    
-                    const changelogEl = document.getElementById('update-changelog');
-                    const summaryEl = document.getElementById('update-files-summary');
-                    
-                    if (changelogEl) {
-                        if (data.releaseNotes) {
-                            changelogEl.innerHTML = Utils.escapeHtml(data.releaseNotes).replace(/\n/g, '<br>');
-                        } else {
-                            changelogEl.innerHTML = `<p class="text-muted">${_('updates.no_changelog')}</p>`;
-                        }
-                    }
-                    
-                    if (summaryEl) {
-                        const added = _updateState.changedFiles.filter(f => f.status === 'added').length;
-                        const modified = _updateState.changedFiles.filter(f => f.status === 'modified').length;
-                        const removed = _updateState.changedFiles.filter(f => f.status === 'removed' || f.status === 'renamed').length;
-                        summaryEl.innerHTML = `<p><span class="material-icons" style="font-size:16px;vertical-align:middle;">folder</span> ` +
-                            `${_('updates.files_changed')}: <strong>${_updateState.changedFiles.length}</strong> ` +
-                            `<span class="text-muted">(+${added} / ~${modified} / -${removed})</span></p>`;
-                    }
-                    
+                    const changes = await Utils.api(`/api/settings/updates/changes?sha=${data.remoteSHA}`);
+                    _updateState.changedData = changes;
+                    renderUpdateDetails(data, changes);
                     if (installBtn) installBtn.disabled = false;
-                } catch (e) {
-                    if (detailsSection) {
-                        const changelogEl = document.getElementById('update-changelog');
-                        if (changelogEl) changelogEl.innerHTML = `<p class="text-muted">${_('updates.changes_unavailable')}</p>`;
-                    }
+                } catch (_e) {
+                    const cl = document.getElementById('update-changelog');
+                    if (cl) cl.innerHTML = `<p class="text-muted">${_('updates.changes_unavailable')}</p>`;
                     if (installBtn) installBtn.disabled = false;
                 }
                 
@@ -1042,13 +1028,73 @@
         }
     }
     
+    function renderUpdateDetails(checkData, changesData) {
+        const changelogEl = document.getElementById('update-changelog');
+        const summaryEl = document.getElementById('update-files-summary');
+        
+        // ---- Recent commits ----
+        if (changelogEl) {
+            const commits = changesData.commits || [];
+            if (commits.length > 0) {
+                let html = '<div class="update-commits">';
+                for (const c of commits.slice(0, 20)) {
+                    const d = c.date ? new Date(c.date).toLocaleDateString() : '';
+                    html += `<div class="update-commit-item">
+                        <code class="update-commit-sha">${Utils.escapeHtml(c.sha || '')}</code>
+                        <span class="update-commit-msg">${Utils.escapeHtml(c.message || '')}</span>
+                        <span class="update-commit-meta">${Utils.escapeHtml(c.author || '')} · ${d}</span>
+                    </div>`;
+                }
+                html += '</div>';
+                changelogEl.innerHTML = html;
+            } else {
+                changelogEl.innerHTML = `<p class="text-muted">${_('updates.no_changelog')}</p>`;
+            }
+        }
+        
+        // ---- Component breakdown ----
+        if (summaryEl) {
+            const grouped = changesData.grouped || {};
+            const meta = {
+                console: { icon: 'web',       label: _('updates.component_console'),  auto: true },
+                server:  { icon: 'dns',       label: _('updates.component_server'),   auto: false },
+                agent:   { icon: 'smart_toy', label: _('updates.component_agent'),    auto: false },
+                scripts: { icon: 'terminal',  label: _('updates.component_scripts'),  auto: true },
+                other:   { icon: 'folder',    label: _('updates.component_other'),    auto: false }
+            };
+            
+            let html = '<div class="update-components">';
+            for (const [comp, files] of Object.entries(grouped)) {
+                if (!files || files.length === 0) continue;
+                const m = meta[comp] || meta.other;
+                const badge = m.auto
+                    ? `<span class="badge badge-success badge-sm">${_('updates.auto')}</span>`
+                    : `<span class="badge badge-warning badge-sm">${_('updates.manual')}</span>`;
+                html += `<div class="update-component-row">
+                    <span class="material-icons">${m.icon}</span>
+                    <span class="update-component-label">${m.label}</span>
+                    <span class="update-component-count">${files.length} ${_('updates.files')}</span>
+                    ${badge}
+                </div>`;
+            }
+            html += '</div>';
+            html += `<p class="text-muted" style="margin-top:8px;font-size:12px;">${_('updates.total_files')}: <strong>${changesData.totalFiles || 0}</strong></p>`;
+            
+            if (grouped.server?.length > 0) {
+                html += `<div class="update-warning"><span class="material-icons">warning</span> ${_('updates.server_rebuild_warning')}</div>`;
+            }
+            
+            summaryEl.innerHTML = html;
+        }
+    }
+    
     async function installUpdate() {
         const installBtn = document.getElementById('update-install-btn');
         const progressEl = document.getElementById('update-progress');
         const progressFill = document.getElementById('update-progress-fill');
         const progressText = document.getElementById('update-progress-text');
         
-        if (!_updateState.remoteVersion) {
+        if (!_updateState.remoteSHA) {
             Notifications.error(_('updates.no_version'));
             return;
         }
@@ -1069,21 +1115,27 @@
             const result = await Utils.api('/api/settings/updates/install', {
                 method: 'POST',
                 body: {
-                    remoteVersion: _updateState.remoteVersion,
-                    createBackup: createBackup
+                    remoteSHA: _updateState.remoteSHA,
+                    createBackup,
+                    components: ['console', 'scripts']
                 }
             });
             
             if (progressFill) progressFill.style.width = '100%';
-            if (progressText) progressText.textContent = _('updates.restarting');
             
-            Notifications.success(_('updates.install_success'));
+            let msg = `${_('updates.applied')}: ${result.applied?.length || 0}`;
+            if (result.failed?.length) msg += `, ${_('updates.failed')}: ${result.failed.length}`;
+            if (result.removed?.length) msg += `, ${_('updates.removed')}: ${result.removed.length}`;
             
-            // Server will restart — poll until it comes back
-            setTimeout(() => {
-                pollServerRestart();
-            }, 3000);
-            
+            if (result.needsConsoleRestart) {
+                if (progressText) progressText.textContent = _('updates.restarting');
+                Notifications.success(msg);
+                setTimeout(() => pollServerRestart(), 3000);
+            } else {
+                Notifications.success(_('updates.install_success'));
+                if (progressEl) setTimeout(() => { progressEl.style.display = 'none'; }, 5000);
+                if (installBtn) installBtn.disabled = false;
+            }
         } catch (error) {
             Notifications.error(error.message || _('updates.install_failed'));
             if (progressEl) progressEl.style.display = 'none';
@@ -1124,7 +1176,7 @@
         
         try {
             const data = await Utils.api('/api/settings/updates/backups');
-            const backups = data.backups || [];
+            const backups = Array.isArray(data) ? data : (data.backups || []);
             
             if (!backups.length) {
                 listEl.innerHTML = `<p class="text-muted">${_('updates.no_backups')}</p>`;
@@ -1133,11 +1185,12 @@
             
             let html = '<div class="update-backups">';
             for (const b of backups) {
-                const date = new Date(b.timestamp).toLocaleString();
+                const date = b.timestamp ? new Date(b.timestamp).toLocaleString() : '';
+                const sha = b.sha ? ` · ${Utils.escapeHtml(b.sha)}` : '';
                 html += `<div class="update-backup-item">
                     <div class="update-backup-info">
                         <strong>${Utils.escapeHtml(b.name)}</strong>
-                        <span class="text-muted">${date} &middot; ${b.fileCount} ${_('updates.files')}</span>
+                        <span class="text-muted">${date}${sha} · ${b.fileCount || b.filesBackedUp || 0} ${_('updates.files')}</span>
                     </div>
                     <button class="btn btn-sm btn-outline" data-backup="${Utils.escapeHtml(b.name)}">
                         <span class="material-icons">restore</span> ${_('updates.restore')}

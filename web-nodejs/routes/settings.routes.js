@@ -414,16 +414,16 @@ router.get('/api/settings/updates/check', requireAuth, requireAdmin, async (req,
 });
 
 /**
- * GET /api/settings/updates/changes - Get list of changed files between versions
+ * GET /api/settings/updates/changes - Get list of changed files between local SHA and remote
  */
 router.get('/api/settings/updates/changes', requireAuth, requireAdmin, async (req, res) => {
     try {
-        const { local, remote } = req.query;
-        if (!local || !remote) {
-            return res.status(400).json({ success: false, error: 'local and remote version params required' });
+        const { sha } = req.query;
+        if (!sha || !/^[0-9a-f]{7,40}$/i.test(sha)) {
+            return res.status(400).json({ success: false, error: 'Valid SHA parameter required' });
         }
-        const files = await updateService.getChangedFiles(local, remote);
-        res.json({ success: true, data: { files, total: files.length } });
+        const result = await updateService.getChangedFiles(sha);
+        res.json({ success: true, data: result });
     } catch (err) {
         console.error('Get changes error:', err);
         res.status(500).json({ success: false, error: 'Failed to get changed files: ' + err.message });
@@ -432,55 +432,49 @@ router.get('/api/settings/updates/changes', requireAuth, requireAdmin, async (re
 
 /**
  * POST /api/settings/updates/install - Apply the update
- * Body: { remoteVersion, createBackup: true/false }
+ * Body: { remoteSHA, createBackup: true/false, components: ['console','scripts'] }
  */
 router.post('/api/settings/updates/install', requireAuth, requireAdmin, async (req, res) => {
     try {
-        const { remoteVersion, createBackup } = req.body;
-        if (!remoteVersion || typeof remoteVersion !== 'string') {
-            return res.status(400).json({ success: false, error: 'remoteVersion is required' });
+        const { remoteSHA, createBackup, components } = req.body;
+        if (!remoteSHA || !/^[0-9a-f]{7,40}$/i.test(remoteSHA)) {
+            return res.status(400).json({ success: false, error: 'Valid remoteSHA is required' });
         }
-        // Validate version format (semver-like)
-        if (!/^\d+\.\d+\.\d+/.test(remoteVersion.replace(/^v/i, ''))) {
-            return res.status(400).json({ success: false, error: 'Invalid version format' });
-        }
-
-        const localVersion = updateService.getLocalVersion();
 
         // Get changed files
-        const changedFiles = await updateService.getChangedFiles(localVersion, remoteVersion);
-        if (changedFiles.length === 0) {
+        const changedData = await updateService.getChangedFiles(remoteSHA);
+        if (changedData.totalFiles === 0) {
             return res.json({ success: true, data: { applied: [], message: 'No files to update' } });
         }
 
         // Apply update
-        const doBackup = createBackup !== false;
-        const result = await updateService.applyUpdate(remoteVersion, changedFiles, doBackup);
+        const result = await updateService.applyUpdate(remoteSHA, changedData, {
+            createBackup: createBackup !== false,
+            components: components || ['console', 'scripts']
+        });
 
         await db.logAction(
             req.session?.userId,
             'system_update',
-            `Updated ${localVersion} → ${remoteVersion} (${result.applied.length} files, ${result.failed.length} failed)`,
+            `Updated to ${remoteSHA.slice(0, 7)} (${result.applied.length} applied, ${result.failed.length} failed)`,
             req.ip
         );
 
-        // If update applied successfully and has no critical failures, schedule restart
-        const needsRestart = result.applied.length > 0 && result.failed.length === 0;
+        // Restart Go server if changes detected and component selected
+        if (result.needsServerRestart && (components || []).includes('server')) {
+            const svc = updateService.restartService(
+                process.platform === 'win32' ? 'BetterDeskServer' : 'betterdesk-server'
+            );
+            if (svc.success) result.servicesRestarted.push('server');
+            else result.servicesFailed.push({ service: 'server', error: svc.error });
+        }
 
-        res.json({
-            success: true,
-            data: {
-                ...result,
-                localVersion,
-                remoteVersion,
-                needsRestart
-            }
-        });
+        res.json({ success: true, data: result });
 
-        // Restart after response is sent (systemd/PM2 will restart automatically)
-        if (needsRestart) {
+        // Restart console after response is sent (systemd/NSSM restarts automatically)
+        if (result.needsConsoleRestart) {
             setTimeout(() => {
-                console.log(`[UPDATE] Restarting after update to v${remoteVersion}...`);
+                console.log(`[UPDATE] Restarting console after update to ${remoteSHA.slice(0, 7)}...`);
                 process.exit(0);
             }, 2000);
         }

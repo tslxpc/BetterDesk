@@ -1,21 +1,23 @@
 /**
  * BetterDesk Console - Self-Update Service
  *
- * Checks GitHub for new releases, compares with local version, downloads
- * only changed files, creates a backup before applying, and restarts the
- * console service.
+ * Commit-based update system. Compares locally tracked commit SHA with
+ * the HEAD of the configured GitHub branch. Downloads changed files,
+ * categorises them by component (console / server / agent / scripts),
+ * applies updates, and restarts affected services.
  *
  * GitHub repo:  UNITRONIX/BetterDesk
- * Version file: VERSION (root of repo)
+ * Tracking:     data/.update_sha (deployed commit SHA)
  *
  * Flow:
- *   1. GET /repos/{owner}/{repo}/releases/latest → remote version
- *   2. Compare with local VERSION / package.json
- *   3. GET /repos/{owner}/{repo}/compare/{localTag}...{remoteTag} → changed files
- *   4. Download each changed file (only web-nodejs/ subtree)
- *   5. Backup current files → data/backups/pre-update-{ts}/
- *   6. Overwrite local files
- *   7. Restart service via process exit (systemd restarts automatically)
+ *   1. GET /repos/{owner}/{repo}/commits/{branch} → remote HEAD SHA
+ *   2. Compare with local .update_sha
+ *   3. GET /repos/{owner}/{repo}/compare/{local}...{remote} → changed files
+ *   4. Categorise: console / server / scripts / agent / other
+ *   5. Backup current console files → data/backups/pre-update-{ts}/
+ *   6. Download & overwrite changed files per selected component
+ *   7. npm install if package.json changed
+ *   8. Restart affected services (systemd / NSSM)
  */
 
 const fs = require('fs');
@@ -24,29 +26,82 @@ const https = require('https');
 const { execSync } = require('child_process');
 const config = require('../config/config');
 
-const GITHUB_OWNER = process.env.UPDATE_GITHUB_OWNER || 'UNITRONIX';
-const GITHUB_REPO  = process.env.UPDATE_GITHUB_REPO  || 'BetterDesk';
-const GITHUB_API   = 'https://api.github.com';
-const CONSOLE_PREFIX = 'web-nodejs/';
-const USER_AGENT   = `BetterDesk-Console/${config.appVersion}`;
-const BACKUP_DIR   = path.join(config.dataDir, 'backups');
-const ROOT_DIR     = path.join(__dirname, '..');
+const GITHUB_OWNER  = process.env.UPDATE_GITHUB_OWNER  || 'UNITRONIX';
+const GITHUB_REPO   = process.env.UPDATE_GITHUB_REPO   || 'BetterDesk';
+const GITHUB_BRANCH = process.env.UPDATE_GITHUB_BRANCH || 'main';
+const GITHUB_API    = 'https://api.github.com';
+const USER_AGENT    = `BetterDesk-Console/${config.appVersion}`;
+const BACKUP_DIR    = path.join(config.dataDir, 'backups');
+const SHA_FILE      = path.join(config.dataDir, '.update_sha');
+const ROOT_DIR      = path.join(__dirname, '..');          // web-nodejs/
+const PROJECT_ROOT  = path.join(ROOT_DIR, '..');           // repo root
+const IS_WINDOWS    = process.platform === 'win32';
 
-// Optional GitHub token for higher rate limits (60/h unauthenticated, 5000/h with token)
+// Optional GitHub personal-access token  (60 req/h without, 5 000 with)
 const GITHUB_TOKEN = process.env.UPDATE_GITHUB_TOKEN || '';
 
-// ======================== Helpers ========================================
+// ---------- component definitions ----------
+const COMPONENTS = {
+    console: {
+        prefix: 'web-nodejs/',
+        label: 'Web Console',
+        localRoot: ROOT_DIR,
+        service: IS_WINDOWS ? 'BetterDeskConsole' : 'betterdesk-console',
+        autoUpdate: true
+    },
+    server: {
+        prefix: 'betterdesk-server/',
+        label: 'Go Server',
+        localRoot: null,
+        service: IS_WINDOWS ? 'BetterDeskServer' : 'betterdesk-server',
+        autoUpdate: false
+    },
+    agent: {
+        prefix: 'betterdesk-agent/',
+        label: 'Agent',
+        localRoot: null,
+        service: IS_WINDOWS ? 'BetterDeskAgent' : 'betterdesk-agent',
+        autoUpdate: false
+    },
+    scripts: {
+        // matched by exact file names, not prefix
+        files: [
+            'betterdesk.sh', 'betterdesk.ps1', 'betterdesk-docker.sh',
+            'docker-compose.yml', 'docker-compose.single.yml', 'docker-compose.quick.yml',
+            'Dockerfile', 'Dockerfile.server', 'Dockerfile.console'
+        ],
+        label: 'Scripts & Docker',
+        localRoot: PROJECT_ROOT,
+        service: null,
+        autoUpdate: true
+    }
+};
+
+// paths that are never downloaded during an update
+const EXCLUDE_PATTERNS = [
+    /^\.github\//,
+    /^archive\//,
+    /^docs\//,
+    /^screenshots\//,
+    /^dev_modules\//,
+    /^tasks\//,
+    /^sdks\//,
+    /^bridges\//,
+    /node_modules\//,
+    /\.sqlite3$/,
+    /\.exe$/,
+    /^betterdesk-server\/betterdesk-server/       // compiled binaries
+];
+
+// ======================== HTTP Helpers ===================================
 
 /**
- * Make an HTTPS GET request and return parsed JSON.
+ * HTTPS GET → parsed JSON. Follows one redirect.
  */
 function ghGet(urlPath) {
     return new Promise((resolve, reject) => {
         const url = urlPath.startsWith('https://') ? new URL(urlPath) : new URL(urlPath, GITHUB_API);
-        const headers = {
-            'User-Agent': USER_AGENT,
-            'Accept': 'application/vnd.github+json'
-        };
+        const headers = { 'User-Agent': USER_AGENT, 'Accept': 'application/vnd.github+json' };
         if (GITHUB_TOKEN) headers['Authorization'] = `Bearer ${GITHUB_TOKEN}`;
 
         const req = https.get({ hostname: url.hostname, path: url.pathname + url.search, headers }, (res) => {
@@ -61,7 +116,7 @@ function ghGet(urlPath) {
                     return reject(new Error(`GitHub API ${res.statusCode}: ${body.slice(0, 200)}`));
                 }
                 try { resolve(JSON.parse(body)); }
-                catch (e) { reject(new Error('Invalid JSON from GitHub API')); }
+                catch (_e) { reject(new Error('Invalid JSON from GitHub API')); }
             });
         });
         req.on('error', reject);
@@ -70,45 +125,67 @@ function ghGet(urlPath) {
 }
 
 /**
- * Download raw file content from GitHub.
+ * Download raw file content from GitHub (binary-safe).
  */
 function ghDownloadFile(owner, repo, ref, filePath) {
+    const url = `https://raw.githubusercontent.com/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/${encodeURIComponent(ref)}/${filePath}`;
     return new Promise((resolve, reject) => {
-        const url = `https://raw.githubusercontent.com/${owner}/${repo}/${ref}/${filePath}`;
         const headers = { 'User-Agent': USER_AGENT };
         if (GITHUB_TOKEN) headers['Authorization'] = `Bearer ${GITHUB_TOKEN}`;
 
-        const req = https.get(url, { headers }, (res) => {
-            if (res.statusCode === 301 || res.statusCode === 302) {
-                return ghDownloadFile(owner, repo, ref, filePath).then(resolve, reject);
-            }
-            if (res.statusCode !== 200) {
-                return reject(new Error(`Download failed (${res.statusCode}): ${filePath}`));
-            }
-            const chunks = [];
-            res.on('data', (c) => chunks.push(c));
-            res.on('end', () => resolve(Buffer.concat(chunks)));
-        });
-        req.on('error', reject);
-        req.setTimeout(30000, () => { req.destroy(); reject(new Error(`Download timeout: ${filePath}`)); });
+        const follow = (target) => {
+            const req = https.get(target, { headers }, (res) => {
+                if ((res.statusCode === 301 || res.statusCode === 302) && res.headers.location) {
+                    return follow(res.headers.location);
+                }
+                if (res.statusCode !== 200) {
+                    return reject(new Error(`Download failed (${res.statusCode}): ${filePath}`));
+                }
+                const chunks = [];
+                res.on('data', (c) => chunks.push(c));
+                res.on('end', () => resolve(Buffer.concat(chunks)));
+            });
+            req.on('error', reject);
+            req.setTimeout(30000, () => { req.destroy(); reject(new Error(`Download timeout: ${filePath}`)); });
+        };
+        follow(url);
     });
 }
 
-/**
- * Parse semver-like version string → comparable integer.
- * "3.0.0" → 3000000, "2.4.1" → 2004001
- */
-function versionToInt(v) {
-    const parts = String(v).replace(/^v/i, '').split('.').map(Number);
-    return (parts[0] || 0) * 1000000 + (parts[1] || 0) * 1000 + (parts[2] || 0);
+// ======================== SHA Tracking ===================================
+
+function getLocalSHA() {
+    if (fs.existsSync(SHA_FILE)) {
+        const sha = fs.readFileSync(SHA_FILE, 'utf8').trim();
+        if (/^[0-9a-f]{7,40}$/i.test(sha)) return sha;
+    }
+    // Fall back to git if available
+    try {
+        const sha = execSync('git rev-parse HEAD', { cwd: PROJECT_ROOT, timeout: 5000, stdio: 'pipe' })
+            .toString().trim();
+        if (/^[0-9a-f]{40}$/i.test(sha)) { saveLocalSHA(sha); return sha; }
+    } catch (_e) { /* no git */ }
+    return null;
 }
 
-/**
- * Get local version from VERSION file or package.json.
- */
+function saveLocalSHA(sha) {
+    if (!/^[0-9a-f]{7,40}$/i.test(sha)) return;
+    fs.mkdirSync(path.dirname(SHA_FILE), { recursive: true });
+    fs.writeFileSync(SHA_FILE, sha.trim() + '\n');
+}
+
+async function getRemoteHeadSHA() {
+    const data = await ghGet(`/repos/${GITHUB_OWNER}/${GITHUB_REPO}/commits/${GITHUB_BRANCH}`);
+    return {
+        sha: data.sha,
+        message: (data.commit?.message || '').split('\n')[0],
+        date: data.commit?.committer?.date || data.commit?.author?.date || '',
+        author: data.commit?.author?.name || ''
+    };
+}
+
 function getLocalVersion() {
-    // Try VERSION file at console root
-    const versionFile = path.join(ROOT_DIR, '..', 'VERSION');
+    const versionFile = path.join(PROJECT_ROOT, 'VERSION');
     if (fs.existsSync(versionFile)) {
         const v = fs.readFileSync(versionFile, 'utf8').trim();
         if (v) return v;
@@ -116,112 +193,171 @@ function getLocalVersion() {
     return config.appVersion;
 }
 
+// ======================== Classify ======================================
+
+function classifyFile(filepath) {
+    if (COMPONENTS.scripts.files.includes(filepath)) return 'scripts';
+    for (const [name, comp] of Object.entries(COMPONENTS)) {
+        if (comp.prefix && filepath.startsWith(comp.prefix)) return name;
+    }
+    return 'other';
+}
+
+function isExcluded(filepath) {
+    return EXCLUDE_PATTERNS.some(rx => rx.test(filepath));
+}
+
 // ======================== Public API ====================================
 
 /**
- * Check for updates — returns version info without downloading anything.
+ * Check for updates by comparing local commit SHA with remote HEAD.
  */
 async function checkForUpdates() {
     const localVersion = getLocalVersion();
+    const localSHA = getLocalSHA();
+    const remote = await getRemoteHeadSHA();
 
-    // Fetch latest release from GitHub
-    let release;
+    // No baseline yet → establish one
+    if (!localSHA) {
+        saveLocalSHA(remote.sha);
+        return {
+            localVersion,
+            localSHA: remote.sha,
+            remoteSHA: remote.sha,
+            updateAvailable: false,
+            baselineEstablished: true,
+            commitsBehind: 0,
+            latestMessage: remote.message,
+            latestDate: remote.date,
+            latestAuthor: remote.author,
+            components: {}
+        };
+    }
+
+    // Already at HEAD
+    if (localSHA.startsWith(remote.sha.slice(0, 7)) || remote.sha.startsWith(localSHA.slice(0, 7)) || localSHA === remote.sha) {
+        return {
+            localVersion,
+            localSHA,
+            remoteSHA: remote.sha,
+            updateAvailable: false,
+            commitsBehind: 0,
+            latestMessage: remote.message,
+            latestDate: remote.date,
+            latestAuthor: remote.author,
+            components: {}
+        };
+    }
+
+    // Compare
+    let compare;
     try {
-        release = await ghGet(`/repos/${GITHUB_OWNER}/${GITHUB_REPO}/releases/latest`);
+        compare = await ghGet(`/repos/${GITHUB_OWNER}/${GITHUB_REPO}/compare/${localSHA}...${remote.sha}`);
     } catch (err) {
-        // 404 means no releases published yet — treat as "up to date"
-        if (err.message && err.message.includes('404')) {
-            return {
-                localVersion,
-                remoteVersion: localVersion,
-                isNewer: false,
-                updateAvailable: false,
-                releaseName: `v${localVersion}`,
-                releaseUrl: `https://github.com/${GITHUB_OWNER}/${GITHUB_REPO}`,
-                publishedAt: '',
-                changelog: '',
-                releaseNotes: '',
-                prerelease: false,
-                noReleases: true
+        // SHA may have been force-pushed away
+        return {
+            localVersion,
+            localSHA,
+            remoteSHA: remote.sha,
+            updateAvailable: true,
+            commitsBehind: -1,
+            latestMessage: remote.message,
+            latestDate: remote.date,
+            latestAuthor: remote.author,
+            components: {},
+            compareError: err.message
+        };
+    }
+
+    const files = (compare.files || []).filter(f => !isExcluded(f.filename));
+    const componentSummary = {};
+    for (const file of files) {
+        const comp = classifyFile(file.filename);
+        if (!componentSummary[comp]) {
+            componentSummary[comp] = {
+                changed: true,
+                fileCount: 0,
+                label: COMPONENTS[comp]?.label || 'Other',
+                autoUpdate: COMPONENTS[comp]?.autoUpdate ?? false
             };
         }
-        throw err;
+        componentSummary[comp].fileCount++;
     }
-    const remoteVersion = (release.tag_name || '').replace(/^v/i, '');
-
-    const isNewer = versionToInt(remoteVersion) > versionToInt(localVersion);
 
     return {
         localVersion,
-        remoteVersion,
-        isNewer,
-        updateAvailable: isNewer,
-        releaseName: release.name || `v${remoteVersion}`,
-        releaseUrl: release.html_url || '',
-        publishedAt: release.published_at || '',
-        changelog: release.body || '',
-        releaseNotes: release.body || '',
-        prerelease: release.prerelease || false
+        localSHA,
+        remoteSHA: remote.sha,
+        updateAvailable: files.length > 0,
+        commitsBehind: compare.total_commits || (compare.commits || []).length,
+        latestMessage: remote.message,
+        latestDate: remote.date,
+        latestAuthor: remote.author,
+        components: componentSummary
     };
 }
 
 /**
- * Get list of changed console files between local and remote versions.
- * Uses GitHub Compare API to get a diff of only web-nodejs/ files.
+ * Get detailed list of changed files between local SHA and the given remote SHA.
+ * Returns files grouped by component plus a flat list and recent commits.
  */
-async function getChangedFiles(localVersion, remoteVersion) {
-    const localTag = `v${localVersion.replace(/^v/i, '')}`;
-    const remoteTag = `v${remoteVersion.replace(/^v/i, '')}`;
+async function getChangedFiles(remoteSHA) {
+    const localSHA = getLocalSHA();
+    if (!localSHA) throw new Error('No local baseline SHA — run update check first');
+    if (!/^[0-9a-f]{7,40}$/i.test(remoteSHA)) throw new Error('Invalid remote SHA');
 
-    let files;
-    try {
-        const compare = await ghGet(`/repos/${GITHUB_OWNER}/${GITHUB_REPO}/compare/${localTag}...${remoteTag}`);
-        files = (compare.files || []);
-    } catch (_err) {
-        // If tags don't exist, fall back to getting the tree for remote tag
-        // and comparing with local files manually
-        const tree = await ghGet(`/repos/${GITHUB_OWNER}/${GITHUB_REPO}/git/trees/${remoteTag}?recursive=1`);
-        files = (tree.tree || [])
-            .filter(f => f.type === 'blob' && f.path.startsWith(CONSOLE_PREFIX))
-            .map(f => ({ filename: f.path, status: 'modified', sha: f.sha }));
+    const compare = await ghGet(`/repos/${GITHUB_OWNER}/${GITHUB_REPO}/compare/${localSHA}...${remoteSHA}`);
+    const files = (compare.files || []).filter(f => !isExcluded(f.filename));
+
+    const grouped = { console: [], server: [], agent: [], scripts: [], other: [] };
+
+    for (const f of files) {
+        const comp = classifyFile(f.filename);
+        const entry = {
+            path: f.filename,
+            status: f.status || 'modified',
+            sha: f.sha || '',
+            component: comp
+        };
+        if (comp === 'console') {
+            entry.localPath = f.filename.slice(COMPONENTS.console.prefix.length);
+        } else if (comp === 'scripts') {
+            entry.localPath = f.filename;
+        }
+        (grouped[comp] || grouped.other).push(entry);
     }
 
-    // Filter to only web-nodejs/ files and exclude tests/dev files
-    const consoleFiles = files.filter(f => {
-        if (!f.filename.startsWith(CONSOLE_PREFIX)) return false;
-        // Skip test files, node_modules references, etc.
-        const rel = f.filename.slice(CONSOLE_PREFIX.length);
-        if (rel.startsWith('node_modules/')) return false;
-        if (rel.startsWith('test/') || rel.startsWith('tests/')) return false;
-        if (rel === 'package-lock.json') return false;
-        return true;
-    });
-
-    return consoleFiles.map(f => ({
-        path: f.filename,                        // full path in repo (web-nodejs/...)
-        localPath: f.filename.slice(CONSOLE_PREFIX.length),  // relative to console root
-        status: f.status || 'modified',          // added | modified | removed | renamed
-        sha: f.sha || ''
-    }));
+    return {
+        files: files.map(f => ({
+            path: f.filename,
+            status: f.status || 'modified',
+            component: classifyFile(f.filename)
+        })),
+        grouped,
+        totalFiles: files.length,
+        commits: (compare.commits || []).slice(-30).reverse().map(c => ({
+            sha: c.sha?.slice(0, 7),
+            message: (c.commit?.message || '').split('\n')[0],
+            date: c.commit?.committer?.date || '',
+            author: c.commit?.author?.name || ''
+        }))
+    };
 }
 
 /**
- * Create a pre-update backup of files that will be changed.
- * Returns the backup directory path.
+ * Create a pre-update backup of console files that will be changed.
  */
-async function createPreUpdateBackup(changedFiles) {
+async function createPreUpdateBackup(allFiles) {
     const ts = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
     const backupPath = path.join(BACKUP_DIR, `pre-update-${ts}`);
-
     fs.mkdirSync(backupPath, { recursive: true });
 
-    // Save VERSION
     const localVersion = getLocalVersion();
-    fs.writeFileSync(path.join(backupPath, 'VERSION.txt'), localVersion);
-
-    // Backup each file that will be changed
+    const localSHA = getLocalSHA();
     let backedUp = 0;
-    for (const file of changedFiles) {
+
+    for (const file of allFiles) {
+        if (file.component !== 'console' || !file.localPath) continue;
         const src = path.join(ROOT_DIR, file.localPath);
         if (fs.existsSync(src)) {
             const dest = path.join(backupPath, file.localPath);
@@ -231,147 +367,188 @@ async function createPreUpdateBackup(changedFiles) {
         }
     }
 
-    // Save manifest
     fs.writeFileSync(path.join(backupPath, 'manifest.json'), JSON.stringify({
         version: localVersion,
+        sha: localSHA,
         timestamp: new Date().toISOString(),
         filesBackedUp: backedUp,
-        files: changedFiles.map(f => f.localPath)
+        files: allFiles.filter(f => f.component === 'console' && f.localPath).map(f => f.localPath)
     }, null, 2));
 
     return { backupPath, backedUp };
 }
 
 /**
- * Apply update — download changed files from GitHub and overwrite local copies.
- * Returns summary of applied changes.
+ * Apply update — download changed files, run npm install if needed,
+ * update SHA tracking file.
+ *
+ * @param {string} remoteSHA
+ * @param {object} changedData        Output of getChangedFiles()
+ * @param {object} opts
+ * @param {boolean}  opts.createBackup  default true
+ * @param {string[]} opts.components    default ['console','scripts']
  */
-async function applyUpdate(remoteVersion, changedFiles, createBackup = true) {
-    const ref = `v${remoteVersion.replace(/^v/i, '')}`;
+async function applyUpdate(remoteSHA, changedData, opts = {}) {
+    const { createBackup = true, components: selectedComponents = ['console', 'scripts'] } = opts;
 
-    // 1. Backup
     let backupInfo = null;
     if (createBackup) {
-        backupInfo = await createPreUpdateBackup(changedFiles);
+        const allFiles = Object.values(changedData.grouped).flat();
+        backupInfo = await createPreUpdateBackup(allFiles);
     }
 
-    // 2. Download and apply each file
-    const applied = [];
-    const failed = [];
-    const removed = [];
-
-    for (const file of changedFiles) {
-        try {
-            if (file.status === 'removed') {
-                // Delete local file
-                const localFile = path.join(ROOT_DIR, file.localPath);
-                if (fs.existsSync(localFile)) {
-                    fs.unlinkSync(localFile);
-                    removed.push(file.localPath);
-                }
-                continue;
-            }
-
-            // Download from GitHub
-            const content = await ghDownloadFile(GITHUB_OWNER, GITHUB_REPO, ref, file.path);
-            const dest = path.join(ROOT_DIR, file.localPath);
-
-            // Ensure directory exists
-            fs.mkdirSync(path.dirname(dest), { recursive: true });
-
-            // Write file
-            fs.writeFileSync(dest, content);
-            applied.push(file.localPath);
-        } catch (err) {
-            failed.push({ file: file.localPath, error: err.message });
-        }
-    }
-
-    // 3. Update package.json version if needed
-    try {
-        const pkgPath = path.join(ROOT_DIR, 'package.json');
-        if (fs.existsSync(pkgPath)) {
-            const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf8'));
-            if (pkg.version !== remoteVersion.replace(/^v/i, '')) {
-                pkg.version = remoteVersion.replace(/^v/i, '');
-                fs.writeFileSync(pkgPath, JSON.stringify(pkg, null, 2) + '\n');
-            }
-        }
-    } catch (_e) { /* non-critical */ }
-
-    // 4. Check if package.json dependencies changed → run npm install
-    let npmInstalled = false;
-    if (changedFiles.some(f => f.localPath === 'package.json')) {
-        try {
-            execSync('npm install --omit=dev --no-audit --no-fund', {
-                cwd: ROOT_DIR,
-                timeout: 120000,
-                stdio: 'pipe'
-            });
-            npmInstalled = true;
-        } catch (_e) {
-            failed.push({ file: 'npm install', error: 'npm install failed — restart may fix this' });
-        }
-    }
-
-    return {
-        applied,
-        failed,
-        removed,
-        npmInstalled,
+    const results = {
+        applied: [],
+        failed: [],
+        removed: [],
+        skipped: [],
+        npmInstalled: false,
+        servicesRestarted: [],
+        servicesFailed: [],
         backupPath: backupInfo?.backupPath || null,
         backedUp: backupInfo?.backedUp || 0,
-        totalChanged: changedFiles.length
+        needsConsoleRestart: false,
+        needsServerRestart: false,
+        needsAgentRestart: false
     };
+
+    // ---- Console files ----
+    if (selectedComponents.includes('console') && changedData.grouped.console?.length) {
+        for (const file of changedData.grouped.console) {
+            try {
+                if (file.status === 'removed') {
+                    const localFile = path.join(ROOT_DIR, file.localPath);
+                    if (fs.existsSync(localFile)) { fs.unlinkSync(localFile); results.removed.push(file.path); }
+                    continue;
+                }
+                if (/^(node_modules|test|tests)\//.test(file.localPath) || file.localPath === 'package-lock.json') {
+                    results.skipped.push(file.path);
+                    continue;
+                }
+                const content = await ghDownloadFile(GITHUB_OWNER, GITHUB_REPO, remoteSHA, file.path);
+                const dest = path.join(ROOT_DIR, file.localPath);
+                fs.mkdirSync(path.dirname(dest), { recursive: true });
+                fs.writeFileSync(dest, content);
+                results.applied.push(file.path);
+            } catch (err) {
+                results.failed.push({ file: file.path, error: err.message });
+            }
+        }
+        // npm install when package.json changed
+        if (changedData.grouped.console.some(f => f.localPath === 'package.json')) {
+            try {
+                execSync('npm install --omit=dev --no-audit --no-fund', { cwd: ROOT_DIR, timeout: 120000, stdio: 'pipe' });
+                results.npmInstalled = true;
+            } catch (_e) {
+                results.failed.push({ file: 'npm install', error: 'npm install failed' });
+            }
+        }
+        results.needsConsoleRestart = true;
+    }
+
+    // ---- Script / Docker files ----
+    if (selectedComponents.includes('scripts') && changedData.grouped.scripts?.length) {
+        for (const file of changedData.grouped.scripts) {
+            try {
+                if (file.status === 'removed') continue;
+                const content = await ghDownloadFile(GITHUB_OWNER, GITHUB_REPO, remoteSHA, file.path);
+                const dest = path.join(PROJECT_ROOT, file.localPath);
+                fs.mkdirSync(path.dirname(dest), { recursive: true });
+                fs.writeFileSync(dest, content);
+                if (!IS_WINDOWS && file.localPath.endsWith('.sh')) {
+                    try { fs.chmodSync(dest, 0o755); } catch (_e) { /* ok */ }
+                }
+                results.applied.push(file.path);
+            } catch (err) {
+                results.failed.push({ file: file.path, error: err.message });
+            }
+        }
+    }
+
+    // ---- Server / Agent — info only for non-auto components ----
+    if (changedData.grouped.server?.length) {
+        if (selectedComponents.includes('server')) {
+            results.needsServerRestart = true;
+        }
+        for (const f of changedData.grouped.server) {
+            results.skipped.push(f.path + ' (server source — rebuild required)');
+        }
+    }
+    if (changedData.grouped.agent?.length) {
+        for (const f of changedData.grouped.agent) {
+            results.skipped.push(f.path + ' (agent source — rebuild required)');
+        }
+    }
+
+    // ---- Update SHA tracking ----
+    saveLocalSHA(remoteSHA);
+
+    // ---- Pull remote VERSION file ----
+    try {
+        const versionContent = await ghDownloadFile(GITHUB_OWNER, GITHUB_REPO, remoteSHA, 'VERSION');
+        fs.writeFileSync(path.join(PROJECT_ROOT, 'VERSION'), versionContent);
+    } catch (_e) { /* non-critical */ }
+
+    return results;
 }
 
 /**
- * List available pre-update backups.
+ * Restart a system service.
+ * Returns { success, service, error? }.
+ */
+function restartService(serviceName) {
+    try {
+        if (IS_WINDOWS) {
+            execSync(`nssm restart "${serviceName}"`, { timeout: 30000, stdio: 'pipe' });
+        } else {
+            execSync(`sudo systemctl restart "${serviceName}"`, { timeout: 30000, stdio: 'pipe' });
+        }
+        return { success: true, service: serviceName };
+    } catch (err) {
+        return { success: false, service: serviceName, error: err.message };
+    }
+}
+
+/**
+ * List pre-update backups (newest first).
  */
 function listBackups() {
     if (!fs.existsSync(BACKUP_DIR)) return [];
-
     return fs.readdirSync(BACKUP_DIR)
         .filter(d => d.startsWith('pre-update-'))
         .map(d => {
             const dir = path.join(BACKUP_DIR, d);
-            const manifestPath = path.join(dir, 'manifest.json');
-            let manifest = {};
-            if (fs.existsSync(manifestPath)) {
-                try { manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8')); } catch (_e) { /* skip */ }
+            const mPath = path.join(dir, 'manifest.json');
+            let m = {};
+            if (fs.existsSync(mPath)) {
+                try { m = JSON.parse(fs.readFileSync(mPath, 'utf8')); } catch (_e) { /* skip */ }
             }
             return {
                 name: d,
                 path: dir,
-                version: manifest.version || 'unknown',
-                timestamp: manifest.timestamp || '',
-                filesBackedUp: manifest.filesBackedUp || 0
+                version: m.version || 'unknown',
+                sha: (m.sha || '').slice(0, 7),
+                timestamp: m.timestamp || '',
+                filesBackedUp: m.filesBackedUp || 0,
+                fileCount: m.filesBackedUp || 0
             };
         })
         .sort((a, b) => b.timestamp.localeCompare(a.timestamp));
 }
 
 /**
- * Restore from a pre-update backup.
+ * Restore console files from a pre-update backup and revert the SHA.
  */
 function restoreFromBackup(backupName) {
+    if (!/^pre-update-[\d\-T]+$/.test(backupName)) throw new Error('Invalid backup name');
     const backupPath = path.join(BACKUP_DIR, backupName);
-    if (!fs.existsSync(backupPath)) {
-        throw new Error('Backup not found');
-    }
-    // Validate backup name to prevent directory traversal
-    if (!/^pre-update-[\d\-T]+$/.test(backupName)) {
-        throw new Error('Invalid backup name');
-    }
+    if (!fs.existsSync(backupPath)) throw new Error('Backup not found');
 
     const manifestPath = path.join(backupPath, 'manifest.json');
-    if (!fs.existsSync(manifestPath)) {
-        throw new Error('Invalid backup — missing manifest');
-    }
+    if (!fs.existsSync(manifestPath)) throw new Error('Invalid backup — missing manifest');
 
     const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
     let restored = 0;
-
     for (const filePath of (manifest.files || [])) {
         const src = path.join(backupPath, filePath);
         const dest = path.join(ROOT_DIR, filePath);
@@ -382,7 +559,10 @@ function restoreFromBackup(backupName) {
         }
     }
 
-    return { restored, version: manifest.version, totalFiles: (manifest.files || []).length };
+    // Revert SHA to the pre-update value
+    if (manifest.sha) saveLocalSHA(manifest.sha);
+
+    return { restored, version: manifest.version, sha: manifest.sha, totalFiles: (manifest.files || []).length };
 }
 
 module.exports = {
@@ -390,7 +570,11 @@ module.exports = {
     getChangedFiles,
     createPreUpdateBackup,
     applyUpdate,
+    restartService,
     listBackups,
     restoreFromBackup,
-    getLocalVersion
+    getLocalVersion,
+    getLocalSHA,
+    saveLocalSHA,
+    COMPONENTS
 };
