@@ -147,7 +147,7 @@
      * Show edit user modal
      */
     function showEditUserModal(userId) {
-        const user = users.find(u => u.id === parseInt(userId, 10));
+        const user = users.find(u => Number(u.id) === Number(userId));
         if (!user) return;
         
         editingUserId = user.id;
@@ -309,7 +309,7 @@
      * Reset user password
      */
     async function resetPassword(userId) {
-        const user = users.find(u => u.id === parseInt(userId, 10));
+        const user = users.find(u => Number(u.id) === Number(userId));
         if (!user) return;
         
         const newPassword = await Modal.prompt({

@@ -1018,7 +1018,7 @@ function createSqliteAdapter(config) {
         },
         async createUser(username, passwordHash, role = 'admin') {
             const info = openAuth().prepare('INSERT INTO users (username, password_hash, role) VALUES (?, ?, ?)').run(username, passwordHash, role);
-            return { id: info.lastInsertRowid, username, role };
+            return { id: Number(info.lastInsertRowid), username, role };
         },
         async updateUserPassword(id, passwordHash) {
             openAuth().prepare('UPDATE users SET password_hash = ? WHERE id = ?').run(passwordHash, id);
@@ -1129,7 +1129,7 @@ function createSqliteAdapter(config) {
         },
         async createFolder({ name, color, icon, sort_order }) {
             const info = openAuth().prepare('INSERT INTO folders (name, color, icon, sort_order) VALUES (?, ?, ?, ?)').run(name, color || '#6366f1', icon || 'folder', sort_order || 0);
-            return { id: info.lastInsertRowid, name, color, icon, sort_order };
+            return { id: Number(info.lastInsertRowid), name, color, icon, sort_order };
         },
         async updateFolder(id, { name, color, icon, sort_order }) {
             const sets = [];
@@ -1437,7 +1437,7 @@ function createSqliteAdapter(config) {
                 rule.condition_type, rule.condition_op || 'gt', rule.condition_value || 0,
                 rule.severity || 'warning', rule.scope_device_id || null,
                 rule.cooldown_secs || 300, rule.notify_emails || '', rule.created_by || null);
-            return { id: info.lastInsertRowid, ...rule };
+            return { id: Number(info.lastInsertRowid), ...rule };
         },
 
         async updateAlertRule(id, data) {
@@ -1464,7 +1464,7 @@ function createSqliteAdapter(config) {
                 VALUES (?, ?, ?, ?, ?)
             `).run(alert.rule_id, alert.device_id || null, alert.severity || 'warning',
                 alert.message || '', alert.triggered_at || new Date().toISOString());
-            return { id: info.lastInsertRowid, ...alert };
+            return { id: Number(info.lastInsertRowid), ...alert };
         },
 
         async getRecentAlert(ruleId, deviceId, cooldownSecs) {
@@ -1502,7 +1502,7 @@ function createSqliteAdapter(config) {
                 VALUES (?, ?, ?, 'pending', ?)
             `).run(cmd.device_id, cmd.command_type || 'shell', cmd.payload || '',
                 cmd.created_by || 'admin');
-            return { id: info.lastInsertRowid, device_id: cmd.device_id, status: 'pending' };
+            return { id: Number(info.lastInsertRowid), device_id: cmd.device_id, status: 'pending' };
         },
 
         async getPendingCommands(deviceId) {
