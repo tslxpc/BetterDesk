@@ -5,7 +5,7 @@
  * only changed files, creates a backup before applying, and restarts the
  * console service.
  *
- * GitHub repo:  UNITRONIX/Rustdesk-FreeConsole
+ * GitHub repo:  UNITRONIX/BetterDesk
  * Version file: VERSION (root of repo)
  *
  * Flow:
@@ -25,7 +25,7 @@ const { execSync } = require('child_process');
 const config = require('../config/config');
 
 const GITHUB_OWNER = process.env.UPDATE_GITHUB_OWNER || 'UNITRONIX';
-const GITHUB_REPO  = process.env.UPDATE_GITHUB_REPO  || 'Rustdesk-FreeConsole';
+const GITHUB_REPO  = process.env.UPDATE_GITHUB_REPO  || 'BetterDesk';
 const GITHUB_API   = 'https://api.github.com';
 const CONSOLE_PREFIX = 'web-nodejs/';
 const USER_AGENT   = `BetterDesk-Console/${config.appVersion}`;
@@ -125,7 +125,28 @@ async function checkForUpdates() {
     const localVersion = getLocalVersion();
 
     // Fetch latest release from GitHub
-    const release = await ghGet(`/repos/${GITHUB_OWNER}/${GITHUB_REPO}/releases/latest`);
+    let release;
+    try {
+        release = await ghGet(`/repos/${GITHUB_OWNER}/${GITHUB_REPO}/releases/latest`);
+    } catch (err) {
+        // 404 means no releases published yet — treat as "up to date"
+        if (err.message && err.message.includes('404')) {
+            return {
+                localVersion,
+                remoteVersion: localVersion,
+                isNewer: false,
+                updateAvailable: false,
+                releaseName: `v${localVersion}`,
+                releaseUrl: `https://github.com/${GITHUB_OWNER}/${GITHUB_REPO}`,
+                publishedAt: '',
+                changelog: '',
+                releaseNotes: '',
+                prerelease: false,
+                noReleases: true
+            };
+        }
+        throw err;
+    }
     const remoteVersion = (release.tag_name || '').replace(/^v/i, '');
 
     const isNewer = versionToInt(remoteVersion) > versionToInt(localVersion);
@@ -134,10 +155,12 @@ async function checkForUpdates() {
         localVersion,
         remoteVersion,
         isNewer,
+        updateAvailable: isNewer,
         releaseName: release.name || `v${remoteVersion}`,
         releaseUrl: release.html_url || '',
         publishedAt: release.published_at || '',
         changelog: release.body || '',
+        releaseNotes: release.body || '',
         prerelease: release.prerelease || false
     };
 }
