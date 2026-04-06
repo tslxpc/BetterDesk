@@ -79,6 +79,10 @@ fi
 # Ensure Go server uses correct signal port (not NODE.js PORT)
 export SIGNAL_PORT="${SIGNAL_PORT:-21116}"
 
+# Ensure Node.js Client API binds to all interfaces (not just localhost)
+export API_HOST="${API_HOST:-0.0.0.0}"
+export HOST="${HOST:-0.0.0.0}"
+
 # Relay server address: if not explicitly set, try to auto-detect public IP.
 # Inside Docker, the Go server's own detection may return the container's
 # internal IP (172.x.x.x) which is unreachable by remote clients.

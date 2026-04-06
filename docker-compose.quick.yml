@@ -60,6 +60,8 @@ services:
     environment:
       - NODE_ENV=production
       - PORT=5000
+      - HOST=0.0.0.0
+      - API_HOST=0.0.0.0
       - SERVER_BACKEND=betterdesk
       - BETTERDESK_API_URL=http://betterdesk-server:21114/api
       - RUSTDESK_PATH=/opt/rustdesk
