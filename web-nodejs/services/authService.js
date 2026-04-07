@@ -163,6 +163,44 @@ function checkForcePasswordUpdate() {
 }
 
 /**
+ * Try to read the admin password from the Go server's .admin_credentials file.
+ * The Go server writes this file on first run (main.go) when it auto-generates
+ * a random admin password. Format:
+ *   Admin Username: admin
+ *   Admin Password: <plaintext>
+ *   ...
+ * Returns the password string or null if file is missing/unreadable.
+ */
+function readAdminCredentialsFile() {
+    // Search multiple candidate directories (Go server's DB dir may differ from keysPath)
+    const candidates = [
+        config.keysPath,
+        path.join(config.keysPath, 'data'),
+        '/opt/betterdesk',
+        '/opt/betterdesk/data',
+        '/opt/rustdesk',
+        '/opt/rustdesk/data',
+    ];
+    if (process.platform === 'win32') {
+        candidates.push('C:\\BetterDesk', 'C:\\BetterDesk\\data');
+    }
+    for (const dir of candidates) {
+        const filePath = path.join(dir, '.admin_credentials');
+        try {
+            if (fs.existsSync(filePath)) {
+                const content = fs.readFileSync(filePath, 'utf8');
+                const match = content.match(/^Admin Password:\s*(.+)$/m);
+                if (match && match[1].trim()) {
+                    console.log(`[AUTH] Read admin password from ${filePath}`);
+                    return match[1].trim();
+                }
+            }
+        } catch (_) { /* permission denied or read error — try next */ }
+    }
+    return null;
+}
+
+/**
  * Create default admin user if no users exist.
  * In PostgreSQL mode, the Go server may have already created the admin user
  * with a PBKDF2 hash. In that case, we migrate the hash to bcrypt format
@@ -170,7 +208,15 @@ function checkForcePasswordUpdate() {
  */
 async function ensureDefaultAdmin() {
     const defaultUsername = process.env.DEFAULT_ADMIN_USERNAME || 'admin';
-    const defaultPassword = process.env.DEFAULT_ADMIN_PASSWORD || '';
+    let defaultPassword = process.env.DEFAULT_ADMIN_PASSWORD || '';
+
+    // If no password from env, try reading from Go server's .admin_credentials file.
+    // The Go server writes this file on first run when it generates a random password.
+    // Format: "Admin Username: admin\nAdmin Password: <password>\n..."
+    if (!defaultPassword) {
+        defaultPassword = readAdminCredentialsFile() || '';
+    }
+
     const forceUpdate = checkForcePasswordUpdate();
 
     console.log(`[AUTH] ensureDefaultAdmin: checking for existing users...`);
