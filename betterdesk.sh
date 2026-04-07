@@ -138,6 +138,7 @@ POSTGRESQL_PORT="${POSTGRESQL_PORT:-5432}"
 
 # Common installation paths to search
 COMMON_RUSTDESK_PATHS=(
+    "/opt/betterdesk"
     "/opt/rustdesk"
     "/usr/local/rustdesk"
     "/var/lib/rustdesk"
@@ -635,7 +636,7 @@ auto_detect_paths() {
     
     # If still not found, use default for new installations
     if [ -z "$RUSTDESK_PATH" ]; then
-        RUSTDESK_PATH="/opt/rustdesk"
+        RUSTDESK_PATH="/opt/betterdesk"
         print_info "No installation detected. Default path: $RUSTDESK_PATH"
     fi
     
@@ -759,7 +760,7 @@ configure_paths() {
             configure_paths
             ;;
         4)
-            RUSTDESK_PATH="/opt/rustdesk"
+            RUSTDESK_PATH="/opt/betterdesk"
             CONSOLE_PATH="/opt/BetterDeskConsole"
             DB_PATH="$RUSTDESK_PATH/db_v2.sqlite3"
             print_success "Paths reset to defaults"

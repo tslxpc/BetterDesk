@@ -569,6 +569,7 @@ function printStartupBanner(protocol, port) {
         ? `PostgreSQL (${process.env.DATABASE_URL ? new URL(process.env.DATABASE_URL).hostname : 'localhost'})`
         : path.basename(config.dbPath);
     console.log(`  ║   Database:  ${dbLabel}`.padEnd(53) + '║');
+    console.log(`  ║   Keys:      ${config.keysPath}`.padEnd(53) + '║');
     console.log('  ║                                                  ║');
     console.log('  ╚══════════════════════════════════════════════════╝');
     console.log('');

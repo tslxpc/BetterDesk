@@ -46,7 +46,26 @@ const isWindows = process.platform === 'win32';
 // Base paths
 // Support multiple env var names for compatibility with different install scripts
 const DATA_DIR = process.env.DATA_DIR || (isDocker ? '/app/data' : path.join(__dirname, '..', 'data'));
-const KEYS_PATH = process.env.KEYS_PATH || process.env.RUSTDESK_DIR || process.env.RUSTDESK_PATH || (isDocker ? '/opt/rustdesk' : (isWindows ? 'C:\\BetterDesk' : '/opt/rustdesk'));
+
+// KEYS_PATH: directory where Go server writes .api_key, id_ed25519, id_ed25519.pub
+// Priority: env vars → auto-detect existing directory → platform default
+function resolveKeysPath() {
+    const fromEnv = process.env.KEYS_PATH || process.env.RUSTDESK_DIR || process.env.RUSTDESK_PATH;
+    if (fromEnv) return fromEnv;
+    if (isDocker) return '/opt/rustdesk';
+    if (isWindows) {
+        // Prefer C:\BetterDesk, fall back to C:\RustDesk for legacy installs
+        if (fs.existsSync('C:\\BetterDesk\\id_ed25519')) return 'C:\\BetterDesk';
+        if (fs.existsSync('C:\\RustDesk\\id_ed25519')) return 'C:\\RustDesk';
+        return 'C:\\BetterDesk';
+    }
+    // Linux: check both paths, prefer /opt/betterdesk (new), fall back to /opt/rustdesk (legacy)
+    if (fs.existsSync('/opt/betterdesk/id_ed25519')) return '/opt/betterdesk';
+    if (fs.existsSync('/opt/rustdesk/id_ed25519')) return '/opt/rustdesk';
+    // Neither exists yet — use new default
+    return '/opt/betterdesk';
+}
+const KEYS_PATH = resolveKeysPath();
 const RUSTDESK_DIR = KEYS_PATH;
 
 // Database path
