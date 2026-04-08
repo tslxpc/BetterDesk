@@ -814,7 +814,7 @@ const DeviceDetail = (function () {
 
         switch (action) {
             case 'connect-desktop':
-                window.open('betterdesk://' + encodeURIComponent(device.id), '_blank');
+                window.open('rustdesk://' + encodeURIComponent(device.id), '_blank');
                 break;
 
             case 'connect-web':

@@ -571,10 +571,10 @@
     }
     
     /**
-     * Connect to device via BetterDesk desktop client (betterdesk:// protocol)
+     * Connect to device via RustDesk desktop client (rustdesk:// protocol)
      */
     function connectDesktopClient(deviceId) {
-        window.open('betterdesk://' + encodeURIComponent(deviceId), '_blank');
+        window.open('rustdesk://' + encodeURIComponent(deviceId), '_blank');
     }
     
     /**
