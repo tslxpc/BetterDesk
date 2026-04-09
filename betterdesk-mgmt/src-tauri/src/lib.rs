@@ -30,6 +30,7 @@ pub mod helpdesk;
 pub mod identity;
 pub mod input;
 pub mod inventory;
+pub mod logging;
 pub mod management;
 pub mod network;
 pub mod protocol;
@@ -53,15 +54,16 @@ pub fn run() {
 
     // Default to DEBUG in --console mode, INFO otherwise.
     let is_console = std::env::args().any(|a| a == "--console");
-    let default_level = if is_console { "debug" } else { "info" };
 
-    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or(default_level))
-        .format_timestamp_millis()
-        .init();
+    // Initialize dual logging: stderr + file in %APPDATA%/BetterDesk/BetterDesk/logs/
+    logging::init(is_console);
 
-    info!("BetterDesk Client v{} (pid={}) — boot", env!("CARGO_PKG_VERSION"), std::process::id());
+    info!("BetterDesk MGMT v{} (pid={}) — boot", env!("CARGO_PKG_VERSION"), std::process::id());
     if is_console {
         info!("Console mode ACTIVE — all logs visible in terminal");
+    }
+    if let Some(path) = logging::log_file_path() {
+        info!("Log file: {}", path.display());
     }
 
     let settings = config::Settings::load().unwrap_or_default();
@@ -191,6 +193,7 @@ pub fn run() {
             // API proxy (session-based, cookie jar)
             commands::api_proxy,
             commands::api_clear_session,
+            commands::set_access_token,
             commands::operator_get_help_requests,
             commands::operator_accept_help_request,
             commands::operator_record_session_event,
@@ -232,6 +235,10 @@ pub fn run() {
             commands::open_file_native,
             // Activity tracking
             commands::get_activity_log,
+            // Logging bridge
+            commands::write_log,
+            commands::open_log_file,
+            commands::get_log_path,
         ])
         .setup(move |app| {
             // System tray — always visible, redesigned with branding.

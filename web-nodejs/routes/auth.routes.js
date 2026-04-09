@@ -68,7 +68,8 @@ router.post('/api/auth/login', loginLimiter, async (req, res) => {
         const user = await authService.authenticate(username, password);
         
         if (!user) {
-            // Log failed attempt
+            // Record failed attempt (shared brute-force tracker with /api/bd/operator/login)
+            authService.recordAttempt(username, req.ip, false);
             await db.logAction(null, 'login_failed', `Username: ${username}`, req.ip);
             
             return res.status(401).json({
@@ -76,6 +77,9 @@ router.post('/api/auth/login', loginLimiter, async (req, res) => {
                 error: req.t('auth.invalid_credentials')
             });
         }
+        
+        // Clear brute-force lockout on successful auth (shared with operator_login)
+        authService.recordAttempt(username, req.ip, true);
         
         // Block pro-only accounts from web panel login
         if (user.role === 'pro') {

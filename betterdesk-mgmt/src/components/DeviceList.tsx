@@ -178,7 +178,7 @@ export default function DeviceList(props: DeviceListProps) {
                                             </td>
                                             <td onClick={(e) => e.stopPropagation()}>
                                                 <div class="device-actions-cell">
-                                                    <button class="btn-icon" title={t('dashboard.connect')} onClick={() => props.onNavigate(`remote:${device.id}`)}>
+                                                    <button class="btn-icon" title={isOnline(device) ? t('dashboard.connect') : t('remote.device_offline')} disabled={!isOnline(device)} onClick={() => props.onNavigate(`remote:${device.id}`)} style={!isOnline(device) ? 'opacity: 0.35; cursor: not-allowed;' : ''}>
                                                         <span class="material-symbols-rounded" style="font-size: 18px;">desktop_windows</span>
                                                     </button>
                                                     <div class="dropdown-wrapper">

@@ -420,6 +420,42 @@ function createSqliteAdapter(config) {
             );
         `);
 
+        // Migration: Add missing columns to existing users table (for upgrades from older versions)
+        const userColsMigration = [
+            { name: 'last_login', sql: 'TEXT' },
+            { name: 'totp_secret', sql: 'TEXT DEFAULT NULL' },
+            { name: 'totp_enabled', sql: 'INTEGER DEFAULT 0' },
+            { name: 'totp_recovery_codes', sql: 'TEXT DEFAULT NULL' },
+        ];
+        try {
+            const existingUserCols = new Set(db.prepare('PRAGMA table_info(users)').all().map(c => c.name));
+            if (existingUserCols.size > 0) {
+                for (const c of userColsMigration) {
+                    if (!existingUserCols.has(c.name)) {
+                        try { db.exec(`ALTER TABLE users ADD COLUMN ${c.name} ${c.sql}`); console.log(`[DB] Migration: added users.${c.name}`); } catch (_) {}
+                    }
+                }
+            }
+        } catch (e) { console.warn('[DB] Migration users columns error:', e.message); }
+
+        // Migration: Add updated_at to settings table if missing (for upgrades from older versions)
+        try {
+            const settingsCols = new Set(db.prepare('PRAGMA table_info(settings)').all().map(c => c.name));
+            if (settingsCols.size > 0 && !settingsCols.has('updated_at')) {
+                db.exec("ALTER TABLE settings ADD COLUMN updated_at TEXT DEFAULT (datetime('now'))");
+                console.log('[DB] Migration: added settings.updated_at');
+            }
+        } catch (e) { console.warn('[DB] Migration settings columns error:', e.message); }
+
+        // Migration: Add updated_at to branding_config table if missing
+        try {
+            const brandingCols = new Set(db.prepare('PRAGMA table_info(branding_config)').all().map(c => c.name));
+            if (brandingCols.size > 0 && !brandingCols.has('updated_at')) {
+                db.exec("ALTER TABLE branding_config ADD COLUMN updated_at TEXT DEFAULT (datetime('now'))");
+                console.log('[DB] Migration: added branding_config.updated_at');
+            }
+        } catch (e) { console.warn('[DB] Migration branding_config columns error:', e.message); }
+
         // Seed default groups if empty
         const ugCount = db.prepare('SELECT COUNT(*) as c FROM user_groups').get().c;
         if (ugCount === 0) {
@@ -460,19 +496,6 @@ function createSqliteAdapter(config) {
                 UNIQUE(device_id)
             );
         `);
-        
-        // Migration: Add TOTP columns to existing users table (for upgrades from older versions)
-        const userCols = [
-            { name: 'totp_secret', sql: 'TEXT DEFAULT NULL' },
-            { name: 'totp_enabled', sql: 'INTEGER DEFAULT 0' },
-            { name: 'totp_recovery_codes', sql: 'TEXT DEFAULT NULL' },
-        ];
-        const existingUserCols = new Set(db.prepare('PRAGMA table_info(users)').all().map(c => c.name));
-        for (const c of userCols) {
-            if (!existingUserCols.has(c.name)) {
-                try { db.exec(`ALTER TABLE users ADD COLUMN ${c.name} ${c.sql}`); } catch (_) {}
-            }
-        }
     }
 
     function ensureActivityTables(db) {
@@ -3015,9 +3038,12 @@ function createPostgresAdapter() {
             await q('INSERT INTO device_groups (guid, name, note) VALUES ($1, $2, $3)', [crypto.randomUUID(), 'Default', 'Default device group']);
         }
         
-        // Migration: Add TOTP columns to existing users table (for upgrades from older versions)
+        // Migration: Add missing columns to existing users table (for upgrades from older versions)
         const columnCheck = await all(`SELECT column_name FROM information_schema.columns WHERE table_name = 'users'`);
         const existingCols = new Set(columnCheck.map(c => c.column_name));
+        if (!existingCols.has('last_login')) {
+            await q('ALTER TABLE users ADD COLUMN IF NOT EXISTS last_login TIMESTAMPTZ');
+        }
         if (!existingCols.has('totp_secret')) {
             await q('ALTER TABLE users ADD COLUMN IF NOT EXISTS totp_secret TEXT DEFAULT NULL');
         }
@@ -3027,6 +3053,15 @@ function createPostgresAdapter() {
         if (!existingCols.has('totp_recovery_codes')) {
             await q('ALTER TABLE users ADD COLUMN IF NOT EXISTS totp_recovery_codes TEXT DEFAULT NULL');
         }
+
+        // Migration: Add updated_at to settings table if missing (for upgrades from older versions)
+        try {
+            const settingsColCheck = await all(`SELECT column_name FROM information_schema.columns WHERE table_name = 'settings'`);
+            const settingsCols = new Set(settingsColCheck.map(c => c.column_name));
+            if (settingsCols.size > 0 && !settingsCols.has('updated_at')) {
+                await q('ALTER TABLE settings ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT NOW()');
+            }
+        } catch (_) {}
     }
 
     // Parse helpers

@@ -91,24 +91,27 @@ impl BdRelayConnection {
     /// 2. Opens WebSocket to /ws/bd-relay
     /// 3. Waits for pairing
     /// 4. Returns channels for bidirectional binary data
+    ///
+    /// `base_url` is the console URL (e.g. `http://192.168.0.110:5000`),
+    ///     passed from the frontend to match the origin of session cookies.
+    /// `http_client` is the shared reqwest client with cookie store from AppState.
+    /// If `access_token` is available, it's sent as Bearer auth.
+    /// Otherwise the session cookies from prior `api_proxy` login are used.
     pub async fn connect(
+        base_url: &str,
         settings: &Settings,
+        http_client: &reqwest::Client,
         my_id: &str,
         target_id: &str,
     ) -> Result<Self> {
-        let base_url = settings.bd_api_url();
+        let base_url = base_url.trim_end_matches('/');
         let token = settings.access_token.clone().unwrap_or_default();
 
-        if token.is_empty() {
-            bail!("Access token is required to connect. Please log in first.");
-        }
-
         // Step 1: Request relay session via HTTP
-        info!("Requesting relay session to {} via {}", target_id, base_url);
-
-        let client = reqwest::Client::builder()
-            .timeout(std::time::Duration::from_secs(CONNECT_TIMEOUT_SECS))
-            .build()?;
+        let connect_url = format!("{}/api/bd/connect", base_url);
+        info!("[bd_relay] POST {} (target={}, initiator={}, token_len={}, auth={})",
+            connect_url, target_id, my_id, token.len(),
+            if !token.is_empty() { "Bearer" } else { "cookies" });
 
         let body = ConnectRequest {
             target_id: target_id.to_string(),
@@ -116,17 +119,33 @@ impl BdRelayConnection {
             public_key: None, // TODO: E2E key exchange
         };
 
-        let resp = client
-            .post(format!("{}/api/bd/connect", base_url))
-            .header("Authorization", format!("Bearer {}", token))
-            .json(&body)
+        let mut req_builder = http_client
+            .post(&connect_url)
+            .timeout(std::time::Duration::from_secs(CONNECT_TIMEOUT_SECS))
+            .header("Content-Type", "application/json")
+            .header("Origin", "https://tauri.localhost")
+            .json(&body);
+
+        // Attach Bearer token if available; otherwise session cookies are sent automatically
+        if !token.is_empty() {
+            req_builder = req_builder.header("Authorization", format!("Bearer {}", token));
+        }
+
+        let resp = req_builder
             .send()
             .await
-            .context("Failed to request relay session")?;
+            .map_err(|e| {
+                log::error!("[bd_relay] HTTP POST failed: {} (url={})", e, connect_url);
+                anyhow::anyhow!("Failed to request relay session: {}", e)
+            })?;
 
-        if !resp.status().is_success() {
+        let status = resp.status();
+        info!("[bd_relay] POST {} → HTTP {}", connect_url, status);
+
+        if !status.is_success() {
             let text = resp.text().await.unwrap_or_default();
-            bail!("Connect request failed: {}", text);
+            log::error!("[bd_relay] Connect request failed: HTTP {} — {}", status, &text[..text.len().min(500)]);
+            bail!("Connect request failed (HTTP {}): {}", status, text);
         }
 
         let connect_resp: ConnectResponse = resp.json().await?;

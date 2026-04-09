@@ -11,6 +11,7 @@ import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 import { t } from '../lib/i18n';
 import { getDevice, type Device } from '../lib/api';
 import { toastError, toastInfo } from '../stores/toast';
+import { log } from '../lib/logger';
 
 interface RemoteViewProps {
     deviceId: string;
@@ -50,12 +51,25 @@ export default function RemoteView(props: RemoteViewProps) {
     // ---- Lifecycle ----
 
     onMount(async () => {
+        let d: Device | null = null;
         try {
-            const d = await getDevice(props.deviceId);
+            d = await getDevice(props.deviceId);
             setDevice(d);
         } catch {
             // Device info is optional — proceed with connection anyway
         }
+
+        // Don't auto-connect to offline devices — show offline state instead
+        const isDeviceOnline = d && (d.online || d.status === 'online');
+        if (!isDeviceOnline) {
+            log.info('remote', `Device ${props.deviceId} is offline — not auto-connecting`);
+            batch(() => {
+                setState('error');
+                setErrorMsg(t('remote.device_offline'));
+            });
+            return;
+        }
+
         await startConnection();
     });
 
@@ -98,14 +112,20 @@ export default function RemoteView(props: RemoteViewProps) {
             await cleanupAsync();
 
             // Initiate RustDesk protocol connection
+            const currentServerUrl = localStorage.getItem('bd_mgmt_server_url') || '';
+            log.info('remote', `startConnection: peer=${props.deviceId} serverUrl=${currentServerUrl}`);
+
             const result = await invoke<{
                 state: string;
                 peer_id?: string;
                 peer_info?: Record<string, unknown>;
                 error?: string;
-            }>('connect_to_peer', { peerId: props.deviceId });
+            }>('connect_to_peer', { peerId: props.deviceId, serverUrl: currentServerUrl || null });
+
+            log.info('remote', 'connect_to_peer result', result);
 
             if (result.state.startsWith('error')) {
+                log.error('remote', `connect_to_peer error: ${result.error || result.state}`);
                 batch(() => {
                     setState('error');
                     setErrorMsg(result.error || result.state);
@@ -127,6 +147,7 @@ export default function RemoteView(props: RemoteViewProps) {
 
     function startPolling() {
         if (pollTimer) clearInterval(pollTimer);
+        log.info('remote', 'startPolling: begin polling connection state every 300ms');
         pollTimer = setInterval(async () => {
             try {
                 const cs = await invoke<{
@@ -141,16 +162,18 @@ export default function RemoteView(props: RemoteViewProps) {
                 if (cs.latency_ms) setLatency(cs.latency_ms);
 
                 if (cs.state === 'authenticating') {
+                    log.info('remote', 'poll: state=authenticating, stopping poll');
                     clearInterval(pollTimer!);
                     pollTimer = undefined;
                     setState('authenticating');
                     setTimeout(() => passwordRef?.focus(), 50);
                 } else if (cs.state === 'connected') {
-                    // Already authenticated (e.g. no password required)
+                    log.info('remote', 'poll: state=connected (no password required), starting session');
                     clearInterval(pollTimer!);
                     pollTimer = undefined;
                     await startSession();
                 } else if (cs.state.startsWith('error') || cs.state === 'disconnected') {
+                    log.error('remote', `poll: state=${cs.state} error=${cs.error}`);
                     clearInterval(pollTimer!);
                     pollTimer = undefined;
                     batch(() => {
@@ -159,8 +182,8 @@ export default function RemoteView(props: RemoteViewProps) {
                     });
                 }
                 // else: still 'connecting' — keep polling
-            } catch {
-                // Transient error — keep polling
+            } catch (pollErr) {
+                log.warn('remote', 'poll: transient error', pollErr);
             }
         }, 300);
     }
@@ -172,6 +195,7 @@ export default function RemoteView(props: RemoteViewProps) {
         if (!pw) return;
         setPasswordError('');
         setState('starting');
+        log.info('remote', `submitPassword: authenticating (pw_len=${pw.length})`);
 
         try {
             const result = await invoke<{
@@ -180,11 +204,14 @@ export default function RemoteView(props: RemoteViewProps) {
                 error?: string;
             }>('authenticate', { password: pw });
 
+            log.info('remote', 'authenticate result', result);
             if (result.peer_info) setPeerInfo(result.peer_info);
 
             if (result.state === 'connected' || result.state.includes('connected')) {
+                log.info('remote', 'authenticate: connected, starting session');
                 await startSession();
             } else if (result.state.startsWith('error')) {
+                log.error('remote', `authenticate: error — ${result.error}`);
                 batch(() => {
                     setState('authenticating');
                     setPasswordError(result.error || t('remote.auth_failed'));
@@ -192,11 +219,12 @@ export default function RemoteView(props: RemoteViewProps) {
                 });
                 setTimeout(() => passwordRef?.focus(), 50);
             } else {
-                // Unexpected state — poll for a bit
+                log.warn('remote', `authenticate: unexpected state=${result.state}, polling`);
                 startPolling();
             }
         } catch (err: unknown) {
             const msg = err instanceof Error ? err.message : String(err);
+            log.error('remote', `submitPassword catch: ${msg}`);
             batch(() => {
                 setState('authenticating');
                 setPasswordError(msg || t('remote.auth_failed'));
@@ -214,6 +242,7 @@ export default function RemoteView(props: RemoteViewProps) {
 
     async function startSession() {
         setState('starting');
+        log.info('remote', `startSession: peer=${props.deviceId}`);
 
         try {
             // Register event listeners before starting session
@@ -228,6 +257,7 @@ export default function RemoteView(props: RemoteViewProps) {
             }));
 
             unlisteners.push(await listen<{ reason?: string }>('remote-closed', (ev) => {
+                log.warn('remote', `remote-closed event: reason=${ev.payload.reason}`);
                 batch(() => {
                     setState('disconnected');
                     setErrorMsg(ev.payload.reason || '');
@@ -236,6 +266,7 @@ export default function RemoteView(props: RemoteViewProps) {
 
             // Also listen for status events from start_remote_session
             unlisteners.push(await listen<{ connected: boolean; error?: string }>('remote-viewer-status', (ev) => {
+                log.info('remote', `remote-viewer-status: connected=${ev.payload.connected} error=${ev.payload.error}`);
                 if (!ev.payload.connected && state() === 'connected') {
                     batch(() => {
                         setState('disconnected');
@@ -244,9 +275,12 @@ export default function RemoteView(props: RemoteViewProps) {
                 }
             }));
 
+            log.info('remote', 'startSession: event listeners registered, invoking start_remote_session');
+
             // Bridge relay → SessionManager
             await invoke('start_remote_session', { peerId: props.deviceId });
 
+            log.info('remote', 'startSession: start_remote_session returned OK');
             setState('connected');
             toastInfo(t('remote.connected'), peerInfo()?.hostname as string || props.deviceId);
 
@@ -260,6 +294,7 @@ export default function RemoteView(props: RemoteViewProps) {
             setTimeout(() => canvasRef?.focus(), 100);
         } catch (err: unknown) {
             const msg = err instanceof Error ? err.message : String(err);
+            log.error('remote', `startSession catch: ${msg}`);
             batch(() => {
                 setState('error');
                 setErrorMsg(msg || t('remote.connect_failed'));

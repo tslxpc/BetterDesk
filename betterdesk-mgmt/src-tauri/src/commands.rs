@@ -213,20 +213,54 @@ pub fn get_device_id() -> Result<String, String> {
 pub async fn connect_to_peer(
     state: State<'_, AppState>,
     peer_id: String,
+    server_url: Option<String>,
 ) -> Result<ConnectionStatus, String> {
     let settings = {
         let s = state.settings.lock().map_err(|e| e.to_string())?;
         s.clone()
     };
 
-    if settings.native_protocol && settings.access_token.as_ref().map_or(false, |t| !t.is_empty()) {
-        // BetterDesk native — HTTP + WebSocket relay (with 30s overall timeout)
-        // Requires access_token from operator login
+    // Use the frontend-provided server URL (from localStorage) so the request
+    // goes to the same origin where session cookies were established.
+    // Fall back to settings.bd_api_url() if not provided.
+    let base_url = server_url
+        .filter(|u| !u.is_empty())
+        .unwrap_or_else(|| settings.bd_api_url());
+
+    log::info!("[connect_to_peer] peer={} base_url={} native_protocol={} has_token={} console_url={}",
+        peer_id, base_url, settings.native_protocol,
+        settings.access_token.as_ref().map_or(false, |t| !t.is_empty()),
+        settings.console_url);
+
+    // Try BD native protocol first if configured.
+    // Token may come from operator_login (stored in keyring) or session cookies
+    // are used as fallback via the shared http_client.
+    if settings.native_protocol {
         let my_id = identity::get_or_create_device_id().map_err(|e| e.to_string())?;
+        let client = &state.http_client;
+
+        // Pre-flight: check if session cookie is valid by hitting /api/auth/verify
+        {
+            let verify_url = format!("{}/api/auth/verify", base_url);
+            match client.get(&verify_url)
+                .header("Origin", "https://tauri.localhost")
+                .send()
+                .await
+            {
+                Ok(resp) => {
+                    let st = resp.status().as_u16();
+                    let body = resp.text().await.unwrap_or_default();
+                    log::info!("[connect_to_peer] cookie-jar session check: status={} body_prefix={}", st, &body[..body.len().min(100)]);
+                },
+                Err(e) => {
+                    log::warn!("[connect_to_peer] cookie-jar session check failed: {}", e);
+                }
+            }
+        }
 
         let relay = tokio::time::timeout(
             std::time::Duration::from_secs(30),
-            BdRelayConnection::connect(&settings, &my_id, &peer_id),
+            BdRelayConnection::connect(&base_url, &settings, client, &my_id, &peer_id),
         )
         .await
         .map_err(|_| "Connection timed out (30s)".to_string())?
@@ -1838,11 +1872,8 @@ pub async fn api_proxy(
     method: String,
     body: Option<String>,
 ) -> Result<serde_json::Value, String> {
-    let url = format!(
-        "{}{}",
-        server_url.trim_end_matches('/'),
-        if path.starts_with('/') { path.as_str() } else { &format!("/{}", path) }
-    );
+    let normalized_path = if path.starts_with('/') { path } else { format!("/{}", path) };
+    let url = format!("{}{}", server_url.trim_end_matches('/'), normalized_path);
 
     let client = &state.http_client;
 
@@ -1866,6 +1897,8 @@ pub async fn api_proxy(
         builder
     };
 
+    log::info!("[api_proxy] {} {} (body_len={})", method.to_uppercase(), url, body.as_ref().map_or(0, |b| b.len()));
+
     let resp = builder
         .send()
         .await
@@ -1873,6 +1906,8 @@ pub async fn api_proxy(
 
     let status = resp.status().as_u16();
     let text = resp.text().await.map_err(|e| e.to_string())?;
+
+    log::info!("[api_proxy] {} {} → {} (resp_len={})", method.to_uppercase(), normalized_path, status, text.len());
 
     // Parse response — always return a JSON object with __status for the frontend
     let mut json_value: serde_json::Value = if text.trim().is_empty() {
@@ -1893,6 +1928,7 @@ pub async fn api_proxy(
             .or_else(|| json_value.get("message"))
             .and_then(|v| v.as_str())
             .unwrap_or("Request failed");
+        log::warn!("[api_proxy] ERROR {} {} → HTTP {}: {}", method.to_uppercase(), normalized_path, status, error_msg);
         return Err(format!("HTTP {}: {}", status, error_msg));
     }
 
@@ -1911,28 +1947,54 @@ pub async fn api_clear_session(
     // on the server side.  The next login creates a fresh session.
     // We still call the logout endpoint first from the frontend.
     let _ = &state.http_client; // no-op placeholder
+
+    // Clear the stored access token on logout
+    let mut settings = state.settings.lock().map_err(|e| e.to_string())?;
+    settings.access_token = None;
+    let _ = settings.save();
+
     Ok(())
 }
 
+/// Store an access token obtained from operator login.
+///
+/// This is called by the frontend after a successful login via `api_proxy`
+/// to persist the token for use by `BdRelayConnection::connect()`.
+#[tauri::command]
+pub fn set_access_token(
+    state: State<'_, AppState>,
+    token: String,
+) -> Result<(), String> {
+    log::info!("[set_access_token] token_len={} token_prefix={}",
+        token.len(),
+        if token.len() >= 8 { &token[..8] } else { &token });
+    let mut settings = state.settings.lock().map_err(|e| e.to_string())?;
+    settings.access_token = if token.is_empty() { None } else { Some(token) };
+    settings.save().map_err(|e| format!("Failed to save access token: {}", e))
+}
+
 /// Login as an operator and get an access token.
+///
+/// Calls the dedicated BD operator login endpoint which returns a persistent
+/// access token. The token is stored securely (OS keyring) and used for
+/// relay connections and operator API calls.
+///
+/// Retries up to 3 times with exponential backoff on HTTP 429 (rate limit).
 #[tauri::command]
 pub async fn operator_login(
     state: State<'_, AppState>,
     username: String,
     password: String,
 ) -> Result<serde_json::Value, String> {
-    let settings = {
+    let base_url = {
         let s = state.settings.lock().map_err(|e| e.to_string())?;
-        s.clone()
+        s.bd_api_url()
     };
 
-    let base_url = settings.bd_api_url();
     let device_id = identity::get_or_create_device_id().map_err(|e| e.to_string())?;
+    let client = &state.http_client;
 
-    let client = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(10))
-        .build()
-        .map_err(|e| e.to_string())?;
+    log::info!("[operator_login] url={}/api/bd/operator/login user={} device_id={}", base_url, username, device_id);
 
     let body = serde_json::json!({
         "username": username,
@@ -1940,23 +2002,69 @@ pub async fn operator_login(
         "device_id": device_id,
     });
 
-    let url = format!("{}/api/auth/login", base_url);
+    let url = format!("{}/api/bd/operator/login", base_url);
 
-    let resp = client
-        .post(&url)
-        .json(&body)
-        .send()
-        .await
-        .map_err(|e| format!("Login failed: {}", e))?;
+    // Retry on 429 (brute-force lockout) — the session login that runs just
+    // before this call will clear the lockout server-side, but the response
+    // may arrive before the server processes the clearance.
+    let max_retries: u32 = 3;
+    let mut last_err = String::new();
 
-    let status = resp.status();
-    let text = resp.text().await.map_err(|e| e.to_string())?;
+    for attempt in 0..=max_retries {
+        if attempt > 0 {
+            let delay = std::time::Duration::from_secs(2u64.pow(attempt));
+            log::info!("[operator_login] retry {}/{} after {}s", attempt, max_retries, delay.as_secs());
+            tokio::time::sleep(delay).await;
+        }
 
-    if !status.is_success() {
-        return Err(format!("Login failed (HTTP {}): {}", status, text));
+        let resp = match client
+            .post(&url)
+            .header("Content-Type", "application/json")
+            .header("Origin", "https://tauri.localhost")
+            .json(&body)
+            .send()
+            .await
+        {
+            Ok(r) => r,
+            Err(e) => {
+                log::error!("[operator_login] request failed: {}", e);
+                last_err = format!("Login failed: {}", e);
+                continue;
+            }
+        };
+
+        let status = resp.status();
+        let text = resp.text().await.map_err(|e| e.to_string())?;
+
+        log::info!("[operator_login] response: status={} body_len={} body_prefix={}", status, text.len(), &text[..text.len().min(100)]);
+
+        if status.as_u16() == 429 && attempt < max_retries {
+            log::warn!("[operator_login] HTTP 429 (rate limited), will retry");
+            last_err = format!("Login failed (HTTP {}): {}", status, text);
+            continue;
+        }
+
+        if !status.is_success() {
+            log::warn!("[operator_login] HTTP {} — {}", status, &text[..text.len().min(200)]);
+            return Err(format!("Login failed (HTTP {}): {}", status, text));
+        }
+
+        let json: serde_json::Value =
+            serde_json::from_str(&text).map_err(|e| format!("Invalid login response: {}", e))?;
+
+        if let Some(token) = json.get("access_token").and_then(|v| v.as_str()) {
+            log::info!("[operator_login] token obtained, len={}", token.len());
+            let mut settings = state.settings.lock().map_err(|e| e.to_string())?;
+            settings.access_token = Some(token.to_string());
+            settings.save().map_err(|e| format!("Failed to save access token: {}", e))?;
+        } else {
+            log::warn!("[operator_login] response has no access_token field");
+        }
+
+        return Ok(json);
     }
 
-    serde_json::from_str(&text).map_err(|e| format!("Invalid login response: {}", e))
+    Err(last_err)
 }
 
 /// Get list of devices visible to the operator.
@@ -2918,4 +3026,37 @@ pub fn dismiss_notification(
     let mut dismissed = state.dismissed_notifs.lock().map_err(|e| e.to_string())?;
     dismissed.insert(notification_id);
     Ok(())
+}
+
+// ---- Logging bridge (frontend → Rust log file) ----
+
+/// Write a log line from the frontend (JS/TS) into the shared log file.
+///
+/// Levels: "debug", "info", "warn", "error".  Unknown → info.
+#[tauri::command]
+pub fn write_log(level: String, module: String, message: String) -> Result<(), String> {
+    let lvl = match level.to_lowercase().as_str() {
+        "debug" | "trace" => log::Level::Debug,
+        "warn" | "warning" => log::Level::Warn,
+        "error" => log::Level::Error,
+        _ => log::Level::Info,
+    };
+    crate::logging::write_frontend_log(lvl, &module, &message);
+    Ok(())
+}
+
+/// Return the log file path so the UI can display it.
+#[tauri::command]
+pub fn get_log_path() -> Result<String, String> {
+    crate::logging::log_file_path()
+        .map(|p| p.to_string_lossy().to_string())
+        .ok_or_else(|| "Log file not initialized".to_string())
+}
+
+/// Open the log file in the OS default text editor / file manager.
+#[tauri::command]
+pub fn open_log_file() -> Result<(), String> {
+    let path = crate::logging::log_file_path()
+        .ok_or("Log file not initialized")?;
+    open::that(&path).map_err(|e| format!("Failed to open log: {}", e))
 }
