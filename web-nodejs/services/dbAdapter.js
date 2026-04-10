@@ -217,6 +217,7 @@ function createSqliteAdapter(config) {
             { name: 'banned_at', sql: 'TEXT' },
             { name: 'banned_reason', sql: 'TEXT DEFAULT \'\'' },
             { name: 'folder_id', sql: 'INTEGER DEFAULT NULL' },
+            { name: 'tags', sql: "TEXT DEFAULT ''" },
         ];
         const existing = new Set(db.prepare('PRAGMA table_info(peer)').all().map(c => c.name));
         for (const c of cols) {
@@ -793,6 +794,7 @@ function createSqliteAdapter(config) {
             ban_reason: row.banned_reason || '',
             folder_id: row.folder_id || null,
             info: row.info || '',
+            tags: row.tags ? row.tags.split(',').filter(Boolean) : [],
         };
     }
 
@@ -836,7 +838,7 @@ function createSqliteAdapter(config) {
             if (!tbl) return;
             db.prepare(`
                 INSERT INTO peer (id, uuid, pk, info, ip, "user", status_online, last_online, created_at,
-                                  is_deleted, is_banned, banned_at, banned_reason)
+                                  is_deleted, is_banned, banned_at, banned_reason, tags)
                 SELECT
                     p.id,
                     COALESCE(p.uuid, ''),
@@ -855,15 +857,33 @@ function createSqliteAdapter(config) {
                     0,
                     CASE WHEN p.banned THEN 1 ELSE 0 END,
                     p.banned_at,
-                    COALESCE(p.ban_reason, '')
+                    COALESCE(p.ban_reason, ''),
+                    COALESCE(p.tags, '')
                 FROM peers p
                 WHERE NOT p.soft_deleted
                 ON CONFLICT(id) DO UPDATE SET
                     status_online = excluded.status_online,
                     last_online   = COALESCE(excluded.last_online, last_online),
                     info          = CASE WHEN info IS NULL OR info = '{}' OR info = '' THEN excluded.info ELSE info END,
-                    is_deleted    = 0
+                    is_deleted    = 0,
+                    tags          = COALESCE(NULLIF(excluded.tags, ''), tags)
             `).run();
+
+            // Clean up ghost entries from ID changes: remove peers whose ID appears
+            // as old_id in Go's id_change_history and no longer exists in Go's peers table.
+            const histTbl = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='id_change_history'").get();
+            if (histTbl) {
+                const result = db.prepare(`
+                    DELETE FROM peer WHERE id IN (
+                        SELECT h.old_id FROM id_change_history h
+                        LEFT JOIN peers p ON p.id = h.old_id AND NOT p.soft_deleted
+                        WHERE p.id IS NULL
+                    )
+                `).run();
+                if (result.changes > 0) {
+                    console.log(`[DB] syncGoPeersSqlite: cleaned up ${result.changes} ghost peer(s) from ID changes`);
+                }
+            }
         } catch (err) {
             if (!err.message.includes('no such table')) {
                 console.warn('[DB] syncGoPeersSqlite error:', err.message);
@@ -933,8 +953,8 @@ function createSqliteAdapter(config) {
                             version: goRow.version || ''
                         });
                         db.prepare(`
-                            INSERT INTO peer (id, uuid, pk, info, ip, "user", status_online, last_online, created_at, is_deleted, is_banned, banned_at, banned_reason)
-                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?)
+                            INSERT INTO peer (id, uuid, pk, info, ip, "user", status_online, last_online, created_at, is_deleted, is_banned, banned_at, banned_reason, tags)
+                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?)
                             ON CONFLICT(id) DO UPDATE SET
                                 uuid = COALESCE(NULLIF(excluded.uuid, ''), uuid),
                                 pk = COALESCE(excluded.pk, pk),
@@ -943,7 +963,8 @@ function createSqliteAdapter(config) {
                                 "user" = COALESCE(NULLIF(excluded."user", ''), "user"),
                                 status_online = excluded.status_online,
                                 last_online = COALESCE(excluded.last_online, last_online),
-                                is_deleted = 0
+                                is_deleted = 0,
+                                tags = COALESCE(NULLIF(excluded.tags, ''), tags)
                         `).run(
                             goRow.id,
                             goRow.uuid || '',
@@ -956,7 +977,8 @@ function createSqliteAdapter(config) {
                             goRow.created_at || new Date().toISOString(),
                             goRow.banned ? 1 : 0,
                             goRow.banned_at || null,
-                            goRow.ban_reason || ''
+                            goRow.ban_reason || '',
+                            goRow.tags || ''
                         );
                         row = db.prepare('SELECT * FROM peer WHERE id = ? AND is_deleted = 0').get(id);
                     }
@@ -1002,6 +1024,20 @@ function createSqliteAdapter(config) {
             authDb.prepare('DELETE FROM peer_metrics WHERE peer_id = ?').run(id);
             authDb.prepare('DELETE FROM device_folder_assignments WHERE peer_id = ?').run(id);
             authDb.prepare('DELETE FROM device_group_peers WHERE peer_id = ?').run(id);
+        },
+
+        /**
+         * Check if a peer ID was renamed to a new ID. Returns the new_id if found,
+         * null otherwise. Used to reject registrations with stale/old IDs.
+         */
+        getRenamedPeerId(oldId) {
+            try {
+                const db = openMain();
+                const tbl = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='id_change_history'").get();
+                if (!tbl) return null;
+                const row = db.prepare('SELECT new_id FROM id_change_history WHERE old_id = ? ORDER BY rowid DESC LIMIT 1').get(oldId);
+                return row ? row.new_id : null;
+            } catch (_) { return null; }
         },
 
         async setBanStatus(id, banned, reason = '') {
@@ -3087,6 +3123,7 @@ function createPostgresAdapter() {
             ban_reason: row.banned_reason || '',
             folder_id: row.folder_id || null,
             info: typeof row.info === 'object' ? JSON.stringify(row.info) : (row.info || ''),
+            tags: row.tags ? (typeof row.tags === 'string' ? row.tags.split(',').filter(Boolean) : []) : [],
         };
     }
 
@@ -3286,6 +3323,17 @@ function createPostgresAdapter() {
             await q('DELETE FROM peer_metrics WHERE peer_id = $1', [id]);
             await q('DELETE FROM device_folder_assignments WHERE peer_id = $1', [id]);
             await q('DELETE FROM device_group_peers WHERE peer_id = $1', [id]);
+        },
+
+        /**
+         * Check if a peer ID was renamed to a new ID. Returns the new_id if found,
+         * null otherwise. Used to reject registrations with stale/old IDs.
+         */
+        async getRenamedPeerId(oldId) {
+            try {
+                const row = await q1('SELECT new_id FROM id_change_history WHERE old_id = $1 ORDER BY id DESC LIMIT 1', [oldId]);
+                return row ? row.new_id : null;
+            } catch (_) { return null; }
         },
 
         async setBanStatus(id, banned, reason = '') {

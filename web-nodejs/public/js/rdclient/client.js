@@ -47,7 +47,7 @@ class RDClient {
         });
 
         // State
-        this._state = 'idle'; // idle | connecting | waiting_password | authenticating | streaming | disconnected | error
+        this._state = 'idle'; // idle | connecting | waiting_password | waiting_2fa | authenticating | streaming | disconnected | error
         this._listeners = {};
         this._peerInfo = null;
         this._loginChallenge = null;
@@ -264,6 +264,27 @@ class RDClient {
 
             // The response will be handled in _handleRelayMessage
 
+        } catch (err) {
+            this._handleError(err);
+        }
+    }
+
+    /**
+     * Submit 2FA verification code (TOTP)
+     * @param {string} code - 6-digit TOTP code
+     */
+    submit2FA(code) {
+        try {
+            this._setState('authenticating');
+            this._emit('log', 'Verifying 2FA code...');
+
+            const auth2fa = {
+                auth2Fa: {
+                    code: code.trim()
+                }
+            };
+            this._sendPeerMessage(auth2fa);
+            console.log('[RDClient] Auth2FA sent');
         } catch (err) {
             this._handleError(err);
         }
@@ -835,7 +856,17 @@ class RDClient {
         }).substring(0, 500));
 
         if (resp.error && resp.error.length > 0) {
+            const errLower = resp.error.toLowerCase();
             console.log('[RDClient] Login error: ' + resp.error);
+
+            // Detect 2FA requirement from error message
+            if (errLower.includes('2fa') || errLower.includes('totp') || errLower.includes('verification code')) {
+                console.log('[RDClient] 2FA required by peer');
+                this._setState('waiting_2fa');
+                this._emit('2fa_required');
+                return;
+            }
+
             this._emit('login_error', resp.error);
             this._setState('waiting_password');
             return;

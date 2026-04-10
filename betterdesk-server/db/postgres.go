@@ -88,13 +88,15 @@ func (pg *PostgresDB) Migrate() error {
 			deleted_at    TIMESTAMPTZ,
 			note          TEXT NOT NULL DEFAULT '',
 			tags          TEXT NOT NULL DEFAULT '',
-			heartbeat_seq BIGINT NOT NULL DEFAULT 0
+			heartbeat_seq BIGINT NOT NULL DEFAULT 0,
+			device_type   TEXT NOT NULL DEFAULT '',
+			linked_peer_id TEXT NOT NULL DEFAULT '',
+			display_name  TEXT NOT NULL DEFAULT ''
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_peers_uuid ON peers(uuid)`,
 		`CREATE INDEX IF NOT EXISTS idx_peers_status ON peers(status)`,
 		`CREATE INDEX IF NOT EXISTS idx_peers_banned ON peers(banned) WHERE banned = TRUE`,
 		`CREATE INDEX IF NOT EXISTS idx_peers_soft_deleted ON peers(soft_deleted) WHERE soft_deleted = FALSE`,
-		`CREATE INDEX IF NOT EXISTS idx_peers_linked_peer ON peers(linked_peer_id) WHERE linked_peer_id != ''`,
 
 		`CREATE TABLE IF NOT EXISTS server_config (
 			key   TEXT PRIMARY KEY,
@@ -259,6 +261,16 @@ func (pg *PostgresDB) Migrate() error {
 			value  TEXT NOT NULL DEFAULT '',
 			PRIMARY KEY(org_id, key)
 		)`,
+		// Role permission overrides (RBAC Phase 52)
+		`CREATE TABLE IF NOT EXISTS role_permissions (
+			id          BIGSERIAL PRIMARY KEY,
+			role        TEXT NOT NULL,
+			permission  TEXT NOT NULL,
+			granted     BOOLEAN NOT NULL DEFAULT TRUE,
+			UNIQUE(role, permission)
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_role_permissions_role ON role_permissions(role)`,
+
 		`CREATE TABLE IF NOT EXISTS access_policies (
 			peer_id TEXT PRIMARY KEY,
 			unattended_enabled BOOLEAN NOT NULL DEFAULT FALSE,
@@ -300,11 +312,24 @@ func (pg *PostgresDB) Migrate() error {
 		`ALTER TABLE peers ADD COLUMN IF NOT EXISTS linked_peer_id TEXT NOT NULL DEFAULT ''`,
 		// peers: display_name alias (added in v2.6.0)
 		`ALTER TABLE peers ADD COLUMN IF NOT EXISTS display_name TEXT NOT NULL DEFAULT ''`,
+		// users: server admin flag (RBAC Phase 52)
+		`ALTER TABLE users ADD COLUMN IF NOT EXISTS is_server_admin BOOLEAN NOT NULL DEFAULT FALSE`,
 	}
 
 	for _, ddl := range columnMigrations {
 		if _, err := pg.pool.Exec(pg.ctx, ddl); err != nil {
 			return fmt.Errorf("db: PostgreSQL column migration failed: %w\nStatement: %s", err, ddl)
+		}
+	}
+
+	// Deferred indexes — must run AFTER column migrations so that columns
+	// like linked_peer_id exist on databases created before v2.5.0.
+	deferredIndexes := []string{
+		`CREATE INDEX IF NOT EXISTS idx_peers_linked_peer ON peers(linked_peer_id) WHERE linked_peer_id != ''`,
+	}
+	for _, idx := range deferredIndexes {
+		if _, err := pg.pool.Exec(pg.ctx, idx); err != nil {
+			return fmt.Errorf("db: PostgreSQL deferred index failed: %w\nStatement: %s", err, idx)
 		}
 	}
 
@@ -782,7 +807,7 @@ func scanUser(row pgx.Row) (*User, error) {
 	var lastLogin *time.Time
 
 	err := row.Scan(&u.ID, &u.Username, &u.PasswordHash, &u.Role,
-		&u.TOTPSecret, &u.TOTPEnabled, &createdAt, &lastLogin)
+		&u.TOTPSecret, &u.TOTPEnabled, &createdAt, &lastLogin, &u.IsServerAdmin)
 	if err != nil {
 		return nil, err
 	}
@@ -801,7 +826,7 @@ func scanUser(row pgx.Row) (*User, error) {
 func (pg *PostgresDB) GetUser(username string) (*User, error) {
 	row := pg.pool.QueryRow(pg.ctx,
 		`SELECT id, username, password_hash, role, totp_secret, totp_enabled,
-		        created_at, last_login FROM users WHERE username = $1`, username)
+		        created_at, last_login, COALESCE(is_server_admin, FALSE) FROM users WHERE username = $1`, username)
 	u, err := scanUser(row)
 	if err == pgx.ErrNoRows {
 		return nil, nil
@@ -813,7 +838,7 @@ func (pg *PostgresDB) GetUser(username string) (*User, error) {
 func (pg *PostgresDB) GetUserByID(id int64) (*User, error) {
 	row := pg.pool.QueryRow(pg.ctx,
 		`SELECT id, username, password_hash, role, totp_secret, totp_enabled,
-		        created_at, last_login FROM users WHERE id = $1`, id)
+		        created_at, last_login, COALESCE(is_server_admin, FALSE) FROM users WHERE id = $1`, id)
 	u, err := scanUser(row)
 	if err == pgx.ErrNoRows {
 		return nil, nil
@@ -825,7 +850,7 @@ func (pg *PostgresDB) GetUserByID(id int64) (*User, error) {
 func (pg *PostgresDB) ListUsers() ([]*User, error) {
 	rows, err := pg.pool.Query(pg.ctx,
 		`SELECT id, username, password_hash, role, totp_secret, totp_enabled,
-		        created_at, last_login FROM users ORDER BY id`)
+		        created_at, last_login, COALESCE(is_server_admin, FALSE) FROM users ORDER BY id`)
 	if err != nil {
 		return nil, fmt.Errorf("db: ListUsers: %w", err)
 	}
@@ -845,9 +870,9 @@ func (pg *PostgresDB) ListUsers() ([]*User, error) {
 // UpdateUser updates a user's mutable fields.
 func (pg *PostgresDB) UpdateUser(u *User) error {
 	_, err := pg.pool.Exec(pg.ctx,
-		`UPDATE users SET password_hash = $1, role = $2, totp_secret = $3, totp_enabled = $4
-		 WHERE id = $5`,
-		u.PasswordHash, u.Role, u.TOTPSecret, u.TOTPEnabled, u.ID)
+		`UPDATE users SET password_hash = $1, role = $2, totp_secret = $3, totp_enabled = $4, is_server_admin = $5
+		 WHERE id = $6`,
+		u.PasswordHash, u.Role, u.TOTPSecret, u.TOTPEnabled, u.IsServerAdmin, u.ID)
 	return err
 }
 
@@ -1517,4 +1542,76 @@ func (pg *PostgresDB) SaveAccessPolicy(p *AccessPolicy) error {
 func (pg *PostgresDB) DeleteAccessPolicy(peerID string) error {
 	_, err := pg.pool.Exec(pg.ctx, `DELETE FROM access_policies WHERE peer_id = $1`, peerID)
 	return err
+}
+
+// --- Role Permissions (RBAC Phase 52) ---
+
+func (pg *PostgresDB) ListRolePermissions(role string) ([]*RolePermission, error) {
+	rows, err := pg.pool.Query(pg.ctx,
+		`SELECT id, role, permission, granted FROM role_permissions WHERE role = $1`, role)
+	if err != nil {
+		return nil, fmt.Errorf("db: ListRolePermissions: %w", err)
+	}
+	defer rows.Close()
+
+	var perms []*RolePermission
+	for rows.Next() {
+		p := &RolePermission{}
+		if err := rows.Scan(&p.ID, &p.Role, &p.Permission, &p.Granted); err != nil {
+			return nil, err
+		}
+		perms = append(perms, p)
+	}
+	return perms, rows.Err()
+}
+
+func (pg *PostgresDB) SetRolePermission(role, permission string, granted bool) error {
+	_, err := pg.pool.Exec(pg.ctx,
+		`INSERT INTO role_permissions (role, permission, granted)
+		 VALUES ($1, $2, $3) ON CONFLICT (role, permission) DO UPDATE SET granted = EXCLUDED.granted`,
+		role, permission, granted)
+	return err
+}
+
+func (pg *PostgresDB) DeleteRolePermission(role, permission string) error {
+	_, err := pg.pool.Exec(pg.ctx,
+		`DELETE FROM role_permissions WHERE role = $1 AND permission = $2`, role, permission)
+	return err
+}
+
+func (pg *PostgresDB) HasRolePermission(role, permission string) (bool, error) {
+	var granted bool
+	err := pg.pool.QueryRow(pg.ctx,
+		`SELECT granted FROM role_permissions WHERE role = $1 AND permission = $2`,
+		role, permission).Scan(&granted)
+	if err == pgx.ErrNoRows {
+		return false, fmt.Errorf("no override")
+	}
+	return granted, err
+}
+
+func (pg *PostgresDB) ListPeersForOrg(orgID string, includeDeleted bool) ([]*Peer, error) {
+	query := `SELECT ` + peerColumns + ` FROM peers p
+		INNER JOIN org_devices od ON p.id = od.device_id
+		WHERE od.org_id = $1`
+	if !includeDeleted {
+		query += ` AND p.soft_deleted = FALSE`
+	}
+	query += ` ORDER BY p.last_online DESC NULLS LAST`
+
+	rows, err := pg.pool.Query(pg.ctx, query, orgID)
+	if err != nil {
+		return nil, fmt.Errorf("db: ListPeersForOrg: %w", err)
+	}
+	defer rows.Close()
+
+	var peers []*Peer
+	for rows.Next() {
+		p, err := scanPeer(rows)
+		if err != nil {
+			return nil, err
+		}
+		peers = append(peers, p)
+	}
+	return peers, rows.Err()
 }

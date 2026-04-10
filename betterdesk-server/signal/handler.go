@@ -632,24 +632,22 @@ func (s *Server) handlePunchHoleRequestTCP(msg *pb.PunchHoleRequest, raddr *net.
 		}
 	}
 
-	// Forward PunchHole to the TARGET peer via UDP (tell it the initiator wants to connect).
-	if target.UDPAddr != nil {
-		punchHole := &pb.RendezvousMessage{
-			Union: &pb.RendezvousMessage_PunchHole{
-				PunchHole: &pb.PunchHole{
-					SocketAddr:   crypto.EncodeAddr(raddr),
-					RelayServer:  relayServer,
-					NatType:      msg.NatType,
-					UdpPort:      msg.UdpPort,
-					ForceRelay:   msg.ForceRelay,
-					UpnpPort:     msg.UpnpPort,
-					SocketAddrV6: msg.SocketAddrV6,
-				},
+	// Forward PunchHole to the TARGET peer (supports UDP, TCP, and WebSocket targets).
+	punchHole := &pb.RendezvousMessage{
+		Union: &pb.RendezvousMessage_PunchHole{
+			PunchHole: &pb.PunchHole{
+				SocketAddr:   crypto.EncodeAddr(raddr),
+				RelayServer:  relayServer,
+				NatType:      msg.NatType,
+				UdpPort:      msg.UdpPort,
+				ForceRelay:   msg.ForceRelay,
+				UpnpPort:     msg.UpnpPort,
+				SocketAddrV6: msg.SocketAddrV6,
 			},
-		}
-		s.sendUDP(punchHole, target.UDPAddr)
-		log.Printf("[signal] PunchHole (TCP): forwarded PunchHole to target %s at %s", targetID, target.UDPAddr)
+		},
 	}
+	s.sendToPeer(targetID, punchHole)
+	log.Printf("[signal] PunchHole (TCP): forwarded to target %s (connType=%s)", targetID, target.ConnType)
 
 	// LAN detection: if both peers share the same public IP or are on the same
 	// private /24 subnet, they are on the same local network.
@@ -870,23 +868,23 @@ func (s *Server) handleRequestRelay(msg *pb.RequestRelay, raddr *net.UDPAddr) {
 		log.Printf("[signal] RequestRelay LAN detected: %s and %s on same network, relay=%s", raddr.IP, target.UDPAddr.IP, relayServer)
 	}
 
-	// Forward relay info to target peer
-	relayResp := &pb.RendezvousMessage{
-		Union: &pb.RendezvousMessage_RelayResponse{
-			RelayResponse: &pb.RelayResponse{
+	// Forward relay request to target peer (supports UDP, TCP, and WebSocket targets).
+	// NOTE: Must use RequestRelay type, not RelayResponse — RustDesk client's
+	// handle_resp() dispatches RequestRelay to create_relay() but drops RelayResponse.
+	relayReq := &pb.RendezvousMessage{
+		Union: &pb.RendezvousMessage_RequestRelay{
+			RequestRelay: &pb.RequestRelay{
 				SocketAddr:  crypto.EncodeAddr(raddr),
 				Uuid:        relayUUID,
+				Id:          msg.Id,
 				RelayServer: relayServer,
-				Union:       &pb.RelayResponse_Id{Id: msg.Id},
 			},
 		},
 	}
 
-	if target.UDPAddr != nil {
-		// Store the UUID so we can recover it if target responds with empty UUID.
-		s.storePendingUUID(targetID, relayUUID)
-		s.sendUDP(relayResp, target.UDPAddr)
-	}
+	// Store the UUID so we can recover it if target responds with empty UUID.
+	s.storePendingUUID(targetID, relayUUID)
+	s.sendToPeer(targetID, relayReq)
 
 	// Sign the target's PK for E2E encryption verification
 	var signedPk []byte
@@ -967,32 +965,31 @@ func (s *Server) handleRequestRelayTCP(msg *pb.RequestRelay, raddr *net.UDPAddr)
 	}
 
 	// LAN detection: use server's LAN IP for relay when both peers are on same network.
+	// Only applicable when target has a known UDP address for comparison.
 	if target.UDPAddr != nil && isSameNetwork(raddr, target.UDPAddr) {
 		relayServer = s.getLANRelayServer()
 		log.Printf("[signal] RequestRelay (TCP) LAN detected: %s and %s on same network, relay=%s", raddr.IP, target.UDPAddr.IP, relayServer)
 	}
 
-	// Forward RequestRelay to target peer via UDP.
-	if target.UDPAddr != nil {
-		reqRelay := &pb.RendezvousMessage{
-			Union: &pb.RendezvousMessage_RequestRelay{
-				RequestRelay: &pb.RequestRelay{
-					SocketAddr:         crypto.EncodeAddr(raddr),
-					Uuid:               relayUUID,
-					Id:                 msg.Id,
-					RelayServer:        relayServer,
-					Secure:             msg.Secure,
-					ConnType:           msg.ConnType,
-					Token:              msg.Token,
-					ControlPermissions: msg.ControlPermissions,
-				},
+	// Forward RequestRelay to target peer (supports UDP, TCP, and WebSocket targets).
+	reqRelay := &pb.RendezvousMessage{
+		Union: &pb.RendezvousMessage_RequestRelay{
+			RequestRelay: &pb.RequestRelay{
+				SocketAddr:         crypto.EncodeAddr(raddr),
+				Uuid:               relayUUID,
+				Id:                 msg.Id,
+				RelayServer:        relayServer,
+				Secure:             msg.Secure,
+				ConnType:           msg.ConnType,
+				Token:              msg.Token,
+				ControlPermissions: msg.ControlPermissions,
 			},
-		}
-		// Store the UUID so we can recover it if target responds with empty UUID.
-		s.storePendingUUID(targetID, relayUUID)
-		s.sendUDP(reqRelay, target.UDPAddr)
-		log.Printf("[signal] RequestRelay (TCP): forwarded to %s secure=%v connType=%v", targetID, msg.Secure, msg.ConnType)
+		},
 	}
+	// Store the UUID so we can recover it if target responds with empty UUID.
+	s.storePendingUUID(targetID, relayUUID)
+	s.sendToPeer(targetID, reqRelay)
+	log.Printf("[signal] RequestRelay (TCP): forwarded to %s (connType=%s) secure=%v", targetID, target.ConnType, msg.Secure)
 
 	// Sign the target's PK for E2E encryption verification
 	var signedPk []byte

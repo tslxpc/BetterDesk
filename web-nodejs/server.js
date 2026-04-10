@@ -566,7 +566,8 @@ function startRustDeskApiServer() {
  */
 function printStartupBanner(protocol, port) {
     const sslStatus = config.httpsEnabled ? '🔒 HTTPS' : '🔓 HTTP';
-    const apiStatus = config.apiEnabled ? `✅ Port ${config.apiPort}` : '❌ Disabled';
+    const apiStatus = config.apiEnabled ? `✅ Port ${config.apiPort} (HTTP)` : '❌ Disabled';
+    const panelUrl = `${protocol}://${config.host}:${port}`;
     console.log('');
     console.log('  ╔══════════════════════════════════════════════════╗');
     console.log('  ║                                                  ║');
@@ -574,15 +575,19 @@ function printStartupBanner(protocol, port) {
     console.log('  ║                                                  ║');
     console.log('  ╠══════════════════════════════════════════════════╣');
     console.log('  ║                                                  ║');
-    console.log(`  ║   Panel:     ${protocol}://${config.host}:${port}`.padEnd(53) + '║');
+    console.log(`  ║   Panel:      ${panelUrl}`.padEnd(53) + '║');
+    if (config.httpsEnabled && config.httpRedirect) {
+        console.log(`  ║   Redirect:   http://${config.host}:${config.port} → :${config.httpsPort}`.padEnd(53) + '║');
+    }
     console.log(`  ║   Client API: ${apiStatus}`.padEnd(53) + '║');
-    console.log(`  ║   Mode:      ${config.nodeEnv}`.padEnd(53) + '║');
-    console.log(`  ║   Security:  ${sslStatus}`.padEnd(53) + '║');
+    console.log(`  ║   Go API:     http://localhost:21114/api`.padEnd(53) + '║');
+    console.log(`  ║   Mode:       ${config.nodeEnv}`.padEnd(53) + '║');
+    console.log(`  ║   Security:   ${sslStatus}`.padEnd(53) + '║');
     const dbLabel = (db.DB_TYPE === 'postgres' || db.DB_TYPE === 'postgresql')
         ? `PostgreSQL (${process.env.DATABASE_URL ? new URL(process.env.DATABASE_URL).hostname : 'localhost'})`
         : path.basename(config.dbPath);
-    console.log(`  ║   Database:  ${dbLabel}`.padEnd(53) + '║');
-    console.log(`  ║   Keys:      ${config.keysPath}`.padEnd(53) + '║');
+    console.log(`  ║   Database:   ${dbLabel}`.padEnd(53) + '║');
+    console.log(`  ║   Keys:       ${config.keysPath}`.padEnd(53) + '║');
     console.log('  ║                                                  ║');
     console.log('  ╚══════════════════════════════════════════════════╝');
     console.log('');

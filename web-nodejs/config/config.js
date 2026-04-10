@@ -68,6 +68,16 @@ function resolveKeysPath() {
 const KEYS_PATH = resolveKeysPath();
 const RUSTDESK_DIR = KEYS_PATH;
 
+// Warn if KEYS_PATH was auto-detected and looks wrong
+if (!process.env.KEYS_PATH && !process.env.RUSTDESK_DIR && !process.env.RUSTDESK_PATH) {
+    const apiKeyFile = path.join(KEYS_PATH, '.api_key');
+    const keyFile = path.join(KEYS_PATH, 'id_ed25519');
+    if (!fs.existsSync(apiKeyFile) && !fs.existsSync(keyFile)) {
+        console.warn(`⚠️  KEYS_PATH auto-detected as "${KEYS_PATH}" but no .api_key or id_ed25519 found there.`);
+        console.warn('   Set KEYS_PATH in .env to point to the Go server data directory.');
+    }
+}
+
 // Database path
 const DB_PATH = process.env.DB_PATH || path.join(RUSTDESK_DIR, 'db_v2.sqlite3');
 

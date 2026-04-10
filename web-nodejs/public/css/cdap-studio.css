@@ -891,6 +891,7 @@
     border: 1px solid var(--studio-panel-border);
     border-radius: 8px;
     cursor: pointer;
+    transform: translateY(0);
     transition: border-color 0.15s, transform 0.15s;
 }
 

@@ -194,4 +194,7 @@
 
     // Public API
     window.Languages = { init, viewMissing, fixMissing, closeDetail };
+
+    // Self-initialize (inline <script> blocked by CSP nonce policy)
+    document.addEventListener('DOMContentLoaded', init);
 })();

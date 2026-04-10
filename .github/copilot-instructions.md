@@ -5,7 +5,7 @@
 
 ---
 
-## 📊 Stan Projektu (aktualizacja: 2026-03-25)
+## 📊 Stan Projektu (aktualizacja: 2026-04-10)
 
 ### Wersja Skryptów ALL-IN-ONE (v2.4.0)
 
@@ -846,6 +846,43 @@ sudo apt-get install -y build-essential libsqlite3-dev pkg-config libssl-dev git
 364. [ ] **Cross-platform build & installers**: Windows (MSI + NSSM service), Linux (deb/rpm + systemd), macOS (pkg + launchd). Per-platform: screen capture, input model, permissions/UAC, secret storage, firewall, autostart, script execution differences.
 365. [ ] **Testing**: Unit tests, integration tests, registration tests, security tests, automation tests, cross-platform compatibility tests, update tests, connection loss resilience tests, server/certificate reconfiguration tests. Spec: `docs/new_agents/client2.md`.
 
+#### GitHub Issue Triage & Fixes (Phase 51) ✅ COMPLETED 2026-04-10
+366. [x] **Closed 16 GitHub issues**: Full audit of all 22 open issues — 14 already fixed in codebase (verified + closed with detailed comments), 2 fixed with new code
+367. [x] **TCP accept EOF log spam (#100)**: Added `errors.Is(err, io.EOF)` + `strings.Contains("connection reset"|"use of closed")` filter in both `signal/server.go` and `relay/server.go` `serveTCP()` loops. Silences benign scanner/probe noise.
+368. [x] **Startup banner port confusion (#98)**: `server.js` `printStartupBanner()` now shows all active ports, protocol labels (HTTP/HTTPS), redirect info, and Go API URL.
+369. [x] **KEYS_PATH auto-detect warning (#89)**: `config.js` warns when KEYS_PATH was auto-detected but no `.api_key` or `id_ed25519` found at resolved path.
+370. [x] **CSS hover layout shift (#75)**: Added `transform: translateY(0)` base state to 7 elements across 5 CSS files. Fixed `transition: all` → specific properties on `.widget-action-btn`.
+371. [x] **Admin password race condition (#88)**: `ensureDefaultAdmin()` in `authService.js` now retries reading `.admin_credentials` after 3-second delay on fresh install (Go server may not have written file yet). Falls back to writing generated password to `data/.admin_credentials` for discoverability.
+372. [x] **ID change ghost entries (#97)**: Two fixes: (1) `syncGoPeersSqlite()` now cross-references `id_change_history` to DELETE ghost peer entries with renamed IDs. (2) `/api/bd/register` checks `getRenamedPeerId()` and returns 409 with `new_id` for stale IDs.
+373. [x] **Posted analysis comments**: Remaining open issues (#93 EJS template, #94 MGMT token, #78 Docker SQLITE_READONLY, #76 tag sync, #74 access controls) received detailed analysis comments with actionable steps.
+374. [x] **Discussion #99 RBAC response**: Comprehensive RBAC analysis comparing current 4-tier vs proposed 6-tier hierarchy, 5 critical gaps identified, 3-phase implementation roadmap. Saved to `docs/_internal/DISCUSSION_99_RBAC_RESPONSE.md`.
+
+#### RBAC — Granular Permissions & Data Scoping (Phase 52) ✅ COMPLETED 2026-04-10
+375. [x] **`auth/permissions.go` created**: 28 granular permission constants (device.view/.connect/.edit/.delete/.ban/.change_id, user.view/.create/.edit/.delete, server.config/.keys, org.create/.edit/.delete/.manage_users/.manage_devices, audit.view, metrics.view, blocklist.edit, cdap.view/.command/.terminal/.files, enrollment.manage/.approve, chat.access, branding.edit). `DefaultRolePermissions` map (admin=all 28, operator=12, viewer=5, pro=1). `RoleHasPermission()`, `ValidPermission()` helpers.
+376. [x] **JWT org context**: Added `OrgID string` to `auth.Claims`, `GenerateOrgToken()` method. Org login now embeds `org_id` in JWT. `authMiddleware` extracts and injects `org_id` into request context.
+377. [x] **`requirePermission()` middleware (Go)**: Checks DB `role_permissions` table for custom overrides first, falls back to `DefaultRolePermissions`. Admin always passes. ~30 routes migrated from `requireRole` to `requirePermission`.
+378. [x] **`requireOrgMembership()` middleware**: Enforces org membership for org-scoped endpoints. Global admins bypass. JWT `org_id` matching + DB lookup fallback.
+379. [x] **Data scoping**: `handleListPeers` uses `ListPeersForOrg(orgID)` when JWT has org_id. `handleListOrgs` filtered by membership for non-admins.
+380. [x] **`role_permissions` table**: SQLite + PostgreSQL schema migration. `ListRolePermissions`, `SetRolePermission`, `DeleteRolePermission`, `HasRolePermission`, `ListPeersForOrg` — implemented in both adapters.
+381. [x] **`User.IsServerAdmin` field**: Added to DB model, SQLite + PostgreSQL schema migration (`is_server_admin` column), all user queries updated to scan/persist it. Exposed in `/api/auth/me` and `/api/users` responses.
+382. [x] **Super admin protection**: Self-demotion prevention (admin cannot lower own role). Role boundary enforcement (cannot assign role > own). Server admin protection (only server admins can modify/delete other server admins). Last-admin deletion guard (pre-existing).
+383. [x] **Node.js `requirePermission()` middleware**: Added to `web-nodejs/middleware/auth.js` with matching `DEFAULT_ROLE_PERMISSIONS` map mirroring Go defaults. Exported `requirePermission()` and `roleHasPermission()` functions.
+384. [x] **Documentation**: `docs/features/RBAC_PHASE52.md` with full permission table, default role maps, override examples, data scoping details, DB schema.
+
+#### RBAC — 6-Role Hierarchy & Org Boundary Enforcement (Phase 52b) ✅ COMPLETED 2026-04-10
+385. [x] **3 new global roles**: Added `super_admin`, `server_admin`, `global_admin` to `auth/roles.go`. `RoleSuperAdmin`, `RoleServerAdmin`, `RoleGlobalAdmin` constants. Legacy `admin` = alias for `super_admin`. `ValidRole()` accepts 7 roles.
+386. [x] **Branched role hierarchy**: `RoleLevel()` returns 5 for super_admin/admin, 4 for server_admin/global_admin (parallel), 2 for operator, 1 for viewer, 0 for pro. `IsSuperAdminRole()`, `IsServerLevel()` helpers.
+387. [x] **`CanAssignRole()` function**: Enforces branched role assignment boundaries. Super admin → any, global_admin → operator/viewer/pro only, server_admin → none, operator/viewer/pro → none.
+388. [x] **7-role permission maps**: `DefaultRolePermissions` expanded to 7 entries. `server_admin`: 8 perms (server.config, server.keys, blocklist.edit, user.view, device.view, audit.view, metrics.view, enrollment.manage). `global_admin`: 22 perms (user/org/device/cdap/audit — NO server.config/server.keys). `RoleHasPermission()` updated to use `IsSuperAdminRole()`.
+389. [x] **Org role boundary enforcement**: `OrgRoleLevel()` (owner=40, admin=30, operator=20, user=10), `OrgCanAssignRole()` (owner → admin/op/user, admin → op/user, others → none), `ValidOrgRole()` — all in `db/database.go`.
+390. [x] **Org privilege escalation fixed**: `handleCreateOrgUser` — caller's org-role checked via `GetOrgUserByUsername` + `OrgCanAssignRole`. Super/global admins bypass. `handleUpdateOrgUser` — self-modification blocked, caller authority check, cannot modify user at or above own org level.
+391. [x] **Org user visibility scoping**: `handleListOrgUsers` — org users with role "user" only see themselves. Org admin/operator/owner see all.
+392. [x] **Last-admin demotion guard**: `handleUpdateUser` — when demoting a super_admin/admin, counts remaining admins. If sole admin, returns 409 Conflict.
+393. [x] **Peer org scope check**: `peerOrgScopeCheck()` helper verifies org-scoped users can only access devices assigned to their org. Applied to 7 critical endpoints: GET/DELETE/PATCH peer, ban/unban, change-id, metrics.
+394. [x] **requirePermission super_admin bypass**: Updated Go `requirePermission()` from `userRole == RoleAdmin` to `IsSuperAdminRole(userRole)`.
+395. [x] **requireOrgMembership global_admin bypass**: Updated to allow super_admin AND global_admin to access any org.
+396. [x] **Node.js 7-role middleware**: Updated `DEFAULT_ROLE_PERMISSIONS` with 7 entries (super_admin, admin, server_admin, global_admin, operator, viewer, pro). Added `SUPER_ADMIN_ROLES` set + `isSuperAdminRole()`. Updated `requireRole`, `requireAdmin`, `requirePermission` to handle new roles.
+
 ### Konfiguracja przez Zmienne Środowiskowe
 
 ```bash
@@ -1115,4 +1152,4 @@ All code changes MUST include a security review as part of the implementation pr
 
 ---
 
-*Ostatnia aktualizacja: 2026-03-27 (Roadmap: Draggable zone borders #281, Unattended access management #300, Desktop binary size reduction #305 (42.5%), WOL audit fix. Previous: Phases 47-48 + Windows 11 snap layouts, desktop login fix, Chat E2E, Web Remote, UI polish, widget groups) przez GitHub Copilot*
+*Ostatnia aktualizacja: 2026-04-10 (Phase 51: GitHub Issue Triage — 16 issues closed, TCP EOF filter, admin password race fix, ID change ghost cleanup, CSS animations, RBAC discussion response. Previous: Phases 47-48 + Windows 11 snap layouts, desktop login fix, Chat E2E, Web Remote, UI polish, widget groups) przez GitHub Copilot*

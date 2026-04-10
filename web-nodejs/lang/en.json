@@ -638,7 +638,11 @@
     "file_rename": "Rename",
     "file_rename_prompt": "Enter new name:",
     "file_delete_confirm": "Are you sure you want to delete this item?",
-    "file_cancelled": "Transfer cancelled"
+    "file_cancelled": "Transfer cancelled",
+    "2fa_required": "2FA Verification Required",
+    "2fa_hint": "Enter the 6-digit code from your authenticator app",
+    "2fa_invalid": "Enter a valid 6-digit code",
+    "verify": "Verify"
   },
   "branding": {
     "identity_title": "Brand Identity",

@@ -17,6 +17,9 @@ const SALT_ROUNDS = 12;
 // Pre-computed dummy hash for timing-safe comparison (prevents user enumeration)
 const DUMMY_HASH = '$2b$12$KiXeOj5vHpJRJHGMhWzadeKfRJLvJRaRHQbMGBBdkpu.jQfXAzgWS';
 
+const http = require('http');
+const https = require('https');
+
 // PBKDF2 parameters matching Go server's auth.HashPassword()
 const PBKDF2_ITERATIONS = 100_000;
 const PBKDF2_KEY_LENGTH = 32; // SHA-256 output size
@@ -75,6 +78,65 @@ async function verifyPassword(password, hash) {
 }
 
 /**
+ * Fallback authentication against Go server's /api/auth/login endpoint.
+ * Used when local (Node.js) auth fails — the Go server may have a different
+ * password hash (e.g., after fresh install race condition, or manual password
+ * change on Go server side).
+ * Returns { role: string } on success, or null on failure.
+ */
+function tryGoServerAuth(username, password) {
+    const apiUrl = config.betterdeskApiUrl || config.hbbsApiUrl || 'http://localhost:21114/api';
+    let authUrl;
+    try {
+        const base = new URL(apiUrl);
+        authUrl = new URL('/api/auth/login', base.origin);
+    } catch (_) {
+        return Promise.resolve(null);
+    }
+
+    const body = JSON.stringify({ username, password });
+    const mod = authUrl.protocol === 'https:' ? https : http;
+    const timeout = config.betterdeskApiTimeout || 3000;
+
+    return new Promise((resolve) => {
+        const req = mod.request(authUrl, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Content-Length': Buffer.byteLength(body),
+            },
+            timeout,
+            rejectUnauthorized: !config.allowSelfSignedCerts,
+        }, (res) => {
+            let data = '';
+            res.on('data', chunk => { data += chunk; });
+            res.on('end', () => {
+                if (res.statusCode === 200) {
+                    try {
+                        const parsed = JSON.parse(data);
+                        // Go server returns { token, role, username } on success
+                        if (parsed.token && parsed.role) {
+                            resolve({ role: parsed.role });
+                            return;
+                        }
+                        // 2FA required — credentials are valid but need second factor
+                        if (parsed.requires_2fa) {
+                            resolve({ role: 'admin', requires2fa: true });
+                            return;
+                        }
+                    } catch (_) { /* JSON parse error */ }
+                }
+                resolve(null);
+            });
+        });
+        req.on('error', () => resolve(null));
+        req.on('timeout', () => { req.destroy(); resolve(null); });
+        req.write(body);
+        req.end();
+    });
+}
+
+/**
  * Authenticate user with username and password.
  * Supports both bcrypt (Node.js native) and PBKDF2 (Go server) hash formats.
  * When a PBKDF2 hash is verified successfully, it is auto-migrated to bcrypt
@@ -87,6 +149,25 @@ async function authenticate(username, password) {
     if (!user) {
         // Timing-safe: do a real hash comparison to prevent user enumeration
         await bcrypt.compare(password, DUMMY_HASH);
+
+        // Fallback: user may exist on Go server but not in local Node.js auth.db
+        const goResult = await tryGoServerAuth(username, password);
+        if (goResult) {
+            console.log(`[AUTH] Go server accepted credentials for '${username}' — creating local user`);
+            const bcryptHash = await hashPassword(password);
+            await db.createUser(username, bcryptHash, goResult.role || 'admin');
+            const created = await db.getUserByUsername(username);
+            if (created) {
+                await db.updateLastLogin(created.id);
+                return {
+                    id: created.id,
+                    username: created.username,
+                    role: created.role,
+                    totpRequired: false,
+                };
+            }
+        }
+
         console.log(`[AUTH] Login failed: user '${username}' not found in database`);
         return null;
     }
@@ -99,14 +180,23 @@ async function authenticate(username, password) {
     
     const { valid, needsMigration } = await verifyPasswordEx(password, user.password_hash);
     if (!valid) {
-        console.log(`[AUTH] Login failed: password mismatch for '${username}' (hash type: ${hashType})`);
-        return null;
+        // Fallback: try Go server auth — password may have been changed on Go side
+        const goResult = await tryGoServerAuth(username, password);
+        if (goResult) {
+            console.log(`[AUTH] Go server accepted password for '${username}' — syncing local hash`);
+            const bcryptHash = await hashPassword(password);
+            await db.updateUserPassword(user.id, bcryptHash);
+            // Fall through to TOTP check and normal success path
+        } else {
+            console.log(`[AUTH] Login failed: password mismatch for '${username}' (hash type: ${hashType})`);
+            return null;
+        }
+    } else if (valid) {
+        console.log(`[AUTH] Login successful for '${username}'`);
     }
-
-    console.log(`[AUTH] Login successful for '${username}'`);
     
     // Auto-migrate PBKDF2 hash to bcrypt for future logins
-    if (needsMigration) {
+    if (valid && needsMigration) {
         try {
             const bcryptHash = await hashPassword(password);
             await db.updateUserPassword(user.id, bcryptHash);
@@ -265,9 +355,37 @@ async function ensureDefaultAdmin() {
         return false;
     }
     
-    // No users at all — create the default admin
+    // No users at all — create the default admin.
+    // If no password from env or credential file, retry reading multiple times.
+    // The Go server may still be starting up and hasn't written .admin_credentials yet.
+    if (!defaultPassword) {
+        const retryDelays = [2000, 3000, 5000]; // 3 retries: 2s, 3s, 5s (total 10s max)
+        for (let i = 0; i < retryDelays.length; i++) {
+            console.log(`[AUTH] No admin password found. Waiting for Go server (attempt ${i + 1}/${retryDelays.length})...`);
+            await new Promise(resolve => setTimeout(resolve, retryDelays[i]));
+            defaultPassword = readAdminCredentialsFile() || '';
+            if (defaultPassword) {
+                console.log(`[AUTH] Found admin password from Go server on retry ${i + 1}`);
+                break;
+            }
+        }
+    }
+
     const password = defaultPassword || require('crypto').randomBytes(16).toString('hex');
     
+    // If we generated the password (not from env or Go server), write it to a shared location
+    // so it can be discovered by users or other services.
+    if (!defaultPassword) {
+        const credsPath = path.join(config.dataDir, '.admin_credentials');
+        try {
+            const credsContent = `Admin Username: ${defaultUsername}\nAdmin Password: ${password}\nGenerated by: BetterDesk Console (Node.js)\nTimestamp: ${new Date().toISOString()}\n`;
+            fs.writeFileSync(credsPath, credsContent, { mode: 0o600 });
+            console.log(`[AUTH] Wrote generated admin credentials to ${credsPath}`);
+        } catch (e) {
+            console.warn(`[AUTH] Could not write .admin_credentials to ${credsPath}: ${e.message}`);
+        }
+    }
+
     const hash = await hashPassword(password);
     await db.createUser(defaultUsername, hash, 'admin');
     

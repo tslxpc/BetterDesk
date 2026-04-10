@@ -253,6 +253,16 @@ func (s *SQLiteDB) Migrate() error {
 			updated_at TEXT DEFAULT '',
 			updated_by TEXT DEFAULT ''
 		)`,
+
+		// Role permissions (RBAC Phase 52) — custom permission overrides per role
+		`CREATE TABLE IF NOT EXISTS role_permissions (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			role TEXT NOT NULL,
+			permission TEXT NOT NULL,
+			granted INTEGER NOT NULL DEFAULT 1,
+			UNIQUE(role, permission)
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_role_permissions_role ON role_permissions(role)`,
 	}
 
 	for _, stmt := range statements {
@@ -285,6 +295,8 @@ func (s *SQLiteDB) Migrate() error {
 		{"peers", "linked_peer_id", `ALTER TABLE peers ADD COLUMN linked_peer_id TEXT DEFAULT ''`},
 		// peers: display_name alias (added in v2.6.0)
 		{"peers", "display_name", `ALTER TABLE peers ADD COLUMN display_name TEXT DEFAULT ''`},
+		// users: is_server_admin flag (RBAC Phase 52)
+		{"users", "is_server_admin", `ALTER TABLE users ADD COLUMN is_server_admin INTEGER DEFAULT 0`},
 	}
 
 	for _, m := range columnMigrations {
@@ -938,9 +950,9 @@ func (s *SQLiteDB) GetUser(username string) (*User, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	u := &User{}
-	err := s.db.QueryRow(`SELECT id, username, password_hash, role, totp_secret, totp_enabled,
-		created_at, last_login FROM users WHERE username = ?`, username).Scan(
-		&u.ID, &u.Username, &u.PasswordHash, &u.Role,
+	err := s.db.QueryRow(`SELECT id, username, password_hash, role, COALESCE(is_server_admin, 0),
+		totp_secret, totp_enabled, created_at, last_login FROM users WHERE username = ?`, username).Scan(
+		&u.ID, &u.Username, &u.PasswordHash, &u.Role, &u.IsServerAdmin,
 		&u.TOTPSecret, &u.TOTPEnabled, &u.CreatedAt, &u.LastLogin)
 	if err == sql.ErrNoRows {
 		return nil, nil
@@ -953,9 +965,9 @@ func (s *SQLiteDB) GetUserByID(id int64) (*User, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	u := &User{}
-	err := s.db.QueryRow(`SELECT id, username, password_hash, role, totp_secret, totp_enabled,
-		created_at, last_login FROM users WHERE id = ?`, id).Scan(
-		&u.ID, &u.Username, &u.PasswordHash, &u.Role,
+	err := s.db.QueryRow(`SELECT id, username, password_hash, role, COALESCE(is_server_admin, 0),
+		totp_secret, totp_enabled, created_at, last_login FROM users WHERE id = ?`, id).Scan(
+		&u.ID, &u.Username, &u.PasswordHash, &u.Role, &u.IsServerAdmin,
 		&u.TOTPSecret, &u.TOTPEnabled, &u.CreatedAt, &u.LastLogin)
 	if err == sql.ErrNoRows {
 		return nil, nil
@@ -967,8 +979,8 @@ func (s *SQLiteDB) GetUserByID(id int64) (*User, error) {
 func (s *SQLiteDB) ListUsers() ([]*User, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	rows, err := s.db.Query(`SELECT id, username, password_hash, role, totp_secret, totp_enabled,
-		created_at, last_login FROM users ORDER BY id`)
+	rows, err := s.db.Query(`SELECT id, username, password_hash, role, COALESCE(is_server_admin, 0),
+		totp_secret, totp_enabled, created_at, last_login FROM users ORDER BY id`)
 	if err != nil {
 		return nil, fmt.Errorf("db: ListUsers: %w", err)
 	}
@@ -976,7 +988,7 @@ func (s *SQLiteDB) ListUsers() ([]*User, error) {
 	var users []*User
 	for rows.Next() {
 		u := &User{}
-		if err := rows.Scan(&u.ID, &u.Username, &u.PasswordHash, &u.Role,
+		if err := rows.Scan(&u.ID, &u.Username, &u.PasswordHash, &u.Role, &u.IsServerAdmin,
 			&u.TOTPSecret, &u.TOTPEnabled, &u.CreatedAt, &u.LastLogin); err != nil {
 			return nil, err
 		}
@@ -989,8 +1001,9 @@ func (s *SQLiteDB) ListUsers() ([]*User, error) {
 func (s *SQLiteDB) UpdateUser(u *User) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	_, err := s.db.Exec(`UPDATE users SET password_hash=?, role=?, totp_secret=?, totp_enabled=?
-		WHERE id=?`, u.PasswordHash, u.Role, u.TOTPSecret, u.TOTPEnabled, u.ID)
+	_, err := s.db.Exec(`UPDATE users SET password_hash=?, role=?, is_server_admin=?,
+		totp_secret=?, totp_enabled=? WHERE id=?`,
+		u.PasswordHash, u.Role, u.IsServerAdmin, u.TOTPSecret, u.TOTPEnabled, u.ID)
 	return err
 }
 
@@ -1706,4 +1719,124 @@ func (s *SQLiteDB) DeleteAccessPolicy(peerID string) error {
 
 	_, err := s.db.Exec(`DELETE FROM access_policies WHERE peer_id = ?`, peerID)
 	return err
+}
+
+// --- Role Permissions (RBAC Phase 52) ---
+
+// ListRolePermissions returns all custom permission overrides for a role.
+func (s *SQLiteDB) ListRolePermissions(role string) ([]*RolePermission, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	rows, err := s.db.Query(`SELECT id, role, permission, granted FROM role_permissions WHERE role = ?`, role)
+	if err != nil {
+		return nil, fmt.Errorf("db: ListRolePermissions: %w", err)
+	}
+	defer rows.Close()
+
+	var perms []*RolePermission
+	for rows.Next() {
+		p := &RolePermission{}
+		if err := rows.Scan(&p.ID, &p.Role, &p.Permission, &p.Granted); err != nil {
+			return nil, err
+		}
+		perms = append(perms, p)
+	}
+	return perms, rows.Err()
+}
+
+// SetRolePermission creates or updates a custom permission override for a role.
+func (s *SQLiteDB) SetRolePermission(role, permission string, granted bool) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	grantedInt := 0
+	if granted {
+		grantedInt = 1
+	}
+	_, err := s.db.Exec(`INSERT INTO role_permissions (role, permission, granted)
+		VALUES (?, ?, ?) ON CONFLICT(role, permission) DO UPDATE SET granted = excluded.granted`,
+		role, permission, grantedInt)
+	return err
+}
+
+// DeleteRolePermission removes a custom permission override, reverting to defaults.
+func (s *SQLiteDB) DeleteRolePermission(role, permission string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	_, err := s.db.Exec(`DELETE FROM role_permissions WHERE role = ? AND permission = ?`, role, permission)
+	return err
+}
+
+// HasRolePermission checks if a custom permission override exists for a role.
+// Returns (granted_value, nil) if found, or (false, error) if no override exists.
+func (s *SQLiteDB) HasRolePermission(role, permission string) (bool, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	var granted bool
+	err := s.db.QueryRow(`SELECT granted FROM role_permissions WHERE role = ? AND permission = ?`,
+		role, permission).Scan(&granted)
+	if err == sql.ErrNoRows {
+		return false, fmt.Errorf("no override")
+	}
+	return granted, err
+}
+
+// --- Org-scoped device queries (RBAC Phase 52) ---
+
+// ListPeersForOrg returns only peers assigned to the given organization.
+func (s *SQLiteDB) ListPeersForOrg(orgID string, includeDeleted bool) ([]*Peer, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	query := `SELECT p.id, p.uuid, p.pk, p.ip, p.user, p.hostname, p.os, p.version,
+		p.status, p.nat_type, p.last_online, p.created_at, p.disabled,
+		p.banned, p.ban_reason, p.banned_at, p.soft_deleted, p.deleted_at,
+		p.note, p.tags, p.heartbeat_seq, COALESCE(p.display_name, ''),
+		COALESCE(p.device_type, ''), COALESCE(p.linked_peer_id, '')
+		FROM peers p INNER JOIN org_devices od ON p.id = od.device_id
+		WHERE od.org_id = ?`
+	if !includeDeleted {
+		query += ` AND p.soft_deleted = 0`
+	}
+	query += ` ORDER BY p.last_online DESC`
+
+	rows, err := s.db.Query(query, orgID)
+	if err != nil {
+		return nil, fmt.Errorf("db: ListPeersForOrg: %w", err)
+	}
+	defer rows.Close()
+
+	var peers []*Peer
+	for rows.Next() {
+		p := &Peer{}
+		var lastOnline, createdAt, bannedAt, deletedAt sql.NullString
+		if err := rows.Scan(
+			&p.ID, &p.UUID, &p.PK, &p.IP, &p.User, &p.Hostname, &p.OS, &p.Version,
+			&p.Status, &p.NATType, &lastOnline, &createdAt, &p.Disabled,
+			&p.Banned, &p.BanReason, &bannedAt, &p.SoftDeleted, &deletedAt,
+			&p.Note, &p.Tags, &p.HeartbeatSeq, &p.DisplayName,
+			&p.DeviceType, &p.LinkedPeerID,
+		); err != nil {
+			return nil, err
+		}
+		if lastOnline.Valid {
+			p.LastOnline, _ = time.Parse("2006-01-02 15:04:05", lastOnline.String)
+		}
+		if createdAt.Valid {
+			p.CreatedAt, _ = time.Parse("2006-01-02 15:04:05", createdAt.String)
+		}
+		if bannedAt.Valid {
+			t, _ := time.Parse("2006-01-02 15:04:05", bannedAt.String)
+			p.BannedAt = &t
+		}
+		if deletedAt.Valid {
+			t, _ := time.Parse("2006-01-02 15:04:05", deletedAt.String)
+			p.DeletedAt = &t
+		}
+		peers = append(peers, p)
+	}
+	return peers, rows.Err()
 }

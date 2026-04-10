@@ -34,6 +34,7 @@ import (
 	"github.com/google/uuid"
 	"golang.org/x/crypto/bcrypt"
 
+	"github.com/unitronix/betterdesk-server/auth"
 	"github.com/unitronix/betterdesk-server/db"
 )
 
@@ -100,6 +101,9 @@ func (s *Server) handleCreateOrg(w http.ResponseWriter, r *http.Request) {
 
 // GET /api/org
 func (s *Server) handleListOrgs(w http.ResponseWriter, r *http.Request) {
+	userRole := getRoleFromCtx(r)
+	username := getUsernameFromCtx(r)
+
 	orgs, err := s.db.ListOrganizations()
 	if err != nil {
 		log.Printf("[org] ListOrganizations error: %v", err)
@@ -109,6 +113,22 @@ func (s *Server) handleListOrgs(w http.ResponseWriter, r *http.Request) {
 	if orgs == nil {
 		orgs = []*db.Organization{}
 	}
+
+	// Data scoping: non-admin users only see orgs they belong to
+	if userRole != auth.RoleAdmin {
+		var filtered []*db.Organization
+		for _, org := range orgs {
+			member, err := s.db.GetOrgUserByUsername(org.ID, username)
+			if err == nil && member != nil {
+				filtered = append(filtered, org)
+			}
+		}
+		if filtered == nil {
+			filtered = []*db.Organization{}
+		}
+		orgs = filtered
+	}
+
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{"organizations": orgs})
 }
@@ -253,10 +273,26 @@ func (s *Server) handleCreateOrgUser(w http.ResponseWriter, r *http.Request) {
 	if body.Role == "" {
 		body.Role = db.OrgRoleUser
 	}
-	if body.Role != db.OrgRoleOwner && body.Role != db.OrgRoleAdmin &&
-		body.Role != db.OrgRoleOperator && body.Role != db.OrgRoleUser {
+	if !db.ValidOrgRole(body.Role) {
 		http.Error(w, `{"error":"invalid role (owner, admin, operator, user)"}`, http.StatusBadRequest)
 		return
+	}
+
+	// Org role boundary: check caller's authority within this org.
+	callerRole := getRoleFromCtx(r)
+	callerUsername := getUsernameFromCtx(r)
+
+	// Super/global admins can assign any org role.
+	if !auth.IsSuperAdminRole(callerRole) && callerRole != auth.RoleGlobalAdmin {
+		callerOrgUser, _ := s.db.GetOrgUserByUsername(orgID, callerUsername)
+		if callerOrgUser == nil {
+			http.Error(w, `{"error":"you are not a member of this organization"}`, http.StatusForbidden)
+			return
+		}
+		if !db.OrgCanAssignRole(callerOrgUser.Role, body.Role) {
+			http.Error(w, `{"error":"cannot assign a role higher than your org-level authority"}`, http.StatusForbidden)
+			return
+		}
 	}
 
 	// Check duplicate
@@ -306,6 +342,24 @@ func (s *Server) handleListOrgUsers(w http.ResponseWriter, r *http.Request) {
 	if users == nil {
 		users = []*db.OrgUser{}
 	}
+
+	// Org User scope: can only see themselves.
+	callerRole := getRoleFromCtx(r)
+	if !auth.IsSuperAdminRole(callerRole) && callerRole != auth.RoleGlobalAdmin {
+		callerUsername := getUsernameFromCtx(r)
+		callerOrgUser, _ := s.db.GetOrgUserByUsername(orgID, callerUsername)
+		if callerOrgUser != nil && callerOrgUser.Role == db.OrgRoleUser {
+			filtered := []*db.OrgUser{}
+			for _, u := range users {
+				if u.Username == callerUsername {
+					filtered = append(filtered, u)
+					break
+				}
+			}
+			users = filtered
+		}
+	}
+
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{"users": users})
 }
@@ -342,11 +396,38 @@ func (s *Server) handleUpdateOrgUser(w http.ResponseWriter, r *http.Request) {
 		user.Email = *body.Email
 	}
 	if body.Role != nil {
-		if *body.Role != db.OrgRoleOwner && *body.Role != db.OrgRoleAdmin &&
-			*body.Role != db.OrgRoleOperator && *body.Role != db.OrgRoleUser {
+		if !db.ValidOrgRole(*body.Role) {
 			http.Error(w, `{"error":"invalid role"}`, http.StatusBadRequest)
 			return
 		}
+
+		// Self-modification block: cannot change own org role.
+		callerUsername := getUsernameFromCtx(r)
+		if user.Username == callerUsername {
+			http.Error(w, `{"error":"cannot modify your own org role"}`, http.StatusForbidden)
+			return
+		}
+
+		// Org role boundary: check caller's authority.
+		callerRole := getRoleFromCtx(r)
+		if !auth.IsSuperAdminRole(callerRole) && callerRole != auth.RoleGlobalAdmin {
+			callerOrgUser, _ := s.db.GetOrgUserByUsername(user.OrgID, callerUsername)
+			if callerOrgUser == nil {
+				http.Error(w, `{"error":"you are not a member of this organization"}`, http.StatusForbidden)
+				return
+			}
+			// Cannot promote higher than own org role.
+			if !db.OrgCanAssignRole(callerOrgUser.Role, *body.Role) {
+				http.Error(w, `{"error":"cannot assign a role higher than your org-level authority"}`, http.StatusForbidden)
+				return
+			}
+			// Cannot demote someone at or above own level.
+			if db.OrgRoleLevel(user.Role) >= db.OrgRoleLevel(callerOrgUser.Role) {
+				http.Error(w, `{"error":"cannot modify a user at or above your org-level authority"}`, http.StatusForbidden)
+				return
+			}
+		}
+
 		user.Role = *body.Role
 	}
 
@@ -636,13 +717,13 @@ func (s *Server) handleOrgLogin(w http.ResponseWriter, r *http.Request) {
 	// Update last login
 	s.db.UpdateOrgUserLogin(user.ID)
 
-	// Generate JWT
+	// Generate JWT with org context
 	if s.jwtManager == nil {
 		http.Error(w, `{"error":"JWT not configured"}`, http.StatusInternalServerError)
 		return
 	}
 
-	token, err := s.jwtManager.Generate(user.Username, user.Role)
+	token, err := s.jwtManager.GenerateOrgToken(user.Username, user.Role, orgID, s.jwtManager.Expiry())
 	if err != nil {
 		log.Printf("[org] JWT generation error: %v", err)
 		http.Error(w, `{"error":"token generation failed"}`, http.StatusInternalServerError)
@@ -651,9 +732,9 @@ func (s *Server) handleOrgLogin(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{
-		"token":        token,
-		"user":         user,
-		"org_id":       orgID,
-		"type":         "org_user",
+		"token":  token,
+		"user":   user,
+		"org_id": orgID,
+		"type":   "org_user",
 	})
 }

@@ -45,6 +45,7 @@ const facade = {
     updateDevice:  (id, data) => adapter.updatePeer(id, data),
     softDeletePeer: (id) => adapter.softDeletePeer(id),
     deleteDevice:   (id) => adapter.softDeletePeer(id),
+    getRenamedPeerId: (id) => adapter.getRenamedPeerId ? adapter.getRenamedPeerId(id) : null,
     setBanStatus:  (id, banned, reason) => adapter.setBanStatus(id, banned, reason),
     getPeerStats:  () => adapter.getPeerStats(),
     getStats:      () => adapter.getPeerStats(),

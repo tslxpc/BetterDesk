@@ -24,7 +24,8 @@ type contextKey string
 const (
 	ctxKeyRole     contextKey = "role"
 	ctxKeyUsername contextKey = "username"
-	ctxKeyUser     contextKey = "user" // Full db.User object
+	ctxKeyUser     contextKey = "user"   // Full db.User object
+	ctxKeyOrgID    contextKey = "org_id" // Organization ID (empty for global users)
 )
 
 // getRoleFromCtx returns the authenticated user's role from the request context.
@@ -43,6 +44,37 @@ func getUsernameFromCtx(r *http.Request) string {
 	return ""
 }
 
+// getOrgIDFromCtx returns the org ID embedded in the JWT token (empty for global users).
+func getOrgIDFromCtx(r *http.Request) string {
+	if v, ok := r.Context().Value(ctxKeyOrgID).(string); ok {
+		return v
+	}
+	return ""
+}
+
+// peerOrgScopeCheck verifies org-scoped users have access to the target peer.
+// Returns true if access is allowed, false if denied (response already written).
+// Super admins, global admins, and users without org context bypass the check.
+func (s *Server) peerOrgScopeCheck(w http.ResponseWriter, r *http.Request, peerID string) bool {
+	userRole := getRoleFromCtx(r)
+	// Super admin and global admin can access any peer.
+	if auth.IsSuperAdminRole(userRole) || userRole == auth.RoleGlobalAdmin {
+		return true
+	}
+	orgID := getOrgIDFromCtx(r)
+	if orgID == "" {
+		// Global user (no org scope) — allowed (permissions already checked by requirePermission).
+		return true
+	}
+	// Org-scoped user: peer must be assigned to their org.
+	od, _ := s.db.GetOrgDevice(orgID, peerID)
+	if od != nil {
+		return true
+	}
+	writeJSON(w, http.StatusForbidden, map[string]string{"error": "Device not in your organization"})
+	return false
+}
+
 // requireRole wraps a handler to enforce minimum role permissions.
 func (s *Server) requireRole(role string, handler http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -52,6 +84,84 @@ func (s *Server) requireRole(role string, handler http.HandlerFunc) http.Handler
 			return
 		}
 		handler(w, r)
+	}
+}
+
+// requirePermission wraps a handler to enforce a specific granular permission.
+// Checks custom DB overrides first, then falls back to default role permissions.
+func (s *Server) requirePermission(perm string, handler http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		userRole := getRoleFromCtx(r)
+
+		// Super admin (and legacy admin) always has all permissions
+		if auth.IsSuperAdminRole(userRole) {
+			handler(w, r)
+			return
+		}
+
+		// Check DB-stored custom permission overrides first
+		if s.db != nil {
+			granted, err := s.db.HasRolePermission(userRole, perm)
+			if err == nil {
+				if granted {
+					handler(w, r)
+					return
+				}
+				// explicit deny in DB — reject even if default says yes
+				writeJSON(w, http.StatusForbidden, map[string]string{"error": "Insufficient permissions"})
+				return
+			}
+			// err != nil means no override found — fall through to defaults
+		}
+
+		// Fall back to built-in default role permissions
+		if auth.RoleHasPermission(userRole, perm) {
+			handler(w, r)
+			return
+		}
+
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "Insufficient permissions"})
+	}
+}
+
+// requireOrgMembership wraps a handler to enforce that the authenticated user
+// belongs to the organization identified by the URL path parameter.
+// Global admins bypass the check. Org-scoped users must match their JWT org_id.
+func (s *Server) requireOrgMembership(paramName string, handler http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		userRole := getRoleFromCtx(r)
+
+		// Super admin, legacy admin, and global_admin can access any org
+		if auth.IsSuperAdminRole(userRole) || userRole == auth.RoleGlobalAdmin {
+			handler(w, r)
+			return
+		}
+
+		// Get the org ID from the URL path parameter
+		targetOrgID := r.PathValue(paramName)
+		if targetOrgID == "" {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Organization ID required"})
+			return
+		}
+
+		// Check if the user's JWT org_id matches the target org
+		userOrgID := getOrgIDFromCtx(r)
+		if userOrgID != "" && userOrgID == targetOrgID {
+			handler(w, r)
+			return
+		}
+
+		// For global users (no org_id in JWT), check DB membership
+		username := getUsernameFromCtx(r)
+		if username != "" {
+			orgUser, err := s.db.GetOrgUserByUsername(targetOrgID, username)
+			if err == nil && orgUser != nil {
+				handler(w, r)
+				return
+			}
+		}
+
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "Not a member of this organization"})
 	}
 }
 
@@ -205,12 +315,13 @@ func (s *Server) handleAuthMe(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"id":           user.ID,
-		"username":     user.Username,
-		"role":         user.Role,
-		"totp_enabled": user.TOTPEnabled,
-		"created_at":   user.CreatedAt,
-		"last_login":   user.LastLogin,
+		"id":              user.ID,
+		"username":        user.Username,
+		"role":            user.Role,
+		"totp_enabled":    user.TOTPEnabled,
+		"is_server_admin": user.IsServerAdmin,
+		"created_at":      user.CreatedAt,
+		"last_login":      user.LastLogin,
 	})
 }
 
@@ -226,19 +337,21 @@ func (s *Server) handleListUsers(w http.ResponseWriter, r *http.Request) {
 	}
 
 	type userView struct {
-		ID          int64  `json:"id"`
-		Username    string `json:"username"`
-		Role        string `json:"role"`
-		TOTPEnabled bool   `json:"totp_enabled"`
-		CreatedAt   string `json:"created_at"`
-		LastLogin   string `json:"last_login,omitempty"`
+		ID            int64  `json:"id"`
+		Username      string `json:"username"`
+		Role          string `json:"role"`
+		TOTPEnabled   bool   `json:"totp_enabled"`
+		IsServerAdmin bool   `json:"is_server_admin"`
+		CreatedAt     string `json:"created_at"`
+		LastLogin     string `json:"last_login,omitempty"`
 	}
 
 	result := make([]userView, len(users))
 	for i, u := range users {
 		result[i] = userView{
 			ID: u.ID, Username: u.Username, Role: u.Role,
-			TOTPEnabled: u.TOTPEnabled, CreatedAt: u.CreatedAt, LastLogin: u.LastLogin,
+			TOTPEnabled: u.TOTPEnabled, IsServerAdmin: u.IsServerAdmin,
+			CreatedAt: u.CreatedAt, LastLogin: u.LastLogin,
 		}
 	}
 	writeJSON(w, http.StatusOK, result)
@@ -265,6 +378,13 @@ func (s *Server) handleCreateUser(w http.ResponseWriter, r *http.Request) {
 	}
 	if !auth.ValidRole(body.Role) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Invalid role (admin, operator, viewer)"})
+		return
+	}
+
+	// Role boundary: use CanAssignRole for branched hierarchy support.
+	callerRole := getRoleFromCtx(r)
+	if !auth.CanAssignRole(callerRole, body.Role) {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "Cannot assign a role higher than your own"})
 		return
 	}
 
@@ -330,6 +450,46 @@ func (s *Server) handleUpdateUser(w http.ResponseWriter, r *http.Request) {
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Invalid role"})
 			return
 		}
+
+		callerUsername := getUsernameFromCtx(r)
+		callerRole := getRoleFromCtx(r)
+
+		// Prevent self-demotion (admin cannot lower their own role).
+		if user.Username == callerUsername && auth.RoleLevel(body.Role) < auth.RoleLevel(user.Role) {
+			writeJSON(w, http.StatusForbidden, map[string]string{"error": "Cannot demote yourself"})
+			return
+		}
+
+		// Role boundary: use CanAssignRole for branched hierarchy.
+		if !auth.CanAssignRole(callerRole, body.Role) {
+			writeJSON(w, http.StatusForbidden, map[string]string{"error": "Cannot assign a role higher than your own"})
+			return
+		}
+
+		// Prevent demoting the last super-admin/admin.
+		if auth.IsSuperAdminRole(user.Role) && !auth.IsSuperAdminRole(body.Role) {
+			users, _ := s.db.ListUsers()
+			adminCount := 0
+			for _, u := range users {
+				if auth.IsSuperAdminRole(u.Role) {
+					adminCount++
+				}
+			}
+			if adminCount <= 1 {
+				writeJSON(w, http.StatusConflict, map[string]string{"error": "Cannot demote the last admin"})
+				return
+			}
+		}
+
+		// Prevent demoting a server admin unless caller is also a server admin.
+		if user.IsServerAdmin {
+			callerUser, _ := s.db.GetUser(callerUsername)
+			if callerUser == nil || !callerUser.IsServerAdmin {
+				writeJSON(w, http.StatusForbidden, map[string]string{"error": "Only server admins can modify other server admins"})
+				return
+			}
+		}
+
 		user.Role = body.Role
 	}
 
@@ -371,6 +531,16 @@ func (s *Server) handleDeleteUser(w http.ResponseWriter, r *http.Request) {
 		}
 		if adminCount <= 1 {
 			writeJSON(w, http.StatusConflict, map[string]string{"error": "Cannot delete the last admin user"})
+			return
+		}
+	}
+
+	// Prevent deleting a server admin unless caller is also a server admin.
+	if user.IsServerAdmin {
+		callerUsername := getUsernameFromCtx(r)
+		callerUser, _ := s.db.GetUser(callerUsername)
+		if callerUser == nil || !callerUser.IsServerAdmin {
+			writeJSON(w, http.StatusForbidden, map[string]string{"error": "Only server admins can delete other server admins"})
 			return
 		}
 	}
@@ -647,6 +817,23 @@ func (s *Server) authenticateRequest(r *http.Request) (username, role string, ok
 	return "", "", false
 }
 
+// extractOrgIDFromRequest reads the org_id from the Bearer JWT token.
+// Returns empty string if no JWT, no org_id, or API key auth (non-JWT).
+func (s *Server) extractOrgIDFromRequest(r *http.Request) string {
+	if s.jwtManager == nil {
+		return ""
+	}
+	bearer := r.Header.Get("Authorization")
+	if len(bearer) <= 7 || bearer[:7] != "Bearer " {
+		return ""
+	}
+	claims, err := s.jwtManager.Validate(bearer[7:])
+	if err != nil {
+		return ""
+	}
+	return claims.OrgID
+}
+
 // authMiddleware replaces the old apiKeyMiddleware.
 // It authenticates every request and attaches role + username to the context.
 // Public endpoints are excluded from authentication.
@@ -686,6 +873,12 @@ func (s *Server) authMiddleware(next http.Handler) http.Handler {
 
 		ctx := context.WithValue(r.Context(), ctxKeyRole, role)
 		ctx = context.WithValue(ctx, ctxKeyUsername, username)
+
+		// Extract org_id from JWT claims (if present)
+		orgID := s.extractOrgIDFromRequest(r)
+		if orgID != "" {
+			ctx = context.WithValue(ctx, ctxKeyOrgID, orgID)
+		}
 
 		// Optionally load full user object for handlers that need it
 		if user, err := s.db.GetUser(username); err == nil && user != nil {

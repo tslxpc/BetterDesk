@@ -479,17 +479,17 @@ func loadAPIKey(cfg *config.Config, database db.Database) {
 		log.Printf("API key loaded from %s (already in database)", source)
 	} else {
 		if err := database.SetConfig("api_key", apiKey); err != nil {
-			log.Printf("WARN: Failed to sync API key to database: %v", err)
-			return
-		}
-		if existing == "" {
+			log.Printf("WARN: Failed to sync API key to server_config: %v", err)
+			// Do NOT return here — ensureScopedAPIKey below is critical for auth
+		} else if existing == "" {
 			log.Printf("API key loaded from %s and stored in database", source)
 		} else {
 			log.Printf("API key loaded from %s and updated in database", source)
 		}
 	}
 
-	// Always ensure the scoped API key exists in api_keys table
+	// Always ensure the scoped API key exists in api_keys table.
+	// This is critical — authenticateRequest() checks ONLY the api_keys table.
 	if err := ensureScopedAPIKey(database, apiKey); err != nil {
 		log.Printf("WARN: Failed to migrate API key into scoped api_keys table: %v", err)
 	} else {

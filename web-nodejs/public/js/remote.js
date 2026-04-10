@@ -37,6 +37,9 @@
             this.fileTransfersPanel = panel.querySelector('.session-file-transfers');
             this.fileTransfersList = panel.querySelector('.session-file-transfers-list');
             this.fileUploadInput = panel.querySelector('.session-file-upload-input');
+            this.tfaOverlay = panel.querySelector('.session-2fa-overlay');
+            this.tfaInput = panel.querySelector('.session-2fa-input');
+            this.tfaError = panel.querySelector('.session-2fa-error');
             this.client = null;
             this.state = 'idle';
             this.latency = 0;
@@ -332,8 +335,18 @@
             if (isActive(session)) session.passwordInput.focus();
         });
 
+        c.on('2fa_required', () => {
+            session.passwordOverlay.style.display = 'none';
+            session.connectionOverlay.style.display = 'none';
+            session.tfaOverlay.style.display = 'flex';
+            session.tfaError.style.display = 'none';
+            session.tfaInput.value = '';
+            if (isActive(session)) session.tfaInput.focus();
+        });
+
         c.on('login_success', () => {
             session.passwordOverlay.style.display = 'none';
+            session.tfaOverlay.style.display = 'none';
             session.passwordInput.blur();
         });
 
@@ -405,6 +418,31 @@
             if (e.key === 'Enter') {
                 session.panel.querySelector('.session-btn-authenticate')?.click();
             }
+        });
+
+        // 2FA verification
+        session.panel.querySelector('.session-btn-verify-2fa')
+            ?.addEventListener('click', () => {
+                const code = session.tfaInput.value.replace(/\s/g, '');
+                if (!code || code.length !== 6) {
+                    session.tfaError.textContent = _('remote.2fa_invalid') || 'Enter a valid 6-digit code';
+                    session.tfaError.style.display = 'block';
+                    session.tfaInput.focus();
+                    return;
+                }
+                session.tfaError.style.display = 'none';
+                if (session.client) session.client.submit2FA(code);
+            });
+
+        session.tfaInput?.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') {
+                session.panel.querySelector('.session-btn-verify-2fa')?.click();
+            }
+        });
+
+        // Only allow digits in 2FA input
+        session.tfaInput?.addEventListener('input', () => {
+            session.tfaInput.value = session.tfaInput.value.replace(/[^0-9]/g, '');
         });
 
         session.panel.querySelector('.session-btn-chat-close')

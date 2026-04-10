@@ -127,14 +127,14 @@ func (s *Server) Start(ctx context.Context) error {
 	mux.HandleFunc("GET /api/server/stats", s.handleServerStats)
 	mux.HandleFunc("GET /api/server/pubkey", s.handlePubKey)
 
-	// Peers
-	mux.HandleFunc("GET /api/peers", s.handleListPeers)
-	mux.HandleFunc("GET /api/peers/{id}", s.handleGetPeer)
-	mux.HandleFunc("DELETE /api/peers/{id}", s.requireRole(auth.RoleAdmin, s.handleDeletePeer))
-	mux.HandleFunc("PATCH /api/peers/{id}", s.handleUpdatePeerFields)
-	mux.HandleFunc("POST /api/peers/{id}/ban", s.requireRole(auth.RoleAdmin, s.handleBanPeer))
-	mux.HandleFunc("POST /api/peers/{id}/unban", s.requireRole(auth.RoleAdmin, s.handleUnbanPeer))
-	mux.HandleFunc("POST /api/peers/{id}/change-id", s.requireRole(auth.RoleAdmin, s.handleChangePeerID))
+	// Peers (permission-based access control)
+	mux.HandleFunc("GET /api/peers", s.requirePermission(auth.PermDeviceView, s.handleListPeers))
+	mux.HandleFunc("GET /api/peers/{id}", s.requirePermission(auth.PermDeviceView, s.handleGetPeer))
+	mux.HandleFunc("DELETE /api/peers/{id}", s.requirePermission(auth.PermDeviceDelete, s.handleDeletePeer))
+	mux.HandleFunc("PATCH /api/peers/{id}", s.requirePermission(auth.PermDeviceEdit, s.handleUpdatePeerFields))
+	mux.HandleFunc("POST /api/peers/{id}/ban", s.requirePermission(auth.PermDeviceBan, s.handleBanPeer))
+	mux.HandleFunc("POST /api/peers/{id}/unban", s.requirePermission(auth.PermDeviceBan, s.handleUnbanPeer))
+	mux.HandleFunc("POST /api/peers/{id}/change-id", s.requirePermission(auth.PermDeviceChangeID, s.handleChangePeerID))
 
 	// Detailed device status (enhanced in Phase 4)
 	mux.HandleFunc("GET /api/peers/status/summary", s.handleStatusSummary)
@@ -148,42 +148,42 @@ func (s *Server) Start(ctx context.Context) error {
 	mux.HandleFunc("DELETE /api/peers/{id}/access-policy", s.requireRole(auth.RoleAdmin, s.handleDeleteAccessPolicy))
 
 	// Blocklist management
-	mux.HandleFunc("GET /api/blocklist", s.handleListBlocklist)
-	mux.HandleFunc("POST /api/blocklist", s.requireRole(auth.RoleAdmin, s.handleAddBlocklist))
-	mux.HandleFunc("DELETE /api/blocklist/{entry}", s.requireRole(auth.RoleAdmin, s.handleRemoveBlocklist))
+	mux.HandleFunc("GET /api/blocklist", s.requirePermission(auth.PermBlocklistEdit, s.handleListBlocklist))
+	mux.HandleFunc("POST /api/blocklist", s.requirePermission(auth.PermBlocklistEdit, s.handleAddBlocklist))
+	mux.HandleFunc("DELETE /api/blocklist/{entry}", s.requirePermission(auth.PermBlocklistEdit, s.handleRemoveBlocklist))
 
 	// Tags
-	mux.HandleFunc("PUT /api/peers/{id}/tags", s.handleSetPeerTags)
-	mux.HandleFunc("GET /api/tags/{tag}/peers", s.handlePeersByTag)
+	mux.HandleFunc("PUT /api/peers/{id}/tags", s.requirePermission(auth.PermDeviceEdit, s.handleSetPeerTags))
+	mux.HandleFunc("GET /api/tags/{tag}/peers", s.requirePermission(auth.PermDeviceView, s.handlePeersByTag))
 
-	// Chat
-	mux.HandleFunc("GET /api/chat/history/", s.handleChatHistory)
-	mux.HandleFunc("POST /api/chat/messages", s.handleChatSendMessage)
-	mux.HandleFunc("POST /api/chat/read", s.handleChatMarkRead)
-	mux.HandleFunc("GET /api/chat/unread/", s.handleChatUnread)
-	mux.HandleFunc("GET /api/chat/contacts/", s.handleChatContacts)
-	mux.HandleFunc("POST /api/chat/groups", s.handleChatCreateGroup)
-	mux.HandleFunc("GET /api/chat/groups/", s.handleChatListGroups)
-	mux.HandleFunc("PUT /api/chat/groups/", s.handleChatUpdateGroup)
-	mux.HandleFunc("DELETE /api/chat/groups/", s.handleChatDeleteGroup)
+	// Chat (requires chat.access permission)
+	mux.HandleFunc("GET /api/chat/history/", s.requirePermission(auth.PermChatAccess, s.handleChatHistory))
+	mux.HandleFunc("POST /api/chat/messages", s.requirePermission(auth.PermChatAccess, s.handleChatSendMessage))
+	mux.HandleFunc("POST /api/chat/read", s.requirePermission(auth.PermChatAccess, s.handleChatMarkRead))
+	mux.HandleFunc("GET /api/chat/unread/", s.requirePermission(auth.PermChatAccess, s.handleChatUnread))
+	mux.HandleFunc("GET /api/chat/contacts/", s.requirePermission(auth.PermChatAccess, s.handleChatContacts))
+	mux.HandleFunc("POST /api/chat/groups", s.requirePermission(auth.PermChatAccess, s.handleChatCreateGroup))
+	mux.HandleFunc("GET /api/chat/groups/", s.requirePermission(auth.PermChatAccess, s.handleChatListGroups))
+	mux.HandleFunc("PUT /api/chat/groups/", s.requirePermission(auth.PermChatAccess, s.handleChatUpdateGroup))
+	mux.HandleFunc("DELETE /api/chat/groups/", s.requirePermission(auth.PermChatAccess, s.handleChatDeleteGroup))
 
-	// Organizations (v3.0.0)
-	mux.HandleFunc("POST /api/org", s.requireRole(auth.RoleAdmin, s.handleCreateOrg))
-	mux.HandleFunc("GET /api/org", s.handleListOrgs)
-	mux.HandleFunc("GET /api/org/{id}", s.handleGetOrg)
-	mux.HandleFunc("PUT /api/org/{id}", s.requireRole(auth.RoleAdmin, s.handleUpdateOrg))
-	mux.HandleFunc("DELETE /api/org/{id}", s.requireRole(auth.RoleAdmin, s.handleDeleteOrg))
-	mux.HandleFunc("GET /api/org/{id}/users", s.handleListOrgUsers)
-	mux.HandleFunc("POST /api/org/{id}/users", s.requireRole(auth.RoleAdmin, s.handleCreateOrgUser))
-	mux.HandleFunc("PUT /api/org/{id}/users/{uid}", s.requireRole(auth.RoleAdmin, s.handleUpdateOrgUser))
-	mux.HandleFunc("DELETE /api/org/{id}/users/{uid}", s.requireRole(auth.RoleAdmin, s.handleDeleteOrgUser))
-	mux.HandleFunc("POST /api/org/{id}/invite", s.requireRole(auth.RoleAdmin, s.handleCreateOrgInvitation))
-	mux.HandleFunc("GET /api/org/{id}/invitations", s.requireRole(auth.RoleAdmin, s.handleListOrgInvitations))
-	mux.HandleFunc("POST /api/org/{id}/devices", s.requireRole(auth.RoleOperator, s.handleAssignOrgDevice))
-	mux.HandleFunc("GET /api/org/{id}/devices", s.handleListOrgDevices)
-	mux.HandleFunc("DELETE /api/org/{id}/devices/{did}", s.requireRole(auth.RoleOperator, s.handleUnassignOrgDevice))
-	mux.HandleFunc("GET /api/org/{id}/settings", s.handleListOrgSettings)
-	mux.HandleFunc("PUT /api/org/{id}/settings", s.requireRole(auth.RoleAdmin, s.handleSetOrgSetting))
+	// Organizations — org membership enforced on org-specific routes
+	mux.HandleFunc("POST /api/org", s.requirePermission(auth.PermOrgCreate, s.handleCreateOrg))
+	mux.HandleFunc("GET /api/org", s.handleListOrgs) // data-scoped in handler
+	mux.HandleFunc("GET /api/org/{id}", s.requireOrgMembership("id", s.handleGetOrg))
+	mux.HandleFunc("PUT /api/org/{id}", s.requirePermission(auth.PermOrgEdit, s.requireOrgMembership("id", s.handleUpdateOrg)))
+	mux.HandleFunc("DELETE /api/org/{id}", s.requirePermission(auth.PermOrgDelete, s.handleDeleteOrg))
+	mux.HandleFunc("GET /api/org/{id}/users", s.requireOrgMembership("id", s.handleListOrgUsers))
+	mux.HandleFunc("POST /api/org/{id}/users", s.requirePermission(auth.PermOrgManageUsers, s.requireOrgMembership("id", s.handleCreateOrgUser)))
+	mux.HandleFunc("PUT /api/org/{id}/users/{uid}", s.requirePermission(auth.PermOrgManageUsers, s.requireOrgMembership("id", s.handleUpdateOrgUser)))
+	mux.HandleFunc("DELETE /api/org/{id}/users/{uid}", s.requirePermission(auth.PermOrgManageUsers, s.requireOrgMembership("id", s.handleDeleteOrgUser)))
+	mux.HandleFunc("POST /api/org/{id}/invite", s.requirePermission(auth.PermOrgManageUsers, s.requireOrgMembership("id", s.handleCreateOrgInvitation)))
+	mux.HandleFunc("GET /api/org/{id}/invitations", s.requireOrgMembership("id", s.handleListOrgInvitations))
+	mux.HandleFunc("POST /api/org/{id}/devices", s.requirePermission(auth.PermOrgManageDevices, s.requireOrgMembership("id", s.handleAssignOrgDevice)))
+	mux.HandleFunc("GET /api/org/{id}/devices", s.requireOrgMembership("id", s.handleListOrgDevices))
+	mux.HandleFunc("DELETE /api/org/{id}/devices/{did}", s.requirePermission(auth.PermOrgManageDevices, s.requireOrgMembership("id", s.handleUnassignOrgDevice)))
+	mux.HandleFunc("GET /api/org/{id}/settings", s.requireOrgMembership("id", s.handleListOrgSettings))
+	mux.HandleFunc("PUT /api/org/{id}/settings", s.requirePermission(auth.PermOrgEdit, s.requireOrgMembership("id", s.handleSetOrgSetting)))
 	mux.HandleFunc("POST /api/org/login", s.handleOrgLogin) // public — no auth required
 
 	// Audit
@@ -192,9 +192,9 @@ func (s *Server) Start(ctx context.Context) error {
 	// WebSocket real-time events
 	mux.HandleFunc("GET /api/ws/events", s.handleWSEvents)
 
-	// Config
-	mux.HandleFunc("GET /api/config/{key}", s.requireRole(auth.RoleAdmin, s.handleGetConfig))
-	mux.HandleFunc("PUT /api/config/{key}", s.requireRole(auth.RoleAdmin, s.handleSetConfig))
+	// Config (server.config permission)
+	mux.HandleFunc("GET /api/config/{key}", s.requirePermission(auth.PermServerConfig, s.handleGetConfig))
+	mux.HandleFunc("PUT /api/config/{key}", s.requirePermission(auth.PermServerConfig, s.handleSetConfig))
 
 	// Auth (public — no auth required, handled by middleware exclusion)
 	mux.HandleFunc("POST /api/auth/login", s.handleLogin)
@@ -217,21 +217,21 @@ func (s *Server) Start(ctx context.Context) error {
 	mux.HandleFunc("POST /api/sysinfo", s.handleClientSysinfo)
 	mux.HandleFunc("POST /api/sysinfo_ver", s.handleClientSysinfoVer)
 
-	// User management (admin only)
-	mux.HandleFunc("GET /api/users", s.requireRole(auth.RoleAdmin, s.handleListUsers))
-	mux.HandleFunc("POST /api/users", s.requireRole(auth.RoleAdmin, s.handleCreateUser))
-	mux.HandleFunc("PUT /api/users/{id}", s.requireRole(auth.RoleAdmin, s.handleUpdateUser))
-	mux.HandleFunc("DELETE /api/users/{id}", s.requireRole(auth.RoleAdmin, s.handleDeleteUser))
+	// User management (permission-based)
+	mux.HandleFunc("GET /api/users", s.requirePermission(auth.PermUserView, s.handleListUsers))
+	mux.HandleFunc("POST /api/users", s.requirePermission(auth.PermUserCreate, s.handleCreateUser))
+	mux.HandleFunc("PUT /api/users/{id}", s.requirePermission(auth.PermUserEdit, s.handleUpdateUser))
+	mux.HandleFunc("DELETE /api/users/{id}", s.requirePermission(auth.PermUserDelete, s.handleDeleteUser))
 
 	// TOTP management (admin only)
 	mux.HandleFunc("POST /api/users/{id}/totp/setup", s.requireRole(auth.RoleAdmin, s.handleSetupTOTP))
 	mux.HandleFunc("POST /api/users/{id}/totp/confirm", s.requireRole(auth.RoleAdmin, s.handleConfirmTOTP))
 	mux.HandleFunc("DELETE /api/users/{id}/totp", s.requireRole(auth.RoleAdmin, s.handleDisableTOTP))
 
-	// API key management (admin only)
-	mux.HandleFunc("GET /api/keys", s.requireRole(auth.RoleAdmin, s.handleListAPIKeys))
-	mux.HandleFunc("POST /api/keys", s.requireRole(auth.RoleAdmin, s.handleCreateAPIKey))
-	mux.HandleFunc("DELETE /api/keys/{id}", s.requireRole(auth.RoleAdmin, s.handleDeleteAPIKey))
+	// API key management (server.keys permission)
+	mux.HandleFunc("GET /api/keys", s.requirePermission(auth.PermServerKeys, s.handleListAPIKeys))
+	mux.HandleFunc("POST /api/keys", s.requirePermission(auth.PermServerKeys, s.handleCreateAPIKey))
+	mux.HandleFunc("DELETE /api/keys/{id}", s.requirePermission(auth.PermServerKeys, s.handleDeleteAPIKey))
 
 	// Device token management (Dual Key System - admin only)
 	mux.HandleFunc("GET /api/tokens", s.requireRole(auth.RoleAdmin, s.handleListDeviceTokens))
@@ -451,7 +451,16 @@ func (s *Server) handleServerStats(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleListPeers(w http.ResponseWriter, r *http.Request) {
 	includeDeleted := r.URL.Query().Get("include_deleted") == "true"
-	peers, err := s.db.ListPeers(includeDeleted)
+
+	// Data scoping: org-scoped users only see their org's devices
+	orgID := getOrgIDFromCtx(r)
+	var peers []*db.Peer
+	var err error
+	if orgID != "" {
+		peers, err = s.db.ListPeersForOrg(orgID, includeDeleted)
+	} else {
+		peers, err = s.db.ListPeers(includeDeleted)
+	}
 	if err != nil {
 		writeInternalError(w, err, "ListPeers")
 		return
@@ -495,6 +504,12 @@ func (s *Server) handleListPeers(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleGetPeer(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
+
+	// Org scope check: org-scoped users can only access devices in their org.
+	if !s.peerOrgScopeCheck(w, r, id) {
+		return
+	}
+
 	p, err := s.db.GetPeer(id)
 	if err != nil {
 		writeInternalError(w, err, "GetPeer")
@@ -557,6 +572,9 @@ func (s *Server) handleLinkedPeers(w http.ResponseWriter, r *http.Request) {
 // PATCH /api/peers/{id}
 func (s *Server) handleUpdatePeerFields(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
+	if !s.peerOrgScopeCheck(w, r, id) {
+		return
+	}
 
 	var body struct {
 		Note        *string `json:"note"`
@@ -602,6 +620,9 @@ func (s *Server) handleUpdatePeerFields(w http.ResponseWriter, r *http.Request) 
 
 func (s *Server) handleDeletePeer(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
+	if !s.peerOrgScopeCheck(w, r, id) {
+		return
+	}
 	hard := r.URL.Query().Get("hard") == "true"
 	revoke := r.URL.Query().Get("revoke") == "true"
 	cascade := r.URL.Query().Get("cascade") == "true"
@@ -710,6 +731,9 @@ func (s *Server) handleDeletePeer(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleBanPeer(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
+	if !s.peerOrgScopeCheck(w, r, id) {
+		return
+	}
 
 	var body struct {
 		Reason string `json:"reason"`
@@ -737,6 +761,9 @@ func (s *Server) handleBanPeer(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleUnbanPeer(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
+	if !s.peerOrgScopeCheck(w, r, id) {
+		return
+	}
 	if err := s.db.UnbanPeer(id); err != nil {
 		writeInternalError(w, err, "UnbanPeer")
 		return
@@ -756,6 +783,9 @@ func (s *Server) handleUnbanPeer(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleChangePeerID(w http.ResponseWriter, r *http.Request) {
 	oldID := r.PathValue("id")
+	if !s.peerOrgScopeCheck(w, r, oldID) {
+		return
+	}
 
 	var body struct {
 		NewID string `json:"new_id"`
@@ -910,6 +940,9 @@ func (s *Server) handlePeerMetrics(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	if id == "" || !peerIDRegexp.MatchString(id) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Invalid peer ID"})
+		return
+	}
+	if !s.peerOrgScopeCheck(w, r, id) {
 		return
 	}
 

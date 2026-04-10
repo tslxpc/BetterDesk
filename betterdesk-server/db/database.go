@@ -40,14 +40,25 @@ type ServerConfig struct {
 
 // User represents an API user account.
 type User struct {
-	ID           int64  `json:"id"`
-	Username     string `json:"username"`
-	PasswordHash string `json:"-"`
-	Role         string `json:"role"` // admin, operator, viewer
-	TOTPSecret   string `json:"-"`
-	TOTPEnabled  bool   `json:"totp_enabled"`
-	CreatedAt    string `json:"created_at"`
-	LastLogin    string `json:"last_login,omitempty"`
+	ID            int64  `json:"id"`
+	Username      string `json:"username"`
+	PasswordHash  string `json:"-"`
+	Role          string `json:"role"`            // admin, operator, viewer
+	IsServerAdmin bool   `json:"is_server_admin"` // Phase 3: separate server admin flag
+	TOTPSecret    string `json:"-"`
+	TOTPEnabled   bool   `json:"totp_enabled"`
+	CreatedAt     string `json:"created_at"`
+	LastLogin     string `json:"last_login,omitempty"`
+}
+
+// RolePermission represents a custom permission override for a role.
+// Stored in the role_permissions table. If no override exists for a role+permission,
+// the default from auth.DefaultRolePermissions is used.
+type RolePermission struct {
+	ID         int64  `json:"id"`
+	Role       string `json:"role"`
+	Permission string `json:"permission"` // e.g. "device.view", "user.manage"
+	Granted    bool   `json:"granted"`    // true = allowed, false = denied
 }
 
 // APIKey represents a scoped API key for programmatic access.
@@ -218,6 +229,42 @@ const (
 	OrgRoleUser     = "user"
 )
 
+// OrgRoleLevel returns the numeric privilege level for an org-scoped role.
+// Higher = more privileges. Used for role boundary enforcement.
+func OrgRoleLevel(role string) int {
+	switch role {
+	case OrgRoleOwner:
+		return 40
+	case OrgRoleAdmin:
+		return 30
+	case OrgRoleOperator:
+		return 20
+	case OrgRoleUser:
+		return 10
+	default:
+		return 0
+	}
+}
+
+// OrgCanAssignRole checks whether a caller with callerOrgRole may assign targetOrgRole.
+// Owner → any; Admin → operator, user; Operator/User → none.
+func OrgCanAssignRole(callerOrgRole, targetOrgRole string) bool {
+	switch callerOrgRole {
+	case OrgRoleOwner:
+		// Owner can assign admin, operator, user (not another owner — handled in API)
+		return targetOrgRole == OrgRoleAdmin || targetOrgRole == OrgRoleOperator || targetOrgRole == OrgRoleUser
+	case OrgRoleAdmin:
+		return targetOrgRole == OrgRoleOperator || targetOrgRole == OrgRoleUser
+	default:
+		return false
+	}
+}
+
+// ValidOrgRole returns true if the given string is a recognized org role.
+func ValidOrgRole(r string) bool {
+	return r == OrgRoleOwner || r == OrgRoleAdmin || r == OrgRoleOperator || r == OrgRoleUser
+}
+
 // Database is the interface for all database operations.
 // Designed to support SQLite (now) and PostgreSQL (future) as drop-in implementations.
 type Database interface {
@@ -365,4 +412,13 @@ type Database interface {
 	GetAccessPolicy(peerID string) (*AccessPolicy, error)
 	SaveAccessPolicy(p *AccessPolicy) error
 	DeleteAccessPolicy(peerID string) error
+
+	// Role Permissions (RBAC Phase 52)
+	ListRolePermissions(role string) ([]*RolePermission, error)
+	SetRolePermission(role, permission string, granted bool) error
+	DeleteRolePermission(role, permission string) error
+	HasRolePermission(role, permission string) (bool, error)
+
+	// Org-scoped device queries (RBAC Phase 52 — data scoping)
+	ListPeersForOrg(orgID string, includeDeleted bool) ([]*Peer, error)
 }

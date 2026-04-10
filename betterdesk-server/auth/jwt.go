@@ -13,11 +13,12 @@ import (
 
 // Claims represents the JWT payload.
 type Claims struct {
-	Sub  string `json:"sub"`           // Subject (username)
-	Role string `json:"role"`          // User role (admin, operator, viewer)
-	Iat  int64  `json:"iat"`           // Issued at (Unix)
-	Exp  int64  `json:"exp"`           // Expires at (Unix)
-	Jti  string `json:"jti,omitempty"` // JWT ID (for revocation)
+	Sub   string `json:"sub"`              // Subject (username)
+	Role  string `json:"role"`             // User role (admin, operator, viewer)
+	OrgID string `json:"org_id,omitempty"` // Organization ID (empty = global/server-level user)
+	Iat   int64  `json:"iat"`              // Issued at (Unix)
+	Exp   int64  `json:"exp"`              // Expires at (Unix)
+	Jti   string `json:"jti,omitempty"`    // JWT ID (for revocation)
 }
 
 // JWTManager generates and validates HS256 JWT tokens.
@@ -52,17 +53,24 @@ func (m *JWTManager) Generate(subject, role string) (string, error) {
 // GenerateWithTTL creates a new signed JWT token with a custom time-to-live.
 // This is used for short-lived tokens such as partial 2FA tokens (H4).
 func (m *JWTManager) GenerateWithTTL(subject, role string, ttl time.Duration) (string, error) {
+	return m.GenerateOrgToken(subject, role, "", ttl)
+}
+
+// GenerateOrgToken creates a signed JWT token with an organization context.
+// If orgID is empty, the token is a global/server-level token.
+func (m *JWTManager) GenerateOrgToken(subject, role, orgID string, ttl time.Duration) (string, error) {
 	jti, err := GenerateRandomString(16)
 	if err != nil {
 		return "", fmt.Errorf("auth: generate jti: %w", err)
 	}
 	now := time.Now().Unix()
 	claims := Claims{
-		Sub:  subject,
-		Role: role,
-		Iat:  now,
-		Exp:  now + int64(ttl.Seconds()),
-		Jti:  jti,
+		Sub:   subject,
+		Role:  role,
+		OrgID: orgID,
+		Iat:   now,
+		Exp:   now + int64(ttl.Seconds()),
+		Jti:   jti,
 	}
 
 	hdr := b64URLEncode(mustJSON(jwtHeader{Alg: "HS256", Typ: "JWT"}))

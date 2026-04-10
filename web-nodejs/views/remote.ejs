@@ -217,6 +217,26 @@
                 </div>
             </div>
         </div>
+        <div class="viewer-overlay session-2fa-overlay" style="display:none;">
+            <div class="overlay-card">
+                <div class="overlay-icon"><span class="material-icons">verified_user</span></div>
+                <h2 class="overlay-title">${_('remote.2fa_required') || '2FA Verification'}</h2>
+                <p class="overlay-subtitle">${_('remote.2fa_hint') || 'Enter the 6-digit code from your authenticator app'}</p>
+                <div class="password-form">
+                    <div class="form-group">
+                        <input type="text" class="form-input session-2fa-input"
+                               placeholder="000000" autocomplete="one-time-code"
+                               maxlength="6" inputmode="numeric" pattern="[0-9]*"
+                               style="text-align:center;font-size:1.5rem;letter-spacing:0.5em;">
+                    </div>
+                    <p class="login-error session-2fa-error" style="display:none;"></p>
+                    <button class="btn btn-primary btn-full session-btn-verify-2fa">
+                        <span class="material-icons">verified</span>
+                        ${_('remote.verify') || 'Verify'}
+                    </button>
+                </div>
+            </div>
+        </div>
         <canvas class="session-canvas" tabindex="0"></canvas>
         <div class="chat-panel session-chat-panel" style="display:none;">
             <div class="chat-header">

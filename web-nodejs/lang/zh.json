@@ -638,7 +638,11 @@
     "file_rename": "重命名",
     "file_rename_prompt": "输入新名称：",
     "file_delete_confirm": "确定要删除此项吗？",
-    "file_cancelled": "传输已取消"
+    "file_cancelled": "传输已取消",
+    "2fa_required": "需要双因素验证",
+    "2fa_hint": "输入验证器应用中的6位数代码",
+    "2fa_invalid": "请输入有效的6位数代码",
+    "verify": "验证"
   },
   "branding": {
     "identity_title": "品牌标识",

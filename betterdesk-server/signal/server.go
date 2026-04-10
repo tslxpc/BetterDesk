@@ -5,6 +5,7 @@ package signal
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -364,6 +365,12 @@ func (s *Server) serveTCP() {
 			case <-s.ctx.Done():
 				return
 			default:
+				// Filter noisy but harmless accept errors (scanners, TLS probes, resets)
+				if errors.Is(err, io.EOF) ||
+					strings.Contains(err.Error(), "connection reset") ||
+					strings.Contains(err.Error(), "use of closed") {
+					continue
+				}
 				log.Printf("[signal] TCP accept error: %v", err)
 				continue
 			}

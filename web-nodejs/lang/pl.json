@@ -638,7 +638,11 @@
     "file_rename": "Zmień nazwę",
     "file_rename_prompt": "Podaj nową nazwę:",
     "file_delete_confirm": "Czy na pewno chcesz usunąć ten element?",
-    "file_cancelled": "Transfer anulowany"
+    "file_cancelled": "Transfer anulowany",
+    "2fa_required": "Wymagana weryfikacja 2FA",
+    "2fa_hint": "Wprowadź 6-cyfrowy kod z aplikacji uwierzytelniającej",
+    "2fa_invalid": "Wprowadź prawidłowy 6-cyfrowy kod",
+    "verify": "Weryfikuj"
   },
   "branding": {
     "identity_title": "Identyfikacja marki",

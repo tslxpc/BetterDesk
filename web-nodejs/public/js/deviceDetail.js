@@ -76,14 +76,20 @@ const DeviceDetail = (function () {
         overlayEl.className = 'device-panel-overlay';
         overlayEl.innerHTML = '<div class="device-panel" id="device-panel-inner"></div>';
 
-        // Close on overlay click
+        // Close on overlay click — skip if a modal dialog is open on top
         overlayEl.addEventListener('click', function (e) {
-            if (e.target === overlayEl) close();
+            if (e.target === overlayEl) {
+                if (document.querySelector('.modal-overlay.open, .modal-container.open')) return;
+                close();
+            }
         });
 
-        // Escape key
+        // Escape key — skip if a modal dialog is open on top
         overlayEl._escHandler = function (e) {
-            if (e.key === 'Escape') close();
+            if (e.key === 'Escape') {
+                if (document.querySelector('.modal-overlay.open, .modal-container.open')) return;
+                close();
+            }
         };
         document.addEventListener('keydown', overlayEl._escHandler);
 
@@ -836,6 +842,10 @@ const DeviceDetail = (function () {
     }
 
     async function _changeId() {
+        // Capture device ID before async operation — panel close sets device=null
+        const deviceId = device && device.id;
+        if (!deviceId) return;
+
         const newId = await Modal.prompt({
             title: _('devices.change_id_title'),
             label: _('devices.new_id'),
@@ -852,7 +862,7 @@ const DeviceDetail = (function () {
             return;
         }
         try {
-            await Utils.api('/api/devices/' + encodeURIComponent(device.id) + '/change-id', {
+            await Utils.api('/api/devices/' + encodeURIComponent(deviceId) + '/change-id', {
                 method: 'POST',
                 body: { newId: newId.toUpperCase() }
             });
@@ -865,23 +875,28 @@ const DeviceDetail = (function () {
     }
 
     async function _toggleBan() {
-        const isBanned = device.banned;
+        // Capture before async — panel close sets device=null
+        const deviceId = device && device.id;
+        const isBanned = device && device.banned;
+        if (!deviceId) return;
+
         const action = isBanned ? 'unban' : 'ban';
         const confirmed = await Modal.confirm({
             title: _('devices.' + action + '_title'),
-            message: _('devices.' + action + '_confirm', { id: device.id }),
+            message: _('devices.' + action + '_confirm', { id: deviceId }),
             confirmLabel: _(isBanned ? 'actions.unban' : 'actions.ban'),
             danger: !isBanned
         });
         if (!confirmed) return;
         try {
-            await Utils.api('/api/devices/' + encodeURIComponent(device.id) + '/' + action, { method: 'POST' });
+            await Utils.api('/api/devices/' + encodeURIComponent(deviceId) + '/' + action, { method: 'POST' });
             Notifications.success(_('devices.' + action + '_success'));
-            // Refresh panel
-            const id = device.id;
-            device = await Utils.api('/api/devices/' + encodeURIComponent(id));
-            _render();
-            _switchTab('actions');
+            // Refresh panel if still open
+            if (overlayEl) {
+                device = await Utils.api('/api/devices/' + encodeURIComponent(deviceId));
+                _render();
+                _switchTab('actions');
+            }
             _notifyChanged();
         } catch (err) {
             Notifications.error(err.message || _('errors.' + action + '_failed'));
@@ -889,16 +904,20 @@ const DeviceDetail = (function () {
     }
 
     async function _deleteDevice() {
+        // Capture before async — panel close sets device=null
+        const deviceId = device && device.id;
+        if (!deviceId) return;
+
         const confirmed = await Modal.confirm({
             title: _('devices.delete_title'),
-            message: _('devices.delete_confirm', { id: device.id }),
+            message: _('devices.delete_confirm', { id: deviceId }),
             confirmLabel: _('actions.delete'),
             confirmIcon: 'delete',
             danger: true
         });
         if (!confirmed) return;
         try {
-            await Utils.api('/api/devices/' + encodeURIComponent(device.id), { method: 'DELETE' });
+            await Utils.api('/api/devices/' + encodeURIComponent(deviceId), { method: 'DELETE' });
             Notifications.success(_('devices.delete_success'));
             close();
             _notifyChanged();

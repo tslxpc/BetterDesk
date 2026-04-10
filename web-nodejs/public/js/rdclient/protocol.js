@@ -56,6 +56,7 @@ class RDProtocol {
         this.types.ChatMessage = this.protoRoot.lookupType('hbb.ChatMessage');
         this.types.TogglePrivacyMode = this.protoRoot.lookupType('hbb.TogglePrivacyMode');
         this.types.SwitchDisplay = this.protoRoot.lookupType('hbb.SwitchDisplay');
+        this.types.Auth2FA = this.protoRoot.lookupType('hbb.Auth2FA');
 
         // File transfer types
         this.types.FileAction = this.protoRoot.lookupType('hbb.FileAction');
