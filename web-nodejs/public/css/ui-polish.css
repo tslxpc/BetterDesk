@@ -382,44 +382,4 @@
     }
 }
 
-/* ═══════════════════════════════════════════════════════════════════════
-   THEME TOGGLE (Settings UI)
-   ═══════════════════════════════════════════════════════════════════════ */
 
-.theme-selector {
-    display: flex;
-    gap: 8px;
-    padding: 4px;
-    background: var(--bg-tertiary);
-    border-radius: var(--radius-lg, 12px);
-    border: 1px solid var(--border-primary);
-}
-
-.theme-selector-btn {
-    all: unset;
-    cursor: pointer;
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    padding: 6px 14px;
-    border-radius: var(--radius-md, 8px);
-    font-size: var(--font-size-sm, 14px);
-    color: var(--text-secondary);
-    transition: all 0.15s ease;
-}
-
-.theme-selector-btn:hover {
-    color: var(--text-primary);
-    background: var(--bg-hover);
-}
-
-.theme-selector-btn.active {
-    color: var(--text-primary);
-    background: var(--bg-elevated);
-    font-weight: 500;
-    box-shadow: var(--shadow-sm);
-}
-
-.theme-selector-btn .material-icons {
-    font-size: 18px;
-}

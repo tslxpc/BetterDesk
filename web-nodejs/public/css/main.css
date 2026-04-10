@@ -361,30 +361,7 @@ table {
     flex-shrink: 0;
 }
 
-.sidebar-theme-toggle {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    width: 100%;
-    padding: var(--space-xs) var(--space-sm);
-    margin-bottom: var(--space-xs);
-    background: none;
-    border: 1px solid var(--border-primary);
-    border-radius: var(--radius-md);
-    color: var(--text-secondary);
-    cursor: pointer;
-    transition: all var(--transition-fast);
-}
 
-.sidebar-theme-toggle:hover {
-    background: var(--bg-tertiary);
-    color: var(--text-primary);
-    border-color: var(--border-hover);
-}
-
-.sidebar-theme-toggle .material-icons {
-    font-size: 18px;
-}
 
 .sidebar-user {
     display: flex;

@@ -20,7 +20,7 @@
     const STORAGE_WINS_KEY = 'betterdesk_desktop_wins';
     const CASCADE_OFFSET = 32;
     const STORAGE_FOLDABLE_AUTO = 'betterdesk_foldable_auto'; // Auto-switch on unfold
-    const STORAGE_THEME = 'betterdesk_desktop_theme'; // 'dark', 'light', 'auto'
+
 
     // ============ State ============
 
@@ -31,7 +31,7 @@
     let cascadeIndex = 0;
     let dragState = null;
     let resizeState = null;
-    let currentTheme = localStorage.getItem(STORAGE_THEME) || 'auto';
+
 
     // ============ Windows 11 Snap System ============
 
@@ -338,8 +338,9 @@
             }, 350);
         }
 
-        // Apply theme
-        applyTheme(currentTheme);
+        // Force dark theme (theme switching removed — conflicts with branding)
+        document.documentElement.classList.remove('desktop-theme-light');
+        document.documentElement.classList.add('desktop-theme-dark');
 
         // Desktop icons removed — apps open via drawer/shortcuts only
         initTopbar();
@@ -1924,12 +1925,7 @@
         var exitBtn = document.getElementById('topbar-exit-btn');
         if (exitBtn) exitBtn.addEventListener('click', function() { deactivate(); });
 
-        var themeBtn = document.getElementById('topbar-theme-btn');
-        if (themeBtn) themeBtn.addEventListener('click', function() {
-            if (typeof cycleTheme === 'function') cycleTheme();
-            var icon = themeBtn.querySelector('.material-icons');
-            if (icon) icon.textContent = currentTheme === 'dark' ? 'dark_mode' : currentTheme === 'light' ? 'light_mode' : 'brightness_auto';
-        });
+
 
         var widgetsBtn = document.getElementById('topbar-widgets-btn');
         if (widgetsBtn) widgetsBtn.addEventListener('click', function() {
@@ -2310,39 +2306,7 @@
         openApp(found);
     }
 
-    // ============ Theme System ============
 
-    function applyTheme(theme) {
-        currentTheme = theme;
-        localStorage.setItem(STORAGE_THEME, theme);
-
-        var root = document.documentElement;
-        root.classList.remove('desktop-theme-dark', 'desktop-theme-light');
-
-        var resolved = theme;
-        if (theme === 'auto') {
-            resolved = window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark';
-        }
-
-        root.classList.add('desktop-theme-' + resolved);
-    }
-
-    function cycleTheme() {
-        var order = ['dark', 'light', 'auto'];
-        var idx = order.indexOf(currentTheme);
-        var next = order[(idx + 1) % order.length];
-        applyTheme(next);
-        return next;
-    }
-
-    // Listen for system theme changes when in auto mode
-    if (window.matchMedia) {
-        window.matchMedia('(prefers-color-scheme: light)').addEventListener('change', function () {
-            if (currentTheme === 'auto' && active) {
-                applyTheme('auto');
-            }
-        });
-    }
 
     // ============ Public API ============
 
@@ -2355,10 +2319,7 @@
         switchMode: switchMode,
         getMode: function() { return currentMode; },
         openAppByRoute: openAppByRoute,
-        // Theme API
-        setTheme: applyTheme,
-        cycleTheme: cycleTheme,
-        getTheme: function() { return currentTheme; },
+
         // Snap Layout API
         showSnapPicker: showSnapPicker,
         hideSnapPicker: hideSnapPicker,
