@@ -911,6 +911,186 @@
     justify-content: flex-end;
 }
 
+/* ═══════════════════════════════════════════════════
+   TYPOGRAPHY / FONT PICKER
+   ═══════════════════════════════════════════════════ */
+
+.font-config {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-lg);
+}
+
+.font-slot {
+    background: var(--bg-tertiary);
+    border-radius: var(--radius-md);
+    padding: var(--space-md);
+}
+
+.font-slot-header {
+    margin-bottom: var(--space-sm);
+}
+
+.font-slot-title {
+    font-size: var(--font-size-md);
+    font-weight: var(--font-weight-semibold);
+    color: var(--text-primary);
+    margin: 0 0 var(--space-xs);
+}
+
+.font-picker-row {
+    display: flex;
+    align-items: center;
+    gap: var(--space-sm);
+    flex-wrap: wrap;
+}
+
+.font-search-wrapper {
+    position: relative;
+    flex: 1;
+    min-width: 220px;
+}
+
+.font-search-input {
+    width: 100%;
+}
+
+.font-dropdown {
+    position: absolute;
+    top: 100%;
+    left: 0;
+    right: 0;
+    max-height: 280px;
+    overflow-y: auto;
+    background: var(--bg-elevated);
+    border: 1px solid var(--border-primary);
+    border-radius: 0 0 var(--radius-md) var(--radius-md);
+    z-index: 100;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3);
+}
+
+.font-dropdown.hidden { display: none; }
+
+.font-dropdown-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: var(--space-sm) var(--space-md);
+    cursor: pointer;
+    transition: background 0.15s;
+    border-bottom: 1px solid var(--border-secondary);
+}
+
+.font-dropdown-item:last-child { border-bottom: none; }
+.font-dropdown-item:hover { background: var(--bg-hover); }
+
+.font-dropdown-item .font-name {
+    font-size: var(--font-size-sm);
+    color: var(--text-primary);
+}
+
+.font-dropdown-item .font-category {
+    font-size: var(--font-size-xs);
+    color: var(--text-secondary);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+}
+
+.font-dropdown-item .font-status {
+    display: flex;
+    align-items: center;
+    gap: var(--space-xs);
+}
+
+.font-dropdown-item .font-status .material-icons {
+    font-size: 14px;
+}
+
+.font-dropdown-item .font-downloaded {
+    color: var(--accent-green);
+}
+
+.font-dropdown-item .font-needs-download {
+    color: var(--text-secondary);
+    font-size: var(--font-size-xs);
+}
+
+.font-current {
+    font-size: var(--font-size-sm);
+    color: var(--accent-blue);
+    font-weight: var(--font-weight-medium);
+    white-space: nowrap;
+}
+
+.font-clear-btn {
+    padding: var(--space-xs) !important;
+}
+
+.font-clear-btn.hidden { display: none; }
+
+.font-preview {
+    margin-top: var(--space-sm);
+    padding: var(--space-md);
+    background: var(--bg-primary);
+    border: 1px solid var(--border-secondary);
+    border-radius: var(--radius-sm);
+    overflow: hidden;
+}
+
+.font-preview-text {
+    color: var(--text-primary);
+    display: block;
+}
+
+.font-category-filter {
+    display: flex;
+    gap: var(--space-xs);
+    flex-wrap: wrap;
+}
+
+.font-cat-btn {
+    font-size: var(--font-size-xs) !important;
+    padding: var(--space-xs) var(--space-sm) !important;
+    border-radius: var(--radius-full) !important;
+    border: 1px solid var(--border-primary) !important;
+}
+
+.font-cat-btn.active {
+    background: var(--accent-blue) !important;
+    border-color: var(--accent-blue) !important;
+    color: #fff !important;
+}
+
+.font-local-info {
+    display: flex;
+    align-items: center;
+    gap: var(--space-xs);
+    font-size: var(--font-size-sm);
+    color: var(--text-secondary);
+}
+
+.font-local-info .material-icons {
+    font-size: 18px;
+}
+
+.font-downloading {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-xs);
+    font-size: var(--font-size-xs);
+    color: var(--accent-yellow);
+}
+
+.font-downloading .material-icons {
+    font-size: 14px;
+    animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+    from { transform: rotate(0deg); }
+    to { transform: rotate(360deg); }
+}
+
 .btn-lg {
     padding: var(--space-sm) var(--space-xl);
     font-size: var(--font-size-md);

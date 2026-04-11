@@ -204,7 +204,14 @@
                     <div class="branding-logo-config">
                         <div class="logo-type-selector">
                             <label class="logo-type-option">
-                                <input type="radio" name="logo-type" value="icon" checked>
+                                <input type="radio" name="logo-type" value="text">
+                                <span class="logo-type-card">
+                                    <span class="material-icons">title</span>
+                                    <span>${_('branding.logo_type_text')}</span>
+                                </span>
+                            </label>
+                            <label class="logo-type-option">
+                                <input type="radio" name="logo-type" value="icon">
                                 <span class="logo-type-card">
                                     <span class="material-icons">text_fields</span>
                                     <span>${_('branding.logo_type_icon')}</span>
@@ -224,6 +231,22 @@
                                     <span>${_('branding.logo_type_image')}</span>
                                 </span>
                             </label>
+                        </div>
+                        
+                        <!-- Text Logo options -->
+                        <div class="logo-config-panel hidden" id="logo-text-panel">
+                            <div class="form-group">
+                                <label class="form-label" for="logo-text-input">${_('branding.logo_text')}</label>
+                                <input type="text" id="logo-text-input" class="form-input" 
+                                       placeholder="insolve" maxlength="30">
+                                <small class="form-hint">${_('branding.logo_text_hint')}</small>
+                            </div>
+                            <div class="form-group">
+                                <label class="form-label" for="logo-text-accent">${_('branding.logo_text_accent')}</label>
+                                <input type="text" id="logo-text-accent" class="form-input" 
+                                       placeholder="Core Server" maxlength="30">
+                                <small class="form-hint">${_('branding.logo_text_accent_hint')}</small>
+                            </div>
                         </div>
                         
                         <!-- Icon options -->
@@ -409,6 +432,81 @@
                                            placeholder="#21262d" maxlength="7">
                                 </div>
                             </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Typography -->
+            <div class="settings-section">
+                <div class="settings-section-header">
+                    <h2 class="settings-section-title">
+                        <span class="material-icons">text_format</span>
+                        ${_('branding.typography_title')}
+                    </h2>
+                    <p class="settings-section-desc">${_('branding.typography_desc')}</p>
+                </div>
+                <div class="settings-section-body">
+                    <div class="font-config">
+                        <!-- Heading Font -->
+                        <div class="font-slot" id="font-heading-slot">
+                            <div class="font-slot-header">
+                                <h3 class="font-slot-title">${_('branding.font_heading')}</h3>
+                                <small class="form-hint">${_('branding.font_heading_hint')}</small>
+                            </div>
+                            <div class="font-picker-row">
+                                <div class="font-search-wrapper">
+                                    <input type="text" id="font-heading-search" class="form-input font-search-input"
+                                           placeholder="${_('branding.font_search_placeholder')}" autocomplete="off">
+                                    <div class="font-dropdown hidden" id="font-heading-dropdown"></div>
+                                </div>
+                                <input type="hidden" id="font-heading-value">
+                                <span class="font-current" id="font-heading-current">${_('branding.font_system_default')}</span>
+                                <button class="btn btn-ghost btn-sm font-clear-btn hidden" id="font-heading-clear" title="${_('branding.font_clear')}">
+                                    <span class="material-icons">close</span>
+                                </button>
+                            </div>
+                            <div class="font-preview" id="font-heading-preview">
+                                <span class="font-preview-text" style="font-size: 1.5rem; font-weight: 600;">The quick brown fox jumps over the lazy dog</span>
+                            </div>
+                        </div>
+                        
+                        <!-- Body Font -->
+                        <div class="font-slot" id="font-body-slot">
+                            <div class="font-slot-header">
+                                <h3 class="font-slot-title">${_('branding.font_body')}</h3>
+                                <small class="form-hint">${_('branding.font_body_hint')}</small>
+                            </div>
+                            <div class="font-picker-row">
+                                <div class="font-search-wrapper">
+                                    <input type="text" id="font-body-search" class="form-input font-search-input"
+                                           placeholder="${_('branding.font_search_placeholder')}" autocomplete="off">
+                                    <div class="font-dropdown hidden" id="font-body-dropdown"></div>
+                                </div>
+                                <input type="hidden" id="font-body-value">
+                                <span class="font-current" id="font-body-current">${_('branding.font_system_default')}</span>
+                                <button class="btn btn-ghost btn-sm font-clear-btn hidden" id="font-body-clear" title="${_('branding.font_clear')}">
+                                    <span class="material-icons">close</span>
+                                </button>
+                            </div>
+                            <div class="font-preview" id="font-body-preview">
+                                <span class="font-preview-text">The quick brown fox jumps over the lazy dog. 0123456789</span>
+                            </div>
+                        </div>
+                        
+                        <!-- Category filter -->
+                        <div class="font-category-filter">
+                            <button class="btn btn-ghost btn-sm font-cat-btn active" data-category="all">${_('branding.font_cat_all')}</button>
+                            <button class="btn btn-ghost btn-sm font-cat-btn" data-category="sans-serif">Sans-Serif</button>
+                            <button class="btn btn-ghost btn-sm font-cat-btn" data-category="serif">Serif</button>
+                            <button class="btn btn-ghost btn-sm font-cat-btn" data-category="monospace">Mono</button>
+                            <button class="btn btn-ghost btn-sm font-cat-btn" data-category="display">Display</button>
+                        </div>
+                        
+                        <!-- Downloaded fonts info -->
+                        <div class="font-local-info" id="font-local-info">
+                            <span class="material-icons">folder</span>
+                            <span id="font-local-count">0</span> ${_('branding.font_downloaded_count')}
                         </div>
                     </div>
                 </div>

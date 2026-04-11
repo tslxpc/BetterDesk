@@ -8,6 +8,7 @@ import (
 	"crypto/tls"
 	"fmt"
 	"net"
+	"time"
 )
 
 // TLSHandshakeTimeout is the maximum time allowed for a TLS handshake.
@@ -51,18 +52,45 @@ func NewDualModeListener(ln net.Listener, cfg *tls.Config) net.Listener {
 	return &DualModeListener{inner: ln, tlsCfg: cfg}
 }
 
+// dualModePeekTimeout is the maximum time to wait for the client's first byte
+// when detecting TLS vs plain TCP. RustDesk clients that are logged in call
+// secure_tcp which READs first (waiting for the server's KeyExchange). If we
+// block on Peek indefinitely, we deadlock: server waits for client's first
+// byte, client waits for server's KeyExchange. A short timeout breaks the
+// deadlock — if no byte arrives, we assume a plain TCP client that expects the
+// server to send first (NegotiateSecureTCP will do exactly that).
+const dualModePeekTimeout = 200 * time.Millisecond
+
 // Accept waits for and returns the next connection.
 // If the first byte is a TLS handshake record, the connection is upgraded.
+// If the client does not send a first byte within dualModePeekTimeout, the
+// connection is returned as plain TCP (the client likely expects the server
+// to initiate the NaCl key exchange).
 func (d *DualModeListener) Accept() (net.Conn, error) {
 	conn, err := d.inner.Accept()
 	if err != nil {
 		return nil, err
 	}
 
+	// Set a short deadline for the peek so logged-in RustDesk clients
+	// (which wait for the server's KeyExchange first) don't deadlock.
+	conn.SetReadDeadline(time.Now().Add(dualModePeekTimeout))
+
 	// Peek at the first byte to determine protocol
 	br := bufio.NewReaderSize(conn, 1)
 	first, err := br.Peek(1)
+
+	// Clear the deadline regardless of outcome
+	conn.SetReadDeadline(time.Time{})
+
 	if err != nil {
+		// Timeout → client did not send first byte in time.
+		// This is expected for logged-in RustDesk clients that call
+		// secure_tcp (they read first, waiting for server's KeyExchange).
+		// Return the raw connection so NegotiateSecureTCP can send first.
+		if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
+			return conn, nil
+		}
 		conn.Close()
 		return nil, err
 	}

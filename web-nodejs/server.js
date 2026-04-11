@@ -525,17 +525,17 @@ function startRustDeskApiServer() {
     });
 
     // Start HTTP or HTTPS server for RustDesk Client API
+    // Port 21121 is internet-facing — always use TLS if valid certs are available,
+    // regardless of HTTPS_ENABLED (which controls the admin panel port).
     let apiServerInstance;
-    if (config.httpsEnabled) {
-        const sslOptions = loadSslCertificates();
-        if (sslOptions) {
-            apiServerInstance = https.createServer(sslOptions, apiApp);
-            console.log(`  ║   API TLS:   Enabled (HTTPS)`.padEnd(53) + '║');
-        } else {
-            console.warn('WARNING: HTTPS enabled but SSL certs invalid — API falling back to HTTP');
-            apiServerInstance = http.createServer(apiApp);
-        }
+    const sslOptions = loadSslCertificates();
+    if (sslOptions) {
+        apiServerInstance = https.createServer(sslOptions, apiApp);
+        console.log(`  ║   API TLS:   Enabled (HTTPS on :${config.apiPort})`.padEnd(53) + '║');
     } else {
+        if (config.sslCertPath || config.sslKeyPath) {
+            console.warn(`WARNING: SSL certs configured but invalid — API running insecure HTTP on :${config.apiPort}`);
+        }
         apiServerInstance = http.createServer(apiApp);
     }
     
@@ -571,7 +571,11 @@ function startRustDeskApiServer() {
  */
 function printStartupBanner(protocol, port) {
     const sslStatus = config.httpsEnabled ? '🔒 HTTPS' : '🔓 HTTP';
-    const apiStatus = config.apiEnabled ? `✅ Port ${config.apiPort} (HTTP)` : '❌ Disabled';
+    // API port 21121 auto-enables TLS if valid certs exist (regardless of HTTPS_ENABLED)
+    const apiHasCerts = config.sslCertPath && config.sslKeyPath && 
+                        fs.existsSync(config.sslCertPath) && fs.existsSync(config.sslKeyPath);
+    const apiProtocol = apiHasCerts ? 'HTTPS' : 'HTTP';
+    const apiStatus = config.apiEnabled ? `✅ Port ${config.apiPort} (${apiProtocol})` : '❌ Disabled';
     const panelUrl = `${protocol}://${config.host}:${port}`;
     console.log('');
     console.log('  ╔══════════════════════════════════════════════════╗');

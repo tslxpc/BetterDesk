@@ -8,6 +8,7 @@ const config = require('../config/config');
 const keyService = require('../services/keyService');
 const db = require('../services/database');
 const brandingService = require('../services/brandingService');
+const fontService = require('../services/fontService');
 const serverBackend = require('../services/serverBackend');
 const backupService = require('../services/backupService');
 const updateService = require('../services/updateService');
@@ -266,6 +267,78 @@ router.post('/api/settings/themes/:id/apply', requireAuth, requirePermission('br
     } catch (err) {
         console.error('Apply theme error:', err);
         res.status(500).json({ success: false, error: 'Failed to apply theme' });
+    }
+});
+
+// ==================== Font Management API ====================
+
+/**
+ * GET /api/settings/fonts - Search available fonts
+ * Query: ?q=inter&category=sans-serif
+ */
+router.get('/api/settings/fonts', requireAuth, (req, res) => {
+    try {
+        const query = String(req.query.q || '').substring(0, 100);
+        const category = String(req.query.category || 'all').substring(0, 20);
+        const fonts = fontService.searchFonts(query, category);
+        res.json({ success: true, data: fonts });
+    } catch (err) {
+        console.error('Font search error:', err);
+        res.status(500).json({ success: false, error: 'Failed to search fonts' });
+    }
+});
+
+/**
+ * GET /api/settings/fonts/local - List locally downloaded fonts
+ */
+router.get('/api/settings/fonts/local', requireAuth, (req, res) => {
+    try {
+        const fonts = fontService.listLocalFonts();
+        res.json({ success: true, data: fonts });
+    } catch (err) {
+        console.error('List local fonts error:', err);
+        res.status(500).json({ success: false, error: 'Failed to list fonts' });
+    }
+});
+
+/**
+ * POST /api/settings/fonts/download - Download a Google Font to server
+ * Body: { family: "Inter", weights: ["400", "500", "600", "700"] }
+ */
+router.post('/api/settings/fonts/download', requireAuth, requirePermission('branding.edit'), async (req, res) => {
+    try {
+        const { family, weights } = req.body;
+        if (!family || typeof family !== 'string') {
+            return res.status(400).json({ success: false, error: 'Font family is required' });
+        }
+
+        const result = await fontService.downloadFont(family, weights || ['400', '500', '600', '700']);
+
+        await db.logAction(req.session?.userId, 'font_download', `Downloaded font: ${family} (${result.files.length} files)`, req.ip);
+
+        res.json({ success: true, data: result });
+    } catch (err) {
+        console.error('Font download error:', err);
+        res.status(500).json({ success: false, error: err.message || 'Failed to download font' });
+    }
+});
+
+/**
+ * DELETE /api/settings/fonts/:family - Delete a locally downloaded font
+ */
+router.delete('/api/settings/fonts/:family', requireAuth, requirePermission('branding.edit'), async (req, res) => {
+    try {
+        const family = decodeURIComponent(req.params.family);
+        const result = fontService.deleteLocalFont(family);
+
+        if (result) {
+            await db.logAction(req.session?.userId, 'font_delete', `Deleted font: ${family}`, req.ip);
+        }
+
+        res.json({ success: true, deleted: result });
+    } catch (err) {
+        console.error('Font delete error:', err);
+        res.status(500).json({ success: false, error: 'Failed to delete font' });
     }
 });
 

@@ -476,6 +476,7 @@
             populateBrandingForm(brandingData);
             initLogoTypeSelector();
             initColorPickers();
+            initFontPickers();
             initBrandingActions();
             
         } catch (error) {
@@ -504,9 +505,21 @@
         const iconInput = document.getElementById('logo-icon-name');
         const svgInput = document.getElementById('logo-svg-input');
         const imageInput = document.getElementById('logo-image-url');
+        const textInput = document.getElementById('logo-text-input');
+        const textAccentInput = document.getElementById('logo-text-accent');
         if (iconInput) iconInput.value = data.logoIcon || 'dns';
         if (svgInput) svgInput.value = data.logoSvg || '';
         if (imageInput) imageInput.value = data.logoUrl || '';
+        if (textInput) textInput.value = data.logoText || '';
+        if (textAccentInput) textAccentInput.value = data.logoTextAccent || '';
+        
+        // Font fields
+        if (data.fontHeading) {
+            setFontPickerValue('heading', data.fontHeading);
+        }
+        if (data.fontBody) {
+            setFontPickerValue('body', data.fontBody);
+        }
         
         // Colors
         if (data.colors) {
@@ -539,6 +552,8 @@
         document.getElementById('logo-icon-name')?.addEventListener('input', updateLogoPreview);
         document.getElementById('logo-svg-input')?.addEventListener('input', updateLogoPreview);
         document.getElementById('logo-image-url')?.addEventListener('input', updateLogoPreview);
+        document.getElementById('logo-text-input')?.addEventListener('input', updateLogoPreview);
+        document.getElementById('logo-text-accent')?.addEventListener('input', updateLogoPreview);
         document.getElementById('brand-name')?.addEventListener('input', updateLogoPreview);
         
         // File upload handler
@@ -607,7 +622,18 @@
         const type = document.querySelector('input[name="logo-type"]:checked')?.value || 'icon';
         const name = document.getElementById('brand-name')?.value || 'BetterDesk';
         
-        if (type === 'svg') {
+        if (type === 'text') {
+            const logoText = document.getElementById('logo-text-input')?.value || name;
+            const accentText = document.getElementById('logo-text-accent')?.value || '';
+            const fontHeading = document.getElementById('font-heading-value')?.value || '';
+            const fontStyle = fontHeading ? `font-family: '${Utils.escapeHtml(fontHeading)}', sans-serif;` : '';
+            let html = `<span class="brand-text-logo brand-text-logo-lg" style="${fontStyle}">${Utils.escapeHtml(logoText)}`;
+            if (accentText) {
+                html += `<span class="brand-text-accent">${Utils.escapeHtml(accentText)}</span>`;
+            }
+            html += '</span>';
+            preview.innerHTML = html;
+        } else if (type === 'svg') {
             const svg = document.getElementById('logo-svg-input')?.value || '';
             if (svg.trim()) {
                 preview.innerHTML = `<span class="logo-preview-svg">${sanitizeSvg(svg)}</span>`;
@@ -701,6 +727,10 @@
             logoIcon: document.getElementById('logo-icon-name')?.value || 'dns',
             logoSvg: document.getElementById('logo-svg-input')?.value || '',
             logoUrl: document.getElementById('logo-image-url')?.value || '',
+            logoText: document.getElementById('logo-text-input')?.value || '',
+            logoTextAccent: document.getElementById('logo-text-accent')?.value || '',
+            fontHeading: document.getElementById('font-heading-value')?.value || '',
+            fontBody: document.getElementById('font-body-value')?.value || '',
             colors: {}
         };
         
@@ -716,6 +746,196 @@
         return data;
     }
     
+    /**
+     * Font picker state
+     */
+    let _fontSearchTimeout = null;
+    let _fontCategory = '';
+    let _fontPreviewLinks = {};
+
+    /**
+     * Set font picker value
+     */
+    function setFontPickerValue(slot, family) {
+        const valueInput = document.getElementById(`font-${slot}-value`);
+        const currentLabel = document.getElementById(`font-${slot}-current`);
+        const preview = document.getElementById(`font-${slot}-preview`);
+        const clearBtn = document.querySelector(`#font-${slot}-slot .font-clear-btn`);
+        
+        if (valueInput) valueInput.value = family || '';
+        if (currentLabel) currentLabel.textContent = family || _('branding.font_system_default');
+        if (clearBtn) clearBtn.style.display = family ? 'inline-flex' : 'none';
+        
+        if (preview) {
+            if (family) {
+                loadFontPreview(family);
+                preview.style.fontFamily = `'${family}', sans-serif`;
+            } else {
+                preview.style.fontFamily = '';
+            }
+        }
+    }
+
+    /**
+     * Load font preview via Google Fonts CSS
+     */
+    function loadFontPreview(family) {
+        const key = family.replace(/\s+/g, '+');
+        if (_fontPreviewLinks[key]) return;
+        const link = document.createElement('link');
+        link.rel = 'stylesheet';
+        link.href = `https://fonts.googleapis.com/css2?family=${encodeURIComponent(family)}:wght@400;700&display=swap`;
+        document.head.appendChild(link);
+        _fontPreviewLinks[key] = link;
+    }
+
+    /**
+     * Initialize font pickers
+     */
+    function initFontPickers() {
+        ['heading', 'body'].forEach(slot => {
+            const searchInput = document.getElementById(`font-${slot}-search`);
+            const dropdown = document.getElementById(`font-${slot}-dropdown`);
+            const clearBtn = document.querySelector(`#font-${slot}-slot .font-clear-btn`);
+            
+            if (!searchInput || !dropdown) return;
+
+            // Search input
+            searchInput.addEventListener('input', () => {
+                clearTimeout(_fontSearchTimeout);
+                _fontSearchTimeout = setTimeout(() => {
+                    searchFonts(slot, searchInput.value.trim());
+                }, 300);
+            });
+
+            searchInput.addEventListener('focus', () => {
+                if (!dropdown.children.length) {
+                    searchFonts(slot, '');
+                }
+                dropdown.style.display = 'block';
+            });
+
+            // Close dropdown on outside click
+            document.addEventListener('click', (e) => {
+                if (!e.target.closest(`#font-${slot}-slot`)) {
+                    dropdown.style.display = 'none';
+                }
+            });
+
+            // Clear button
+            if (clearBtn) {
+                clearBtn.addEventListener('click', () => {
+                    setFontPickerValue(slot, '');
+                    updateLogoPreview();
+                });
+            }
+        });
+
+        // Category filter buttons
+        document.querySelectorAll('.font-cat-btn').forEach(btn => {
+            btn.addEventListener('click', () => {
+                document.querySelectorAll('.font-cat-btn').forEach(b => b.classList.remove('active'));
+                btn.classList.add('active');
+                _fontCategory = btn.dataset.category || '';
+                // Re-search both slots with new category
+                ['heading', 'body'].forEach(slot => {
+                    const searchInput = document.getElementById(`font-${slot}-search`);
+                    const dropdown = document.getElementById(`font-${slot}-dropdown`);
+                    if (searchInput && dropdown && dropdown.style.display === 'block') {
+                        searchFonts(slot, searchInput.value.trim());
+                    }
+                });
+            });
+        });
+
+        // Load local fonts count
+        loadLocalFontCount();
+    }
+
+    /**
+     * Search fonts and populate dropdown
+     */
+    async function searchFonts(slot, query) {
+        const dropdown = document.getElementById(`font-${slot}-dropdown`);
+        if (!dropdown) return;
+
+        try {
+            const params = new URLSearchParams();
+            if (query) params.set('q', query);
+            if (_fontCategory) params.set('category', _fontCategory);
+            
+            const fonts = await Utils.api(`/api/settings/fonts?${params}`);
+            
+            dropdown.innerHTML = '';
+            
+            if (!fonts || !fonts.length) {
+                dropdown.innerHTML = '<div class="font-dropdown-empty">No fonts found</div>';
+                dropdown.style.display = 'block';
+                return;
+            }
+
+            fonts.forEach(font => {
+                const item = document.createElement('div');
+                item.className = 'font-dropdown-item';
+                
+                loadFontPreview(font.family);
+                
+                item.innerHTML = `
+                    <span class="font-item-name" style="font-family: '${Utils.escapeHtml(font.family)}', sans-serif">${Utils.escapeHtml(font.family)}</span>
+                    <span class="font-item-meta">
+                        <span class="font-item-category">${Utils.escapeHtml(font.category)}</span>
+                        ${font.downloaded ? '<span class="font-item-local" title="Downloaded">●</span>' : ''}
+                    </span>
+                `;
+                
+                item.addEventListener('click', async () => {
+                    // Auto-download if not yet cached
+                    if (!font.downloaded) {
+                        item.classList.add('font-downloading');
+                        try {
+                            await Utils.api('/api/settings/fonts/download', {
+                                method: 'POST',
+                                body: { family: font.family }
+                            });
+                            loadLocalFontCount();
+                        } catch (e) {
+                            // Still use via CDN even if download fails
+                            console.warn('Font download failed, using CDN:', e);
+                        }
+                        item.classList.remove('font-downloading');
+                    }
+                    
+                    setFontPickerValue(slot, font.family);
+                    dropdown.style.display = 'none';
+                    updateLogoPreview();
+                });
+                
+                dropdown.appendChild(item);
+            });
+            
+            dropdown.style.display = 'block';
+        } catch (error) {
+            console.error('Font search failed:', error);
+            dropdown.innerHTML = '<div class="font-dropdown-empty">Search failed</div>';
+            dropdown.style.display = 'block';
+        }
+    }
+
+    /**
+     * Load local font count
+     */
+    async function loadLocalFontCount() {
+        try {
+            const fonts = await Utils.api('/api/settings/fonts/local');
+            const counter = document.getElementById('font-local-count');
+            if (counter && Array.isArray(fonts)) {
+                counter.textContent = fonts.length;
+            }
+        } catch (e) {
+            // ignore
+        }
+    }
+
     /**
      * Initialize branding action buttons
      */

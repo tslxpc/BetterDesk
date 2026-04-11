@@ -17,7 +17,9 @@
         <div class="login-card">
             <div class="login-header">
                 <div class="login-logo">
-                    <% if (branding.logoType === 'svg' && branding.logoSvg) { %>
+                    <% if (branding.logoType === 'text' && branding.logoText) { %>
+                    <span class="brand-text-logo brand-text-logo-lg"><%= branding.logoText %><% if (branding.logoTextAccent) { %><span class="brand-text-accent"><%= branding.logoTextAccent %></span><% } %></span>
+                    <% } else if (branding.logoType === 'svg' && branding.logoSvg) { %>
                     <span class="login-logo-svg"><%- branding.logoSvg %></span>
                     <% } else if (branding.logoType === 'image' && branding.logoUrl) { %>
                     <img src="<%= branding.logoUrl %>" alt="<%= appName %>" class="login-logo-img">

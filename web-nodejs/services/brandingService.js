@@ -5,6 +5,7 @@
  */
 
 const db = require('./database');
+const fontService = require('./fontService');
 
 // Dangerous SVG elements that can execute scripts
 const SVG_DANGEROUS_TAGS = /<\s*(script|foreignobject|iframe|embed|object|applet|animate|set)[^>]*>[\s\S]*?<\s*\/\s*\1\s*>/gi;
@@ -45,10 +46,16 @@ const DEFAULT_BRANDING = {
     appDescription: 'RustDesk Server Management',
     
     // Logo configuration
-    logoType: 'image', // 'icon' | 'svg' | 'image'
+    logoType: 'image', // 'icon' | 'svg' | 'image' | 'text'
     logoIcon: 'dns',   // Material Icons name (when logoType === 'icon')
     logoSvg: '',       // Raw SVG markup or SVG path data (when logoType === 'svg')
     logoUrl: '/img/betterdesk_icon.png', // URL to image file (when logoType === 'image')
+    logoText: '',      // Text to display as logo (when logoType === 'text')
+    logoTextAccent: '', // Accent text (different color, e.g. product name after brand)
+    
+    // Typography (Google Fonts)
+    fontHeading: '',   // Font family for headings / logo text (empty = system default)
+    fontBody: '',      // Font family for body text (empty = system default)
     
     // Favicon (SVG)
     faviconSvg: '',   // Custom favicon SVG (empty = default)
@@ -194,8 +201,8 @@ async function resetBranding() {
 }
 
 /**
- * Generate CSS :root overrides from branding colors
- * @returns {string} CSS string with :root variable overrides
+ * Generate CSS :root overrides from branding colors and fonts
+ * @returns {string} CSS string with @font-face imports and :root variable overrides
  */
 function generateThemeCss() {
     const branding = getBranding();
@@ -217,9 +224,20 @@ function generateThemeCss() {
         }
     }
     
-    if (overrides.length === 0) return '';
+    let css = '';
     
-    return `:root {\n${overrides.join('\n')}\n}\n`;
+    // Font CSS (imports + heading/body font variables)
+    const fontCss = fontService.generateFontCss(branding.fontHeading, branding.fontBody);
+    if (fontCss) {
+        css += fontCss + '\n';
+    }
+    
+    // Color overrides
+    if (overrides.length > 0) {
+        css += `:root {\n${overrides.join('\n')}\n}\n`;
+    }
+    
+    return css;
 }
 
 /**
