@@ -969,6 +969,13 @@ func (s *Server) handleRequestRelayTCP(msg *pb.RequestRelay, raddr *net.UDPAddr)
 	if target.UDPAddr != nil && isSameNetwork(raddr, target.UDPAddr) {
 		relayServer = s.getLANRelayServer()
 		log.Printf("[signal] RequestRelay (TCP) LAN detected: %s and %s on same network, relay=%s", raddr.IP, target.UDPAddr.IP, relayServer)
+	} else {
+		// Debug: log why LAN detection failed
+		if target.UDPAddr == nil {
+			log.Printf("[signal] RequestRelay (TCP) LAN check skipped: target %s has no UDPAddr (connType=%s)", targetID, target.ConnType)
+		} else {
+			log.Printf("[signal] RequestRelay (TCP) LAN check failed: initiator=%s target=%s (isSameNetwork=false)", raddr, target.UDPAddr)
+		}
 	}
 
 	// Forward RequestRelay to target peer (supports UDP, TCP, and WebSocket targets).
@@ -1355,36 +1362,66 @@ func registerPkResponse(result pb.RegisterPkResponse_Result) *pb.RendezvousMessa
 // considered "same network" because the server is local and both are LAN peers.
 func isSameNetwork(a, b *net.UDPAddr) bool {
 	if a == nil || b == nil {
+		log.Printf("[LAN] isSameNetwork: nil address (a=%v, b=%v)", a, b)
 		return false
 	}
+
+	// Normalize to IPv4 if possible (handles ::ffff:x.x.x.x mapped addresses)
+	aIP := a.IP
+	bIP := b.IP
+	if a4 := a.IP.To4(); a4 != nil {
+		aIP = a4
+	}
+	if b4 := b.IP.To4(); b4 != nil {
+		bIP = b4
+	}
+
 	// Same IP — behind the same NAT, or same machine
-	if a.IP.Equal(b.IP) {
+	if aIP.Equal(bIP) {
+		log.Printf("[LAN] isSameNetwork: same IP (%v) → true", aIP)
 		return true
 	}
 
 	// Loopback detection: if initiator is 127.x or ::1 and target is private IP,
 	// treat as same network. This happens when web client or local app connects
 	// to localhost server while target is on LAN.
-	if a.IP.IsLoopback() && isPrivateIP(b.IP.To4()) {
+	aLoopback := aIP.IsLoopback()
+	bPrivate := isPrivateIP(bIP)
+	log.Printf("[LAN] isSameNetwork check: a=%v (loopback=%v), b=%v (private=%v)", aIP, aLoopback, bIP, bPrivate)
+
+	if aLoopback && bPrivate {
+		log.Printf("[LAN] isSameNetwork: loopback→private → true")
 		return true
 	}
-	if b.IP.IsLoopback() && isPrivateIP(a.IP.To4()) {
+	if bIP.IsLoopback() && isPrivateIP(aIP) {
+		log.Printf("[LAN] isSameNetwork: private←loopback → true")
 		return true
 	}
 
 	// Both private IPv4 on the same /24 subnet — same LAN
-	a4 := a.IP.To4()
-	b4 := b.IP.To4()
+	a4 := aIP.To4()
+	b4 := bIP.To4()
 	if a4 != nil && b4 != nil && isPrivateIP(a4) && isPrivateIP(b4) {
-		return a4[0] == b4[0] && a4[1] == b4[1] && a4[2] == b4[2]
+		sameSubnet := a4[0] == b4[0] && a4[1] == b4[1] && a4[2] == b4[2]
+		if sameSubnet {
+			log.Printf("[LAN] isSameNetwork: same /24 subnet (%v, %v) → true", a4, b4)
+			return true
+		}
 	}
+
+	log.Printf("[LAN] isSameNetwork: no match → false")
 	return false
 }
 
 // isPrivateIP returns true if the IP is in a private/local range.
+// Handles both 4-byte and 16-byte IP representations.
 func isPrivateIP(ip net.IP) bool {
 	if ip == nil {
 		return false
+	}
+	// Normalize to 4-byte IPv4 if possible
+	if ip4 := ip.To4(); ip4 != nil {
+		ip = ip4
 	}
 	privateRanges := []struct {
 		network *net.IPNet

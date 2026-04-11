@@ -327,16 +327,21 @@ func (pg *PostgresDB) Migrate() error {
 	// Deferred indexes — must run AFTER column migrations so that columns
 	// like linked_peer_id exist on databases created before v2.5.0.
 	// We use PL/pgSQL DO blocks to safely check column existence first.
+	// NOTE: Must use current_schema() to avoid cross-schema false positives.
+	// Exception handler catches "column does not exist" if timing race occurs.
 	deferredIndexes := []string{
 		// linked_peer_id index — check column exists before creating
 		`DO $$
 		BEGIN
 			IF EXISTS (
 				SELECT 1 FROM information_schema.columns 
-				WHERE table_name = 'peers' AND column_name = 'linked_peer_id'
+				WHERE table_schema = current_schema() AND table_name = 'peers' AND column_name = 'linked_peer_id'
 			) THEN
 				CREATE INDEX IF NOT EXISTS idx_peers_linked_peer ON peers(linked_peer_id) WHERE linked_peer_id != '';
 			END IF;
+		EXCEPTION WHEN undefined_column THEN
+			-- Column doesn't exist yet, skip index creation silently
+			NULL;
 		END $$`,
 	}
 	for _, idx := range deferredIndexes {

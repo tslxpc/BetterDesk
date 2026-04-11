@@ -144,6 +144,12 @@ function tryGoServerAuth(username, password) {
  * Returns user object with totpRequired flag if 2FA is enabled.
  */
 async function authenticate(username, password) {
+    // Safeguard: reject empty username immediately (Issue #104)
+    if (!username || typeof username !== 'string' || username.trim() === '') {
+        console.log(`[AUTH] Rejected authenticate() with empty/invalid username: ${JSON.stringify(username)}`);
+        return null;
+    }
+    
     const user = await db.getUserByUsername(username);
     
     if (!user) {

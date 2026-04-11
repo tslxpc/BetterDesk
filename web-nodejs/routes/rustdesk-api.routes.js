@@ -780,7 +780,15 @@ router.post('/api/login', async (req, res) => {
 
     try {
         const body = req.body || {};
-        console.log('[API:LOGIN] Request body keys:', Object.keys(body).join(', '), 'IP:', ip);
+        
+        // Debug: log exact body for Issue #104 investigation
+        console.log('[API:LOGIN] Request from', ip, '- body:', JSON.stringify({
+            username: body.username,
+            password: body.password ? '[REDACTED]' : body.password,
+            id: body.id,
+            type: body.type,
+            hasDeviceInfo: !!body.deviceInfo
+        }));
 
         // Extract and sanitize credentials — trim whitespace that could cause empty username issues
         const rawUsername = body.username;
@@ -788,10 +796,8 @@ router.post('/api/login', async (req, res) => {
         const username = typeof rawUsername === 'string' ? rawUsername.trim() : '';
         const password = typeof rawPassword === 'string' ? rawPassword : '';
         
-        // Debug log for empty username investigation (#104)
-        if (!username && rawUsername !== undefined) {
-            console.log(`[API:LOGIN] Username is empty/whitespace-only. Raw type: ${typeof rawUsername}, raw value: '${String(rawUsername).slice(0, 20)}'`);
-        }
+        // Debug: log extraction result for Issue #104
+        console.log(`[API:LOGIN] Extracted credentials: username=${JSON.stringify(username)} (from raw type: ${typeof rawUsername}), password=${password ? '[SET]' : '[EMPTY]'}`);
 
         const {
             id: clientId,
@@ -813,7 +819,7 @@ router.post('/api/login', async (req, res) => {
 
         // ── Initial login step ──
         if (!username || !password) {
-            console.log(`[API:LOGIN] Missing credentials - username: '${username ? '[SET]' : '[EMPTY]'}', password: ${password ? '[SET]' : '[EMPTY]'}, IP: ${ip}`);
+            console.log(`[API:LOGIN] Missing credentials - username empty: ${!username}, password empty: ${!password}, IP: ${ip}`);
             return res.status(400).json({ error: 'Missing credentials' });
         }
 

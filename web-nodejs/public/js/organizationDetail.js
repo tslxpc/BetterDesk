@@ -558,20 +558,38 @@
             });
 
             document.getElementById('save-settings-btn')?.addEventListener('click', async () => {
+                const saveBtn = document.getElementById('save-settings-btn');
+                const originalContent = saveBtn.innerHTML;
+                
+                // Visual feedback: disable button, show spinner
+                saveBtn.disabled = true;
+                saveBtn.innerHTML = '<span class="material-icons rotating">sync</span> ' + (t('saving') || 'Saving...');
+                
                 const settingsToSave = [
                     { key: 'connection_policy', value: document.getElementById('setting-connection-policy')?.value || 'unattended' },
                     { key: 'allow_file_transfer', value: document.getElementById('setting-allow-file-transfer')?.value || 'true' },
                     { key: 'allow_clipboard', value: document.getElementById('setting-allow-clipboard')?.value || 'true' },
                     { key: 'max_session_duration_min', value: document.getElementById('setting-max-session')?.value || '120' },
                 ];
+                
+                console.log('[Org Settings] Saving:', settingsToSave);
+                
                 try {
                     for (const s of settingsToSave) {
-                        await api('PUT', '/settings', s);
+                        console.log('[Org Settings] PUT', s.key, '=', s.value);
+                        const result = await api('PUT', '/settings', s);
+                        console.log('[Org Settings] Result:', result);
                     }
-                    toast(t('settings_saved'), 'success');
-                    loadSettings();
+                    toast(t('settings_saved') || 'Settings saved', 'success');
+                    // Reload to confirm persistence
+                    await loadSettings();
                 } catch (err) {
-                    toast(err.message, 'error');
+                    console.error('[Org Settings] Save error:', err);
+                    toast(err.message || 'Failed to save settings', 'error');
+                } finally {
+                    // Restore button
+                    saveBtn.disabled = false;
+                    saveBtn.innerHTML = originalContent;
                 }
             });
         } catch (err) {
