@@ -1350,6 +1350,9 @@ func registerPkResponse(result pb.RegisterPkResponse_Result) *pb.RendezvousMessa
 // Matches the original Rust hbbs logic:
 //
 //	is_local = (both private IPv4 && same /24 subnet) || (same IP)
+//
+// Extended: Loopback (127.x.x.x, ::1) connecting to a private IP target is
+// considered "same network" because the server is local and both are LAN peers.
 func isSameNetwork(a, b *net.UDPAddr) bool {
 	if a == nil || b == nil {
 		return false
@@ -1358,6 +1361,17 @@ func isSameNetwork(a, b *net.UDPAddr) bool {
 	if a.IP.Equal(b.IP) {
 		return true
 	}
+
+	// Loopback detection: if initiator is 127.x or ::1 and target is private IP,
+	// treat as same network. This happens when web client or local app connects
+	// to localhost server while target is on LAN.
+	if a.IP.IsLoopback() && isPrivateIP(b.IP.To4()) {
+		return true
+	}
+	if b.IP.IsLoopback() && isPrivateIP(a.IP.To4()) {
+		return true
+	}
+
 	// Both private IPv4 on the same /24 subnet — same LAN
 	a4 := a.IP.To4()
 	b4 := b.IP.To4()

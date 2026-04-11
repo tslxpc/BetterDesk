@@ -782,9 +782,18 @@ router.post('/api/login', async (req, res) => {
         const body = req.body || {};
         console.log('[API:LOGIN] Request body keys:', Object.keys(body).join(', '), 'IP:', ip);
 
+        // Extract and sanitize credentials — trim whitespace that could cause empty username issues
+        const rawUsername = body.username;
+        const rawPassword = body.password;
+        const username = typeof rawUsername === 'string' ? rawUsername.trim() : '';
+        const password = typeof rawPassword === 'string' ? rawPassword : '';
+        
+        // Debug log for empty username investigation (#104)
+        if (!username && rawUsername !== undefined) {
+            console.log(`[API:LOGIN] Username is empty/whitespace-only. Raw type: ${typeof rawUsername}, raw value: '${String(rawUsername).slice(0, 20)}'`);
+        }
+
         const {
-            username,
-            password,
             id: clientId,
             uuid: clientUuid,
             type: reqType,
@@ -804,6 +813,7 @@ router.post('/api/login', async (req, res) => {
 
         // ── Initial login step ──
         if (!username || !password) {
+            console.log(`[API:LOGIN] Missing credentials - username: '${username ? '[SET]' : '[EMPTY]'}', password: ${password ? '[SET]' : '[EMPTY]'}, IP: ${ip}`);
             return res.status(400).json({ error: 'Missing credentials' });
         }
 

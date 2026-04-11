@@ -134,9 +134,14 @@ func (s *Server) handleClientLogin(w http.ResponseWriter, r *http.Request) {
 		AutoLogin        bool   `json:"autoLogin"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		log.Printf("[api] /api/login: JSON decode error from %s: %v", clientIP, err)
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Invalid JSON"})
 		return
 	}
+
+	// DEBUG: Log incoming login request fields (excluding password)
+	log.Printf("[api] /api/login from %s: user=%q type=%q code=%q secret_len=%d id=%q uuid=%q",
+		clientIP, body.Username, body.Type, body.VerificationCode, len(body.Secret), body.ID, body.UUID)
 
 	totpCode := body.VerificationCode
 	if totpCode == "" {

@@ -295,8 +295,8 @@
 
 <!-- Initial session data (from server route) -->
 <script nonce="${cspNonce}">
-    window.__initialDeviceId = '` + deviceId + `';
-    window.__initialDeviceName = '` + (device && device.hostname ? device.hostname.replace(/'/g, "\\\\'") : '') + `';
+    window.__initialDeviceId = ` + JSON.stringify(deviceId) + `;
+    window.__initialDeviceName = ` + JSON.stringify(device && device.hostname ? device.hostname : '') + `;
 </script>
 
 `

@@ -19,8 +19,8 @@
                 <span class="material-icons">connected_tv</span>
             </div>
             <h2 class="bdv-overlay-title">Remote Desktop</h2>
-            <p class="bdv-overlay-device">` + (device && device.hostname ? device.hostname : '') + `</p>
-            <p class="bdv-overlay-id">` + deviceId + `</p>
+            <p class="bdv-overlay-device" id="bdv-overlay-hostname"></p>
+            <p class="bdv-overlay-id" id="bdv-overlay-deviceid"></p>
             <div class="bdv-overlay-status" id="bdv-status-area">
                 <div class="spinner"></div>
                 <span id="bdv-status-text">Connecting to agent…</span>
@@ -43,7 +43,7 @@
     <div class="bdv-toolbar" id="bdv-toolbar">
         <div class="bdv-toolbar-left">
             <span class="material-icons">connected_tv</span>
-            <span id="bdv-toolbar-title">` + (device && device.hostname ? device.hostname : deviceId) + `</span>
+            <span id="bdv-toolbar-title"></span>
             <span class="bdv-toolbar-sep"></span>
             <span class="bdv-badge" id="bdv-fps-badge">—</span>
         </div>
@@ -90,7 +90,7 @@
     <!-- Chat sidebar -->
     <div class="bdv-chat" id="bdv-chat">
         <div class="bdv-chat-header">
-            <span>Chat — ` + deviceId + `</span>
+            <span id="bdv-chat-title">Chat</span>
             <button class="bdv-btn" id="btnCloseChat">
                 <span class="material-icons">close</span>
             </button>
@@ -112,9 +112,16 @@
 
     // ---- Config ----
     const DEVICE_ID  = ${JSON.stringify(deviceId)};
+    const HOSTNAME   = ${JSON.stringify(device && device.hostname ? device.hostname : '')};
     const WS_BASE    = (location.protocol === 'https:' ? 'wss' : 'ws') + '://' + location.host;
     const REMOTE_URL = WS_BASE + '/ws/remote-viewer/' + encodeURIComponent(DEVICE_ID);
     const CHAT_URL   = WS_BASE + '/ws/chat-operator/' + encodeURIComponent(DEVICE_ID);
+
+    // ---- Safely set dynamic text content (prevents XSS/EJS injection) ----
+    document.getElementById('bdv-overlay-hostname').textContent = HOSTNAME;
+    document.getElementById('bdv-overlay-deviceid').textContent = DEVICE_ID;
+    document.getElementById('bdv-toolbar-title').textContent = HOSTNAME || DEVICE_ID;
+    document.getElementById('bdv-chat-title').textContent = 'Chat — ' + DEVICE_ID;
 
     // ---- DOM ----
     const canvas    = document.getElementById('bdv-canvas');

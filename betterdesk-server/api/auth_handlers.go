@@ -8,6 +8,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"log"
 	"net/http"
 	"strconv"
 	"strings"
@@ -839,6 +840,9 @@ func (s *Server) extractOrgIDFromRequest(r *http.Request) string {
 // Public endpoints are excluded from authentication.
 func (s *Server) authMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Log ALL incoming HTTP requests for debugging
+		log.Printf("[api] %s %s from %s", r.Method, r.URL.Path, s.remoteIP(r))
+
 		// Limit request body size to 1 MB for all requests (S10)
 		r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
 

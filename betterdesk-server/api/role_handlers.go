@@ -1,11 +1,12 @@
 // Role and Permission management handlers for the BetterDesk API (Phase 52 RBAC).
 //
 // Provides endpoints:
-//   GET    /api/roles                                - List all roles with default permissions
-//   GET    /api/roles/{role}/permissions              - Get effective permissions for a role
-//   GET    /api/role-permissions                      - List all custom permission overrides
-//   POST   /api/role-permissions                      - Set a custom permission override
-//   DELETE /api/role-permissions/{role}/{permission}   - Delete a custom override
+//
+//	GET    /api/roles                                - List all roles with default permissions
+//	GET    /api/roles/{role}/permissions              - Get effective permissions for a role
+//	GET    /api/role-permissions                      - List all custom permission overrides
+//	POST   /api/role-permissions                      - Set a custom permission override
+//	DELETE /api/role-permissions/{role}/{permission}   - Delete a custom override
 package api
 
 import (
@@ -17,11 +18,11 @@ import (
 
 // roleInfo describes a single role for the /api/roles response.
 type roleInfo struct {
-	Name        string   `json:"name"`
-	Level       int      `json:"level"`
-	IsSuperAdmin bool    `json:"is_super_admin"`
-	IsServerLevel bool   `json:"is_server_level"`
-	Permissions []string `json:"permissions"`
+	Name          string   `json:"name"`
+	Level         int      `json:"level"`
+	IsSuperAdmin  bool     `json:"is_super_admin"`
+	IsServerLevel bool     `json:"is_server_level"`
+	Permissions   []string `json:"permissions"`
 }
 
 // handleListRoles returns all built-in roles with their default permission sets.
