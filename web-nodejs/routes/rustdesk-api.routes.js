@@ -95,6 +95,7 @@ function extractBearerToken(req) {
 /**
  * Build a RustDesk-compatible user payload
  */
+const ADMIN_ROLES = ['admin', 'super_admin', 'server_admin', 'global_admin'];
 function buildUserPayload(user) {
     return {
         name: user.username,
@@ -102,7 +103,7 @@ function buildUserPayload(user) {
         note: '',
         status: 1, // kNormal
         grp: '',
-        is_admin: user.role === 'admin'
+        is_admin: ADMIN_ROLES.includes(user.role)
     };
 }
 
@@ -131,7 +132,7 @@ async function requireAuth(req, res, next) {
  * Middleware: require admin role
  */
 function requireAdmin(req, res, next) {
-    if (!req.authUser || req.authUser.role !== 'admin') {
+    if (!req.authUser || !ADMIN_ROLES.includes(req.authUser.role)) {
         return res.status(403).json({ error: 'Admin privileges required' });
     }
     next();

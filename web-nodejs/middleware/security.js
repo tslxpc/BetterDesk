@@ -32,7 +32,9 @@ function buildHelmetMiddleware(req, res) {
             directives: {
                 defaultSrc: ["'self'"],
                 scriptSrc: scriptSources,
-                // scriptSrcAttr intentionally omitted — blocks inline event handlers
+                // Allow inline event handlers (onclick=, onchange=, etc.) used by
+                // several admin panel pages. <script> tags still require nonce.
+                scriptSrcAttr: ["'unsafe-inline'"],
                 styleSrc: ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com"],
                 fontSrc: ["'self'", "https://fonts.gstatic.com"],
                 imgSrc: ["'self'", "data:", "blob:"],

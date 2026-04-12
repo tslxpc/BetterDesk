@@ -165,7 +165,10 @@
         try {
             const resp = await fetch(`/api/panel/languages/${encodeURIComponent(code)}/fix`, {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' }
+                headers: {
+                    'Content-Type': 'application/json',
+                    'x-csrf-token': window.BetterDesk?.csrfToken || ''
+                }
             });
             const data = await resp.json();
 

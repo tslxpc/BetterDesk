@@ -91,7 +91,7 @@ function setupPing(ws) {
 async function persistMessage(msg) {
     if (!goApi) return;
     try {
-        await goApi.post('/api/chat/messages', {
+        await goApi.post('/chat/messages', {
             conversation_id: msg.conversation_id || msg.from || 'operator',
             from_id: msg.from || 'unknown',
             from_name: msg.from_name || msg.from || '',
@@ -107,7 +107,7 @@ async function persistMessage(msg) {
 async function loadHistory(conversationId) {
     if (!goApi) return null;
     try {
-        const resp = await goApi.get(`/api/chat/history/${encodeURIComponent(conversationId)}?limit=100`);
+        const resp = await goApi.get(`/chat/history/${encodeURIComponent(conversationId)}?limit=100`);
         return resp.data;
     } catch (e) {
         log.warn('Failed to load chat history:', e.message);
@@ -119,7 +119,7 @@ async function loadHistory(conversationId) {
 async function loadContacts(deviceId) {
     if (!goApi) return null;
     try {
-        const resp = await goApi.get(`/api/chat/contacts/${encodeURIComponent(deviceId)}`);
+        const resp = await goApi.get(`/chat/contacts/${encodeURIComponent(deviceId)}`);
         return resp.data;
     } catch (e) {
         log.warn('Failed to load chat contacts:', e.message);
@@ -131,7 +131,7 @@ async function loadContacts(deviceId) {
 async function loadGroups(deviceId) {
     if (!goApi) return null;
     try {
-        const resp = await goApi.get(`/api/chat/groups/${encodeURIComponent(deviceId)}`);
+        const resp = await goApi.get(`/chat/groups/${encodeURIComponent(deviceId)}`);
         return resp.data;
     } catch (e) {
         log.warn('Failed to load chat groups:', e.message);
@@ -279,7 +279,7 @@ function handleAgentConnection(ws, deviceId) {
 
             case 'mark_read':
                 if (goApi && frame.conversation_id) {
-                    goApi.post('/api/chat/read', {
+                    goApi.post('/chat/read', {
                         conversation_id: frame.conversation_id,
                         reader_id: deviceId,
                     }).catch(() => {});
@@ -288,7 +288,7 @@ function handleAgentConnection(ws, deviceId) {
 
             case 'create_group':
                 if (goApi && frame.name && frame.member_ids) {
-                    goApi.post('/api/chat/groups', {
+                    goApi.post('/chat/groups', {
                         name: frame.name,
                         members: frame.member_ids,
                         created_by: deviceId,
@@ -323,7 +323,7 @@ function handleAgentConnection(ws, deviceId) {
                     timestamp: Date.now(),
                 }, ws);
                 if (goApi && frame.conversation_id) {
-                    goApi.post('/api/chat/read', {
+                    goApi.post('/chat/read', {
                         conversation_id: frame.conversation_id,
                         reader_id: deviceId,
                         message_ids: frame.message_ids || [],

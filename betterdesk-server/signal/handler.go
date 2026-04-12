@@ -5,6 +5,7 @@ import (
 	"log"
 	"net"
 	"regexp"
+	"strconv"
 	"time"
 
 	"github.com/google/uuid"
@@ -1327,15 +1328,28 @@ func (s *Server) getRelayServer() string {
 
 // getLANRelayServer returns the relay server address suitable for LAN peers.
 // Uses the server's detected LAN IP (from OS routing table) rather than public IP.
+// This ensures LAN peers can reach the relay without NAT hairpin support.
 func (s *Server) getLANRelayServer() string {
+	// For LAN peers, ALWAYS prefer the server's LAN IP — even when admin
+	// configured a public relay address.  NAT hairpin (LAN → public IP → LAN)
+	// is unreliable on many routers, causing relay pair timeouts (#102).
+	if ip, ok := s.lanIP.Load().(string); ok && ip != "" {
+		// Determine relay port: prefer admin-configured port, fall back to default.
+		relayPort := s.cfg.RelayPort
+		relays := s.cfg.GetRelayServers()
+		if len(relays) > 0 {
+			if _, portStr, err := net.SplitHostPort(relays[0]); err == nil {
+				if p, err := strconv.Atoi(portStr); err == nil && p > 0 {
+					relayPort = p
+				}
+			}
+		}
+		return fmt.Sprintf("%s:%d", ip, relayPort)
+	}
+	// LAN IP unknown — fall back to configured relay (public)
 	relays := s.cfg.GetRelayServers()
 	if len(relays) > 0 {
-		// Explicitly configured relay — use as-is (admin knows best)
 		return relays[0]
-	}
-	// Prefer LAN IP for local peers
-	if ip, ok := s.lanIP.Load().(string); ok && ip != "" {
-		return fmt.Sprintf("%s:%d", ip, s.cfg.RelayPort)
 	}
 	return s.getRelayServer()
 }

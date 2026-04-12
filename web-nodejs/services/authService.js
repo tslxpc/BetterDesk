@@ -270,6 +270,7 @@ function checkForcePasswordUpdate() {
 function readAdminCredentialsFile() {
     // Search multiple candidate directories (Go server's DB dir may differ from keysPath)
     const candidates = [
+        config.dataDir,
         config.keysPath,
         path.join(config.keysPath, 'data'),
         '/opt/betterdesk',
@@ -278,9 +279,15 @@ function readAdminCredentialsFile() {
         '/opt/rustdesk/data',
     ];
     if (process.platform === 'win32') {
-        candidates.push('C:\\BetterDesk', 'C:\\BetterDesk\\data');
+        candidates.push('C:\\BetterDesk', 'C:\\BetterDesk\\data',
+                         'C:\\RustDesk', 'C:\\RustDesk\\data');
+    }
+    // Docker: also check /app/data if not already covered
+    if (fs.existsSync('/.dockerenv') || process.env.DOCKER === 'true') {
+        if (!candidates.includes('/app/data')) candidates.push('/app/data');
     }
     for (const dir of candidates) {
+        if (!dir) continue;
         const filePath = path.join(dir, '.admin_credentials');
         try {
             if (fs.existsSync(filePath)) {
@@ -365,7 +372,7 @@ async function ensureDefaultAdmin() {
     // If no password from env or credential file, retry reading multiple times.
     // The Go server may still be starting up and hasn't written .admin_credentials yet.
     if (!defaultPassword) {
-        const retryDelays = [2000, 3000, 5000]; // 3 retries: 2s, 3s, 5s (total 10s max)
+        const retryDelays = [2000, 3000, 5000, 5000, 10000]; // 5 retries: 2s, 3s, 5s, 5s, 10s (total 25s max)
         for (let i = 0; i < retryDelays.length; i++) {
             console.log(`[AUTH] No admin password found. Waiting for Go server (attempt ${i + 1}/${retryDelays.length})...`);
             await new Promise(resolve => setTimeout(resolve, retryDelays[i]));

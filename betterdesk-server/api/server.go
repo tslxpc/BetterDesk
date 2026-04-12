@@ -193,11 +193,7 @@ func (s *Server) Start(ctx context.Context) error {
 
 	// Organization Policies (stored as org_settings with policy_ prefix)
 	mux.HandleFunc("GET /api/org/{id}/policy", s.requireOrgMembership("id", s.handleGetOrgPolicy))
-	mux.HandleFunc("PUT /api/org/{id}/policy/connection", s.requirePermission(auth.PermOrgEdit, s.requireOrgMembership("id", s.handleSetOrgPolicy)))
-	mux.HandleFunc("PUT /api/org/{id}/policy/features", s.requirePermission(auth.PermOrgEdit, s.requireOrgMembership("id", s.handleSetOrgPolicy)))
-	mux.HandleFunc("PUT /api/org/{id}/policy/security", s.requirePermission(auth.PermOrgEdit, s.requireOrgMembership("id", s.handleSetOrgPolicy)))
-	mux.HandleFunc("PUT /api/org/{id}/policy/network", s.requirePermission(auth.PermOrgEdit, s.requireOrgMembership("id", s.handleSetOrgPolicy)))
-	mux.HandleFunc("PUT /api/org/{id}/policy/update", s.requirePermission(auth.PermOrgEdit, s.requireOrgMembership("id", s.handleSetOrgPolicy)))
+	mux.HandleFunc("PUT /api/org/{id}/policy/{category}", s.requirePermission(auth.PermOrgEdit, s.requireOrgMembership("id", s.handleSetOrgPolicy)))
 	mux.HandleFunc("GET /api/org/{id}/policy/effective/{deviceId}", s.requireOrgMembership("id", s.handleGetEffectivePolicy))
 	mux.HandleFunc("GET /api/org/{id}/policy/audit", s.requireOrgMembership("id", s.handleGetPolicyAudit))
 
