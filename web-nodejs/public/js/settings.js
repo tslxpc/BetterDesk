@@ -654,13 +654,13 @@
     }
     
     /**
-     * Handle logo image file upload - convert to base64 data URI
+     * Handle logo image file upload — uploads to server disk and fills URL field
      */
-    function handleLogoFileUpload(e) {
+    async function handleLogoFileUpload(e) {
         const file = e.target.files[0];
         if (!file) return;
         
-        const maxSize = 1.5 * 1024 * 1024; // 1.5MB
+        const maxSize = 2 * 1024 * 1024; // 2 MB
         if (file.size > maxSize) {
             Utils.showNotification(_('branding.logo_image_too_large'), 'error');
             e.target.value = '';
@@ -677,18 +677,28 @@
         // Show filename
         const nameEl = document.getElementById('logo-file-name');
         if (nameEl) nameEl.textContent = file.name;
-        
-        const reader = new FileReader();
-        reader.onload = function(event) {
-            const dataUri = event.target.result;
-            const urlInput = document.getElementById('logo-image-url');
-            if (urlInput) {
-                urlInput.value = dataUri;
-                urlInput.removeAttribute('readonly');
+
+        // Upload to server
+        const formData = new FormData();
+        formData.append('logo', file);
+
+        try {
+            const resp = await fetch('/api/settings/branding/upload-logo', {
+                method: 'POST',
+                headers: { 'x-csrf-token': window.BetterDesk?.csrfToken || '' },
+                body: formData
+            });
+            const result = await resp.json();
+            if (!resp.ok || !result.success) {
+                throw new Error(result.error || 'Upload failed');
             }
+            const urlInput = document.getElementById('logo-image-url');
+            if (urlInput) urlInput.value = result.url;
+            Notifications.success(_('branding.logo_upload_success'));
             updateLogoPreview();
-        };
-        reader.readAsDataURL(file);
+        } catch (err) {
+            Utils.showNotification(err.message || _('errors.server_error'), 'error');
+        }
     }
     
     /**

@@ -4,6 +4,9 @@
 
 const express = require('express');
 const router = express.Router();
+const path = require('path');
+const fs = require('fs');
+const crypto = require('crypto');
 const config = require('../config/config');
 const keyService = require('../services/keyService');
 const db = require('../services/database');
@@ -152,6 +155,60 @@ router.post('/api/settings/branding', requireAuth, requirePermission('branding.e
         console.error('Save branding error:', err);
         res.status(500).json({ success: false, error: req.t('errors.server_error') });
     }
+});
+
+// ── Logo image upload (disk storage) ─────────────────────────────────────────
+const UPLOADS_DIR = path.join(config.dataDir || path.join(__dirname, '..', 'data'), 'uploads');
+fs.mkdirSync(UPLOADS_DIR, { recursive: true });
+
+const logoUpload = multer({
+    storage: multer.diskStorage({
+        destination: (_req, _file, cb) => cb(null, UPLOADS_DIR),
+        filename: (_req, file, cb) => {
+            const ext = path.extname(file.originalname).toLowerCase() || '.png';
+            const hash = crypto.randomBytes(8).toString('hex');
+            cb(null, `logo-${hash}${ext}`);
+        }
+    }),
+    limits: { fileSize: 2 * 1024 * 1024 },
+    fileFilter: (_req, file, cb) => {
+        const allowed = /^image\/(png|jpeg|gif|webp|svg\+xml)$/;
+        if (allowed.test(file.mimetype)) {
+            cb(null, true);
+        } else {
+            cb(new Error('Invalid file type'));
+        }
+    }
+});
+
+/**
+ * POST /api/settings/branding/upload-logo - Upload logo image to server disk
+ */
+router.post('/api/settings/branding/upload-logo', requireAuth, requirePermission('branding.edit'), (req, res) => {
+    logoUpload.single('logo')(req, res, async (err) => {
+        if (err) {
+            const msg = err.code === 'LIMIT_FILE_SIZE' ? 'File too large (max 2 MB)' : (err.message || 'Upload failed');
+            return res.status(400).json({ success: false, error: msg });
+        }
+        if (!req.file) {
+            return res.status(400).json({ success: false, error: 'No file provided' });
+        }
+        const url = `/uploads/${req.file.filename}`;
+
+        // Remove previous uploaded logo if it was in the uploads dir
+        try {
+            const branding = brandingService.getBranding();
+            if (branding.logoUrl && branding.logoUrl.startsWith('/uploads/')) {
+                const prev = path.join(UPLOADS_DIR, path.basename(branding.logoUrl));
+                if (fs.existsSync(prev) && prev !== path.join(UPLOADS_DIR, req.file.filename)) {
+                    fs.unlinkSync(prev);
+                }
+            }
+        } catch (_) { /* ignore cleanup errors */ }
+
+        await db.logAction(req.session?.userId, 'branding_logo_upload', `Uploaded logo: ${req.file.filename}`, req.ip);
+        res.json({ success: true, url });
+    });
 });
 
 /**
