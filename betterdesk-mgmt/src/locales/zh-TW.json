@@ -77,6 +77,8 @@
     "loading": "載入裝置中...",
     "count": {
       "one": "{{count}} 台裝置",
+      "few": "{{count}} 台裝置",
+      "many": "{{count}} 台裝置",
       "other": "{{count}} 台裝置"
     },
     "actions": "操作",
@@ -168,7 +170,9 @@
     "yes": "是",
     "no": "否",
     "save": "儲存",
-    "details": "詳細資訊"
+    "details": "詳細資訊",
+    "access_denied": "拒絕存取",
+    "no_permission": "您沒有權限存取這項功能。請聯絡系統管理員。"
   },
   "connection": {
     "connected_to": "已連線到 {{name}}"

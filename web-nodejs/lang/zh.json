@@ -679,7 +679,7 @@
     "logo_image_url_hint": "上传文件时自动填充，或手动输入 URL / 路径。",
     "logo_image_too_large": "图片过大。最大允许 2 MB。",
     "logo_image_invalid_type": "无效的文件类型。请使用 PNG、JPG、GIF、WebP 或 SVG。",
-    "logo_upload_success": "Logo 上传成功。",,
+    "logo_upload_success": "Logo 上传成功。",
     "preview": "预览",
     "colors_title": "配色方案",
     "colors_desc": "自定义调色板。留空使用默认值。",

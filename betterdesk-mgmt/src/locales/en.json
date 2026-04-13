@@ -77,6 +77,8 @@
     "loading": "Loading devices...",
     "count": {
       "one": "{{count}} device",
+      "few": "{{count}} devices",
+      "many": "{{count}} devices",
       "other": "{{count}} devices"
     },
     "actions": "Actions",
