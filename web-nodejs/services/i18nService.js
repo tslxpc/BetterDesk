@@ -34,12 +34,13 @@ const LANGUAGE_META = {
     'ro': { name: 'Romanian', native: 'Română', flag: '🇷🇴', rtl: false },
     'th': { name: 'Thai', native: 'ไทย', flag: '🇹🇭', rtl: false },
     'vi': { name: 'Vietnamese', native: 'Tiếng Việt', flag: '🇻🇳', rtl: false },
-    'id': { name: 'Indonesian', native: 'Bahasa Indonesia', flag: '🇮🇩', rtl: false }
+    'id': { name: 'Indonesian', native: 'Bahasa Indonesia', flag: '🇮🇩', rtl: false },
+    'zh-TW': { name: 'Chinese (Traditional)', native: '繁體中文', flag: '🇹🇼', rtl: false }
 };
 
 // Security: Language code validation regex (prevents path traversal)
-// Must be 2-8 lowercase letters only (ISO 639-1 codes)
-const VALID_LANG_CODE = /^[a-z]{2,8}$/;
+// Supports ISO 639-1 codes (e.g. "en") and BCP 47 tags (e.g. "zh-TW")
+const VALID_LANG_CODE = /^[a-z]{2,8}(-[A-Z][a-zA-Z]{1,7})?$/;
 
 /**
  * Validate language code format to prevent path traversal attacks.
