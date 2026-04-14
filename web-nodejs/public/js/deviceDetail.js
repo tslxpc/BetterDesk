@@ -149,7 +149,7 @@ const DeviceDetail = (function () {
                     </div>
                     <div class="device-panel-subtitle">
                         <span class="material-icons">${platformIcon}</span>
-                        <span>${Utils.escapeHtml(d.hostname || d.note || '-')}</span>
+                        <span>${Utils.escapeHtml(d.display_name || d.hostname || d.note || '-')}</span>
                         ${d.username ? ` &middot; <span>${Utils.escapeHtml(d.username)}</span>` : ''}
                     </div>
                 </div>
@@ -238,6 +238,7 @@ const DeviceDetail = (function () {
             <div class="device-panel-section-title"><span class="material-icons">badge</span> ${_('device_detail.section_identity')}</div>
             <div class="device-panel-info-grid">
                 ${_infoRow(_('devices.id'), `<span class="mono">${Utils.escapeHtml(d.id)}</span>`, d.id)}
+                ${_infoRow(_('devices.display_name'), Utils.escapeHtml(d.display_name || '-'))}
                 ${_infoRow(_('devices.hostname'), Utils.escapeHtml(d.hostname || d.note || '-'))}
                 ${_infoRow(_('devices.username'), Utils.escapeHtml(d.username || '-'))}
                 ${d.uuid ? _infoRow('UUID', `<span class="mono">${Utils.escapeHtml(d.uuid)}</span>`) : ''}
@@ -518,6 +519,15 @@ const DeviceDetail = (function () {
         <div class="device-panel-section">
             <div class="device-panel-section-title"><span class="material-icons">settings</span> ${_('device_detail.section_manage')}</div>
             <div class="device-panel-actions-grid">
+                <div class="device-panel-action-card" data-action="edit">
+                    <div class="device-panel-action-icon blue">
+                        <span class="material-icons">edit</span>
+                    </div>
+                    <div class="device-panel-action-text">
+                        <div class="device-panel-action-title">${_('actions.edit')}</div>
+                        <div class="device-panel-action-desc">${_('devices.display_name')} / ${_('devices.note')}</div>
+                    </div>
+                </div>
                 <div class="device-panel-action-card" data-action="change-id">
                     <div class="device-panel-action-icon blue">
                         <span class="material-icons">swap_horiz</span>
@@ -819,6 +829,14 @@ const DeviceDetail = (function () {
         if (!device) return;
 
         switch (action) {
+            case 'edit':
+                if (window.BetterDeskDevices && typeof window.BetterDeskDevices.showEditModal === 'function') {
+                    window.BetterDeskDevices.showEditModal(device.id);
+                } else {
+                    Notifications.error(_('errors.server_error'));
+                }
+                break;
+
             case 'connect-desktop':
                 window.open('rustdesk://' + encodeURIComponent(device.id), '_blank');
                 break;

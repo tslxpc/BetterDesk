@@ -401,6 +401,10 @@
                                 <span class="material-icons">info</span>
                                 <span>${_('actions.details')}</span>
                             </button>
+                            <button class="kebab-menu-item" data-action="edit" data-id="${eid}">
+                                <span class="material-icons">edit</span>
+                                <span>${_('actions.edit')}</span>
+                            </button>
                             <button class="kebab-menu-item" data-action="access-policy" data-id="${eid}">
                                 <span class="material-icons">lock</span>
                                 <span>${_('devices.access_policy') || 'Access Policy'}</span>
@@ -999,6 +1003,9 @@
             size: 'medium'
         });
     }
+
+    window.BetterDeskDevices = window.BetterDeskDevices || {};
+    window.BetterDeskDevices.showEditModal = showEditModal;
     
     /**
      * Render pagination
