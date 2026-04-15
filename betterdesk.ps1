@@ -2489,6 +2489,17 @@ function Do-Install {
     Configure-Firewall
     Write-Host ""
     
+    # Offer HTTPS Enterprise configuration for fresh installs
+    if (-not $script:AUTO_MODE) {
+        Write-Host ""
+        Print-Info "Enterprise TLS enables full HTTPS on ALL ports (panel, signal, relay, API)"
+        Print-Info "Recommended for production. Requires RustDesk client >= 1.3.x"
+        Write-Host ""
+        if (Confirm-Action "Would you like to configure HTTPS Enterprise now? (Option 5 in SSL menu)") {
+            Do-ConfigureSSL
+        }
+    }
+    
     if (-not $script:AUTO_MODE) {
         Press-Enter
     }
@@ -3886,21 +3897,31 @@ function Do-ConfigureSSL {
         return
     }
     
-    Write-Host "  Configure SSL/TLS certificates for BetterDesk Console." -ForegroundColor White
-    Write-Host "  This enables HTTPS for the admin panel and Client API." -ForegroundColor White
+    Write-Host "  ─── Standard Options ───" -ForegroundColor Cyan
+    Write-Host "  1. Let's Encrypt (ACME)" -ForegroundColor Green
+    Write-Host "  2. Custom certificate (provide cert + key files)" -ForegroundColor Green
+    Write-Host "  3. Self-signed certificate (for testing)" -ForegroundColor Green
+    Write-Host "  4. Disable SSL (revert to HTTP)" -ForegroundColor Red
     Write-Host ""
-    Write-Host "  1. Custom certificate (provide cert + key files)" -ForegroundColor Green
-    Write-Host "  2. Self-signed certificate (for testing only)" -ForegroundColor Green
-    Write-Host "  3. Disable SSL (revert to HTTP)" -ForegroundColor Red
+    Write-Host "  ─── Enterprise Options ───" -ForegroundColor Cyan
+    Write-Host "  5. Enterprise TLS (full HTTPS: panel + signal + relay + API)" -ForegroundColor Yellow
     Write-Host ""
     
-    $sslChoice = Read-Host "Choice [1]"
-    if ([string]::IsNullOrEmpty($sslChoice)) { $sslChoice = "1" }
+    $sslChoice = Read-Host "Choice [3]"
+    if ([string]::IsNullOrEmpty($sslChoice)) { $sslChoice = "3" }
     
     $envContent = Get-Content $envFile -Raw
+    $sslDir = Join-Path $script:RUSTDESK_PATH "ssl"
     
     switch ($sslChoice) {
         "1" {
+            # Let's Encrypt
+            Print-Warning "Let's Encrypt is not yet supported on Windows via this script."
+            Print-Info "Please use Certbot manually or option 2 (custom certificate)."
+            Press-Enter
+            return
+        }
+        "2" {
             # Custom certificate
             Write-Host ""
             $certPath = Read-Host "Path to certificate file (PEM)"
@@ -3929,28 +3950,77 @@ function Do-ConfigureSSL {
             Set-Content $envFile -Value $envContent -NoNewline
             Print-Success "Custom SSL certificate configured"
         }
-        "2" {
-            # Self-signed
-            $sslDir = Join-Path $script:CONSOLE_PATH "ssl"
+        "3" {
+            # Self-signed with full SANs
             New-Item -ItemType Directory -Path $sslDir -Force | Out-Null
             
-            $certPath = Join-Path $sslDir "selfsigned.crt"
-            $keyPath = Join-Path $sslDir "selfsigned.key"
+            $certPath = Join-Path $sslDir "betterdesk.crt"
+            $keyPath = Join-Path $sslDir "betterdesk.key"
+            
+            Write-Host ""
+            $certDomain = Read-Host "Enter domain name (optional, press Enter to skip)"
+            
+            # Detect IPs
+            $serverIp = Get-PublicIP
+            $lanIp = ""
+            try {
+                $lanIp = (Get-NetIPAddress -AddressFamily IPv4 | Where-Object { 
+                    $_.IPAddress -notmatch '^127\.' -and $_.IPAddress -notmatch '^169\.254\.' 
+                } | Select-Object -First 1).IPAddress
+            } catch {
+                $lanIp = [System.Net.Dns]::GetHostAddresses($env:COMPUTERNAME) | 
+                    Where-Object { $_.AddressFamily -eq 'InterNetwork' -and $_.IPAddressToString -notmatch '^127\.' } | 
+                    Select-Object -First 1 -ExpandProperty IPAddressToString
+            }
+            
+            # Build SAN list
+            $sanList = "IP:$serverIp,IP:127.0.0.1,DNS:localhost"
+            if ($lanIp -and $lanIp -ne $serverIp) {
+                $sanList = "$sanList,IP:$lanIp"
+            }
+            if ($certDomain) {
+                $sanList = "DNS:$certDomain,$sanList"
+            }
+            
+            $cn = if ($certDomain) { $certDomain } else { $serverIp }
             
             Print-Step "Generating self-signed certificate..."
+            Print-Info "SANs: $sanList"
             
             # Use openssl if available, otherwise PowerShell
             $openssl = Get-Command openssl -ErrorAction SilentlyContinue
             if ($openssl) {
-                & openssl req -x509 -nodes -days 365 -newkey rsa:2048 `
+                $sanArg = "subjectAltName=$sanList"
+                & openssl req -x509 -nodes -days 3650 -newkey rsa:2048 `
                     -keyout $keyPath -out $certPath `
-                    -subj "/CN=localhost/O=BetterDesk/C=PL" 2>&1 | Out-Null
+                    -subj "/CN=$cn/O=BetterDesk/C=PL" `
+                    -addext $sanArg 2>&1 | Out-Null
+                    
+                if (-not (Test-Path $certPath)) {
+                    # Fallback for older openssl without -addext
+                    & openssl req -x509 -nodes -days 3650 -newkey rsa:2048 `
+                        -keyout $keyPath -out $certPath `
+                        -subj "/CN=$cn/O=BetterDesk/C=PL" 2>&1 | Out-Null
+                }
             } else {
                 # PowerShell self-signed cert
-                $cert = New-SelfSignedCertificate -DnsName "localhost" -CertStoreLocation "cert:\LocalMachine\My" -NotAfter (Get-Date).AddYears(1)
+                $dnsNames = @("localhost")
+                if ($certDomain) { $dnsNames += $certDomain }
+                
+                $cert = New-SelfSignedCertificate -DnsName $dnsNames `
+                    -CertStoreLocation "cert:\LocalMachine\My" `
+                    -NotAfter (Get-Date).AddYears(10) `
+                    -KeyExportPolicy Exportable
+                    
+                # Export as PFX then convert to PEM via openssl if available
+                $pfxPath = Join-Path $sslDir "betterdesk.pfx"
                 $certBytes = $cert.Export([System.Security.Cryptography.X509Certificates.X509ContentType]::Pfx)
-                [System.IO.File]::WriteAllBytes((Join-Path $sslDir "selfsigned.pfx"), $certBytes)
-                Print-Warning "Generated PFX certificate. For PEM format, install OpenSSL."
+                [System.IO.File]::WriteAllBytes($pfxPath, $certBytes)
+                
+                Print-Warning "Generated PFX certificate at $pfxPath"
+                Print-Warning "For full PEM support, install OpenSSL for Windows."
+                $certPath = $pfxPath
+                $keyPath = $pfxPath
             }
             
             $envContent = $envContent -replace 'HTTPS_ENABLED=.*', 'HTTPS_ENABLED=true'
@@ -3958,19 +4028,208 @@ function Do-ConfigureSSL {
             $envContent = $envContent -replace 'SSL_KEY_PATH=.*', "SSL_KEY_PATH=$keyPath"
             $envContent = $envContent -replace 'HTTP_REDIRECT_HTTPS=.*', 'HTTP_REDIRECT_HTTPS=true'
             
+            # Configure NODE_EXTRA_CA_CERTS for self-signed
+            if ($envContent -match 'NODE_EXTRA_CA_CERTS=') {
+                $envContent = $envContent -replace 'NODE_EXTRA_CA_CERTS=.*', "NODE_EXTRA_CA_CERTS=$certPath"
+            } else {
+                $envContent = $envContent.TrimEnd() + "`nNODE_EXTRA_CA_CERTS=$certPath`n"
+            }
+            
             Set-Content $envFile -Value $envContent -NoNewline
-            Print-Success "Self-signed certificate generated"
-            Print-Warning "Browsers will show security warning. Use a real certificate for production."
+            
+            # Configure Go server with TLS for signal/relay
+            $nssm = Get-Command nssm -ErrorAction SilentlyContinue
+            if ($nssm) {
+                $goSvcName = $script:SERVER_SERVICE
+                try {
+                    $goArgs = & nssm get $goSvcName AppParameters 2>$null
+                    if ($goArgs) {
+                        # Remove old TLS args
+                        $goArgs = $goArgs -replace ' -tls-cert [^ ]*', ''
+                        $goArgs = $goArgs -replace ' -tls-key [^ ]*', ''
+                        $goArgs = $goArgs -replace ' -tls-signal', ''
+                        $goArgs = $goArgs -replace ' -tls-relay', ''
+                        $goArgs = $goArgs -replace ' -tls-api', ''
+                        # Add new TLS args
+                        $goArgs = "$goArgs -tls-cert $certPath -tls-key $keyPath -tls-signal -tls-relay"
+                        & nssm set $goSvcName AppParameters $goArgs 2>$null
+                    }
+                } catch { }
+            }
+            
+            Print-Success "Self-signed certificate generated (valid 10 years)"
+            Print-Info "Certificate: $certPath"
+            if ($lanIp -and $lanIp -ne $serverIp) {
+                Print-Info "LAN IP included: $lanIp"
+            }
+            Print-Warning "Browsers will show security warning. Use Let's Encrypt for public servers."
         }
-        "3" {
+        "4" {
             # Disable SSL
             $envContent = $envContent -replace 'HTTPS_ENABLED=.*', 'HTTPS_ENABLED=false'
             $envContent = $envContent -replace 'SSL_CERT_PATH=.*', 'SSL_CERT_PATH='
             $envContent = $envContent -replace 'SSL_KEY_PATH=.*', 'SSL_KEY_PATH='
             $envContent = $envContent -replace 'HTTP_REDIRECT_HTTPS=.*', 'HTTP_REDIRECT_HTTPS=false'
             
+            # Remove TLS args from Go server
+            $nssm = Get-Command nssm -ErrorAction SilentlyContinue
+            if ($nssm) {
+                $goSvcName = $script:SERVER_SERVICE
+                try {
+                    $goArgs = & nssm get $goSvcName AppParameters 2>$null
+                    if ($goArgs) {
+                        $goArgs = $goArgs -replace ' -tls-cert [^ ]*', ''
+                        $goArgs = $goArgs -replace ' -tls-key [^ ]*', ''
+                        $goArgs = $goArgs -replace ' -tls-signal', ''
+                        $goArgs = $goArgs -replace ' -tls-relay', ''
+                        $goArgs = $goArgs -replace ' -tls-api', ''
+                        & nssm set $goSvcName AppParameters $goArgs 2>$null
+                    }
+                } catch { }
+            }
+            
             Set-Content $envFile -Value $envContent -NoNewline
             Print-Success "SSL disabled. Running in HTTP mode."
+        }
+        "5" {
+            # Enterprise TLS - full HTTPS on ALL channels including API
+            Print-Header
+            Write-Host "========== ENTERPRISE TLS CONFIGURATION ==========" -ForegroundColor Yellow
+            Write-Host ""
+            Write-Host "  WARNING: Enterprise TLS enables HTTPS on ALL ports including API." -ForegroundColor Yellow
+            Write-Host "  This requires RustDesk client >= 1.3.x for full compatibility." -ForegroundColor Yellow
+            Write-Host "  Legacy clients may have connectivity issues." -ForegroundColor Yellow
+            Write-Host ""
+            
+            New-Item -ItemType Directory -Path $sslDir -Force | Out-Null
+            
+            $certPath = Join-Path $sslDir "betterdesk.crt"
+            $keyPath = Join-Path $sslDir "betterdesk.key"
+            
+            $certDomain = Read-Host "Enter domain name (optional, press Enter to skip)"
+            
+            # Detect IPs
+            $serverIp = Get-PublicIP
+            $lanIp = ""
+            try {
+                $lanIp = (Get-NetIPAddress -AddressFamily IPv4 | Where-Object { 
+                    $_.IPAddress -notmatch '^127\.' -and $_.IPAddress -notmatch '^169\.254\.' 
+                } | Select-Object -First 1).IPAddress
+            } catch { }
+            
+            # Build comprehensive SAN list
+            $sanList = "IP:$serverIp,IP:127.0.0.1,DNS:localhost"
+            if ($lanIp -and $lanIp -ne $serverIp) {
+                $sanList = "$sanList,IP:$lanIp"
+            }
+            if ($certDomain) {
+                $sanList = "DNS:$certDomain,$sanList"
+            }
+            
+            $cn = if ($certDomain) { $certDomain } else { $serverIp }
+            
+            Print-Step "Generating Enterprise certificate..."
+            Print-Info "SANs: $sanList"
+            
+            $openssl = Get-Command openssl -ErrorAction SilentlyContinue
+            if ($openssl) {
+                $sanArg = "subjectAltName=$sanList"
+                & openssl req -x509 -nodes -days 3650 -newkey rsa:4096 `
+                    -keyout $keyPath -out $certPath `
+                    -subj "/CN=$cn/O=BetterDesk Enterprise/C=PL" `
+                    -addext $sanArg 2>&1 | Out-Null
+                    
+                if (-not (Test-Path $certPath)) {
+                    & openssl req -x509 -nodes -days 3650 -newkey rsa:4096 `
+                        -keyout $keyPath -out $certPath `
+                        -subj "/CN=$cn/O=BetterDesk Enterprise/C=PL" 2>&1 | Out-Null
+                }
+            } else {
+                $dnsNames = @("localhost")
+                if ($certDomain) { $dnsNames += $certDomain }
+                
+                $cert = New-SelfSignedCertificate -DnsName $dnsNames `
+                    -CertStoreLocation "cert:\LocalMachine\My" `
+                    -NotAfter (Get-Date).AddYears(10) `
+                    -KeyExportPolicy Exportable `
+                    -KeyLength 4096
+                    
+                $pfxPath = Join-Path $sslDir "betterdesk.pfx"
+                $certBytes = $cert.Export([System.Security.Cryptography.X509Certificates.X509ContentType]::Pfx)
+                [System.IO.File]::WriteAllBytes($pfxPath, $certBytes)
+                $certPath = $pfxPath
+                $keyPath = $pfxPath
+                Print-Warning "Generated PFX certificate. Install OpenSSL for PEM format."
+            }
+            
+            # === Configure Node.js Console for HTTPS ===
+            $envContent = $envContent -replace 'HTTPS_ENABLED=.*', 'HTTPS_ENABLED=true'
+            $envContent = $envContent -replace 'SSL_CERT_PATH=.*', "SSL_CERT_PATH=$certPath"
+            $envContent = $envContent -replace 'SSL_KEY_PATH=.*', "SSL_KEY_PATH=$keyPath"
+            $envContent = $envContent -replace 'HTTP_REDIRECT_HTTPS=.*', 'HTTP_REDIRECT_HTTPS=true'
+            
+            # Set ALLOW_SELF_SIGNED_CERTS
+            if ($envContent -match 'ALLOW_SELF_SIGNED_CERTS=') {
+                $envContent = $envContent -replace 'ALLOW_SELF_SIGNED_CERTS=.*', 'ALLOW_SELF_SIGNED_CERTS=true'
+            } else {
+                $envContent = $envContent.TrimEnd() + "`nALLOW_SELF_SIGNED_CERTS=true`n"
+            }
+            
+            # Configure NODE_EXTRA_CA_CERTS
+            if ($envContent -match 'NODE_EXTRA_CA_CERTS=') {
+                $envContent = $envContent -replace 'NODE_EXTRA_CA_CERTS=.*', "NODE_EXTRA_CA_CERTS=$certPath"
+            } else {
+                $envContent = $envContent.TrimEnd() + "`nNODE_EXTRA_CA_CERTS=$certPath`n"
+            }
+            
+            # Update API URLs to HTTPS
+            $envContent = $envContent -replace 'HBBS_API_URL=http://', 'HBBS_API_URL=https://'
+            $envContent = $envContent -replace 'BETTERDESK_API_URL=http://', 'BETTERDESK_API_URL=https://'
+            
+            # Set ENTERPRISE_TLS marker
+            if ($envContent -match 'ENTERPRISE_TLS=') {
+                $envContent = $envContent -replace 'ENTERPRISE_TLS=.*', 'ENTERPRISE_TLS=true'
+            } else {
+                $envContent = $envContent.TrimEnd() + "`nENTERPRISE_TLS=true`n"
+            }
+            
+            Set-Content $envFile -Value $envContent -NoNewline
+            
+            # === Configure Go server with FULL TLS ===
+            $nssm = Get-Command nssm -ErrorAction SilentlyContinue
+            if ($nssm) {
+                $goSvcName = $script:SERVER_SERVICE
+                try {
+                    $goArgs = & nssm get $goSvcName AppParameters 2>$null
+                    if ($goArgs) {
+                        # Remove old TLS args
+                        $goArgs = $goArgs -replace ' -tls-cert [^ ]*', ''
+                        $goArgs = $goArgs -replace ' -tls-key [^ ]*', ''
+                        $goArgs = $goArgs -replace ' -tls-signal', ''
+                        $goArgs = $goArgs -replace ' -tls-relay', ''
+                        $goArgs = $goArgs -replace ' -tls-api', ''
+                        # Add FULL TLS args including -tls-api
+                        $goArgs = "$goArgs -tls-cert $certPath -tls-key $keyPath -tls-signal -tls-relay -tls-api"
+                        & nssm set $goSvcName AppParameters $goArgs 2>$null
+                    }
+                } catch { }
+            }
+            
+            Print-Success "Enterprise TLS configured successfully!"
+            Write-Host ""
+            Print-Info "Certificate: $certPath"
+            Print-Info "Valid: 10 years (RSA 4096-bit)"
+            if ($lanIp -and $lanIp -ne $serverIp) {
+                Print-Info "LAN IP: $lanIp"
+            }
+            Write-Host ""
+            Write-Host "  All connections now use TLS:" -ForegroundColor Yellow
+            Print-Info "  - Panel HTTPS: :5443 (or configured port)"
+            Print-Info "  - Signal TLS: :21116"
+            Print-Info "  - Relay TLS: :21117"
+            Print-Info "  - API HTTPS: :21114"
+            Write-Host ""
+            Print-Warning "For browsers/clients, you may need to import $certPath as trusted CA"
         }
         default {
             Print-Warning "Invalid option"
@@ -3980,12 +4239,30 @@ function Do-ConfigureSSL {
     }
     
     # ── Update API URLs in .env when SSL is enabled/disabled ──
-    # API port MUST stay HTTP -- RustDesk desktop clients always send plain HTTP
-    # to signal_port-2 (21114). Enabling TLS on API breaks all client communication.
+    # API TLS (--tls-api) is only enabled for Enterprise TLS (option 5).
+    # Standard options (1-3): API stays HTTP, only signal/relay use TLS.
+    # Option 5 (Enterprise): ALL channels use TLS including API.
     $envContent = Get-Content $envFile -Raw
     
-    if ($sslChoice -ne "3") {
-        # Ensure API URLs always stay HTTP regardless of cert type
+    if ($sslChoice -eq "5") {
+        # === Enterprise TLS: Keep HTTPS for API (already configured in option handler) ===
+        Print-Info "Enterprise TLS mode: ALL connections use HTTPS/TLS"
+        
+        # Ensure NSSM service has ALLOW_SELF_SIGNED_CERTS
+        $nssm = Get-Command nssm -ErrorAction SilentlyContinue
+        if ($nssm) {
+            $svcName = $script:CONSOLE_SERVICE
+            try {
+                $currentEnv = & nssm get $svcName AppEnvironmentExtra 2>$null
+                if ($currentEnv -and $currentEnv -notmatch 'ALLOW_SELF_SIGNED_CERTS=') {
+                    $currentEnv = "$currentEnv`nALLOW_SELF_SIGNED_CERTS=true"
+                    & nssm set $svcName AppEnvironmentExtra $currentEnv 2>$null
+                }
+            } catch { }
+        }
+        
+    } elseif ($sslChoice -ne "4") {
+        # === Standard SSL (options 1-3): API stays HTTP for RustDesk client compatibility ===
         $envContent = $envContent -replace 'HBBS_API_URL=https://localhost', 'HBBS_API_URL=http://localhost'
         $envContent = $envContent -replace 'BETTERDESK_API_URL=https://localhost', 'BETTERDESK_API_URL=http://localhost'
         
@@ -4014,7 +4291,7 @@ function Do-ConfigureSSL {
                 }
             } catch { }
             
-            # Always remove -tls-api from Go server service -- API must stay HTTP
+            # Remove -tls-api from Go server service (standard SSL doesn't use API TLS)
             $goSvcName = $script:SERVER_SERVICE
             try {
                 $goArgs = & nssm get $goSvcName AppParameters 2>$null
@@ -4028,12 +4305,32 @@ function Do-ConfigureSSL {
         
         Print-Info "Signal/relay TLS enabled, API stays HTTP (RustDesk client compatibility)"
     } else {
-        # SSL disabled -- revert API URLs to HTTP
+        # === SSL disabled (option 4) — revert API URLs to HTTP ===
         $envContent = $envContent -replace 'HBBS_API_URL=https://localhost', 'HBBS_API_URL=http://localhost'
         $envContent = $envContent -replace 'BETTERDESK_API_URL=https://localhost', 'BETTERDESK_API_URL=http://localhost'
         $envContent = $envContent -replace '(?m)^NODE_EXTRA_CA_CERTS=.*\r?\n?', ''
+        $envContent = $envContent -replace '(?m)^ENTERPRISE_TLS=.*\r?\n?', ''
+        $envContent = $envContent -replace 'ALLOW_SELF_SIGNED_CERTS=.*', 'ALLOW_SELF_SIGNED_CERTS=false'
         
-        Print-Info "API URLs reverted to HTTP"
+        # Remove ALL TLS args from Go server service
+        $nssm = Get-Command nssm -ErrorAction SilentlyContinue
+        if ($nssm) {
+            $goSvcName = $script:SERVER_SERVICE
+            try {
+                $goArgs = & nssm get $goSvcName AppParameters 2>$null
+                if ($goArgs) {
+                    $goArgs = $goArgs -replace ' -tls-cert [^ ]*', ''
+                    $goArgs = $goArgs -replace ' -tls-key [^ ]*', ''
+                    $goArgs = $goArgs -replace ' -tls-signal', ''
+                    $goArgs = $goArgs -replace ' -tls-relay', ''
+                    $goArgs = $goArgs -replace ' -tls-api', ''
+                    $goArgs = $goArgs -replace ' -force-https', ''
+                    & nssm set $goSvcName AppParameters $goArgs 2>$null
+                }
+            } catch { }
+        }
+        
+        Print-Info "All TLS disabled, API URLs reverted to HTTP"
     }
     
     Set-Content $envFile -Value $envContent -NoNewline

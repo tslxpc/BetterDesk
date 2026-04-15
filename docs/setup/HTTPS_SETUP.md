@@ -332,3 +332,137 @@ server {
 ```
 
 > **Note:** For most deployments, you do NOT need to proxy ports 21118/21119 — let clients connect directly to the Go server.
+
+---
+
+## Installer SSL Configuration (Option C)
+
+The BetterDesk ALL-IN-ONE installers (`betterdesk.sh`, `betterdesk.ps1`, `betterdesk-docker.sh`) include a built-in SSL configuration menu accessible via **Option C** in the main menu.
+
+### SSL Menu Options
+
+| Option | Description |
+|--------|-------------|
+| **1. Let's Encrypt** | Automated certificate provisioning (requires port 80 and valid DNS) |
+| **2. Custom Certificate** | Use your own certificate from a CA or existing infrastructure |
+| **3. Self-Signed Certificate** | Generate a self-signed cert (development/testing/LAN only) |
+| **4. Disable SSL** | Remove TLS configuration, run in HTTP-only mode |
+| **5. Enterprise TLS** | Full HTTPS on ALL ports including Go server API (21114) |
+
+### During Fresh Install
+
+After a successful fresh installation, the installer prompts:
+
+```
+🔒 Enterprise TLS enables full HTTPS on ALL ports (panel, signal, relay, API)
+   Recommended for production. Requires RustDesk client >= 1.3.x
+
+Would you like to configure HTTPS Enterprise now? (Option 5 in SSL menu) [y/N]
+```
+
+Selecting "y" opens the SSL configuration menu where you can choose **Option 5** for full Enterprise TLS.
+
+---
+
+## Enterprise TLS (Full HTTPS on All Ports)
+
+Enterprise TLS enables HTTPS/TLS on **all BetterDesk ports**, not just the web console:
+
+| Port | Component | Without Enterprise TLS | With Enterprise TLS |
+|------|-----------|------------------------|---------------------|
+| 5000/5443 | Web Console | HTTP/HTTPS | HTTPS |
+| 21114 | Go Server API | HTTP | **HTTPS** |
+| 21116 | Signal Server (TCP) | Plain TCP | **TLS** |
+| 21117 | Relay Server (TCP) | Plain TCP | **TLS** |
+| 21118 | Signal WebSocket | WS | **WSS** |
+| 21119 | Relay WebSocket | WS | **WSS** |
+
+### Requirements
+
+- **RustDesk client version 1.3.x or newer** — older clients do not support TLS on signal/relay ports
+- Valid TLS certificate (Let's Encrypt, custom CA, or self-signed for testing)
+- Certificate SAN (Subject Alternative Name) should include:
+  - Domain name (e.g., `betterdesk.example.com`)
+  - Public IP address
+  - LAN IP address (if used internally)
+  - `localhost` and `127.0.0.1` (for local connections)
+
+### Go Server TLS Flags
+
+The Go server supports the following TLS-related flags:
+
+```bash
+# Certificate paths
+-tls-cert /path/to/fullchain.pem
+-tls-key /path/to/privkey.pem
+
+# Enable TLS per component
+-tls-signal    # TLS on signal port (21116)
+-tls-relay     # TLS on relay port (21117)
+-tls-api       # HTTPS on API port (21114)
+
+# Force HTTPS redirect
+-force-https   # Implies -tls-api
+```
+
+### Systemd Service Configuration (Linux)
+
+When Enterprise TLS is enabled via the installer, the systemd service is configured with:
+
+```ini
+[Service]
+ExecStart=/opt/rustdesk/betterdesk-server \
+    -key-dir /opt/rustdesk \
+    -db-path /opt/rustdesk/db_v2.sqlite3 \
+    -relay-servers YOUR_PUBLIC_IP:21117 \
+    -tls-cert /opt/rustdesk/ssl/betterdesk.crt \
+    -tls-key /opt/rustdesk/ssl/betterdesk.key \
+    -tls-signal \
+    -tls-relay
+
+Environment="TLS_SIGNAL=Y"
+Environment="TLS_RELAY=Y"
+```
+
+### Node.js Console Configuration
+
+The `.env` file is updated with:
+
+```env
+HTTPS_ENABLED=true
+HTTPS_PORT=5443
+SSL_CERT_PATH=/opt/rustdesk/ssl/betterdesk.crt
+SSL_KEY_PATH=/opt/rustdesk/ssl/betterdesk.key
+HTTP_REDIRECT_HTTPS=true
+ALLOW_SELF_SIGNED_CERTS=true  # For self-signed certs (dev/LAN)
+ENTERPRISE_TLS=true
+```
+
+### Important Notes
+
+1. **Self-signed certificates and API**: When using self-signed certificates, the Go server API (21114) is kept on HTTP to avoid breaking internal communication between Node.js console and Go server. Signal/relay ports still use TLS.
+
+2. **Browser certificate warnings**: Self-signed certificates will cause browser warnings. Users must manually accept the certificate or add it to their trusted store.
+
+3. **RustDesk client configuration**: Clients must be configured with the same server address. If using a domain with Let's Encrypt, ensure the domain resolves correctly.
+
+4. **Mixed TLS/plain connections**: The Go server supports a "dual-mode listener" that auto-detects TLS vs plain connections on the same port (first-byte 0x16 detection). This allows gradual migration without breaking older clients.
+
+### Troubleshooting Enterprise TLS
+
+#### Clients show "connection timeout" after enabling TLS
+
+- Verify RustDesk client is version 1.3.x or newer
+- Check that the Go server started successfully: `journalctl -u betterdesk-server -n 50`
+- Ensure certificate SAN includes the IP/domain the client is connecting to
+
+#### "Failed to secure tcp: deadline has elapsed"
+
+- The client is trying TLS but the server isn't configured for it (or vice versa)
+- Check `-tls-signal` flag is present in Go server ExecStart
+
+#### Web console shows "0 devices" after enabling Enterprise TLS
+
+- Internal Node.js → Go API communication may be broken if API is now HTTPS with self-signed
+- For self-signed certs, check `ALLOW_SELF_SIGNED_CERTS=true` in `.env`
+- Or keep API on HTTP (don't use `-tls-api`) — only signal/relay need TLS for security

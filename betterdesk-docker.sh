@@ -950,6 +950,15 @@ do_install() {
     echo -e "${CYAN}║    Key:          ${WHITE}${public_key:-<generated on first start>}${NC}"
     echo -e "${CYAN}╚════════════════════════════════════════════════════════════╝${NC}"
     
+    # Offer HTTPS Enterprise configuration for fresh installs
+    echo ""
+    print_info "🔒 Enterprise TLS enables full HTTPS on ALL ports (panel, signal, relay, API)"
+    print_info "   Recommended for production. Requires RustDesk client >= 1.3.x"
+    echo ""
+    if confirm "Would you like to configure HTTPS Enterprise now? (Option 5 in SSL menu)"; then
+        do_configure_ssl
+    fi
+    
     press_enter
 }
 
@@ -2399,6 +2408,246 @@ EOSQL
 }
 
 #===============================================================================
+# SSL/TLS Configuration
+#===============================================================================
+
+do_configure_ssl() {
+    print_header
+    echo -e "${WHITE}${BOLD}══════════ SSL CERTIFICATE CONFIGURATION ══════════${NC}"
+    echo ""
+    
+    detect_installation
+    
+    if [ "$INSTALL_STATUS" = "none" ]; then
+        print_error "BetterDesk Docker is not installed!"
+        print_info "Use 'Fresh Installation' first (option 1)"
+        press_enter
+        return
+    fi
+    
+    local ssl_dir="$DATA_DIR/ssl"
+    local env_file="$DATA_DIR/.env"
+    
+    echo -e "${CYAN}  ─── Standard Options ───${NC}"
+    echo "  1. Let's Encrypt (ACME auto-renewal)"
+    echo "  2. Custom certificate (provide cert + key files)"
+    echo -e "${GREEN}  3. Self-signed certificate (for testing)${NC}"
+    echo -e "${RED}  4. Disable SSL (revert to HTTP)${NC}"
+    echo ""
+    echo -e "${CYAN}  ─── Enterprise Options ───${NC}"
+    echo -e "${YELLOW}  5. Enterprise TLS (full HTTPS: panel + signal + relay + API)${NC}"
+    echo ""
+    
+    local ssl_choice
+    read -p "Choice [3]: " ssl_choice
+    ssl_choice="${ssl_choice:-3}"
+    
+    case "$ssl_choice" in
+        1)
+            print_warning "Let's Encrypt for Docker requires additional setup."
+            print_info "Recommended: Use a reverse proxy (nginx/traefik) with Let's Encrypt."
+            print_info "See: https://github.com/UNITRONIX/Rustdesk-FreeConsole/wiki/TLS-SSL"
+            press_enter
+            return
+            ;;
+        2)
+            # Custom certificate
+            echo ""
+            read -p "Path to certificate file (PEM): " cert_path
+            read -p "Path to private key file (PEM): " key_path
+            read -p "Path to CA bundle (optional, press Enter to skip): " ca_path
+            
+            if [ ! -f "$cert_path" ]; then
+                print_error "Certificate file not found: $cert_path"
+                press_enter
+                return
+            fi
+            if [ ! -f "$key_path" ]; then
+                print_error "Key file not found: $key_path"
+                press_enter
+                return
+            fi
+            
+            mkdir -p "$ssl_dir"
+            cp "$cert_path" "$ssl_dir/betterdesk.crt"
+            cp "$key_path" "$ssl_dir/betterdesk.key"
+            [ -n "$ca_path" ] && [ -f "$ca_path" ] && cp "$ca_path" "$ssl_dir/ca.crt"
+            
+            chmod 600 "$ssl_dir/betterdesk.key"
+            
+            configure_docker_ssl "$ssl_dir" false
+            print_success "Custom SSL certificate configured"
+            ;;
+        3)
+            # Self-signed with full SANs
+            mkdir -p "$ssl_dir"
+            
+            echo ""
+            read -p "Enter domain name (optional, press Enter to skip): " cert_domain
+            
+            # Detect IPs
+            local server_ip
+            server_ip=$(get_public_ip)
+            local lan_ip
+            lan_ip=$(ip -4 addr show scope global | grep -oP '(?<=inet\s)\d+(\.\d+){3}' | head -1 2>/dev/null || \
+                     hostname -I 2>/dev/null | awk '{print $1}' || echo "")
+            
+            # Build SAN list
+            local san_list="IP:$server_ip,IP:127.0.0.1,DNS:localhost"
+            [ -n "$lan_ip" ] && [ "$lan_ip" != "$server_ip" ] && san_list="$san_list,IP:$lan_ip"
+            [ -n "$cert_domain" ] && san_list="DNS:$cert_domain,$san_list"
+            
+            local cn="${cert_domain:-$server_ip}"
+            
+            print_step "Generating self-signed certificate..."
+            print_info "SANs: $san_list"
+            
+            openssl req -x509 -nodes -days 3650 -newkey rsa:2048 \
+                -keyout "$ssl_dir/betterdesk.key" \
+                -out "$ssl_dir/betterdesk.crt" \
+                -subj "/CN=$cn/O=BetterDesk/C=PL" \
+                -addext "subjectAltName=$san_list" 2>&1 || {
+                # Fallback for older openssl
+                openssl req -x509 -nodes -days 3650 -newkey rsa:2048 \
+                    -keyout "$ssl_dir/betterdesk.key" \
+                    -out "$ssl_dir/betterdesk.crt" \
+                    -subj "/CN=$cn/O=BetterDesk/C=PL" 2>&1
+            }
+            
+            chmod 600 "$ssl_dir/betterdesk.key"
+            chmod 644 "$ssl_dir/betterdesk.crt"
+            
+            configure_docker_ssl "$ssl_dir" false
+            
+            print_success "Self-signed certificate generated (valid 10 years)"
+            print_info "Certificate: $ssl_dir/betterdesk.crt"
+            [ -n "$lan_ip" ] && [ "$lan_ip" != "$server_ip" ] && print_info "LAN IP included: $lan_ip"
+            print_warning "Browsers will show security warning. Use Let's Encrypt for public servers."
+            ;;
+        4)
+            # Disable SSL
+            configure_docker_ssl "" disable
+            print_success "SSL disabled. Running in HTTP mode."
+            ;;
+        5)
+            # Enterprise TLS - full HTTPS on ALL channels including API
+            print_header
+            echo -e "${YELLOW}${BOLD}══════════ ENTERPRISE TLS CONFIGURATION ══════════${NC}"
+            echo ""
+            print_warning "⚠️  IMPORTANT: Enterprise TLS enables HTTPS on ALL ports including API."
+            print_warning "    This requires RustDesk client >= 1.3.x for full compatibility."
+            print_warning "    Legacy clients may have connectivity issues."
+            echo ""
+            
+            mkdir -p "$ssl_dir"
+            
+            read -p "Enter domain name (optional, press Enter to skip): " cert_domain
+            
+            # Detect IPs
+            local server_ip
+            server_ip=$(get_public_ip)
+            local lan_ip
+            lan_ip=$(ip -4 addr show scope global | grep -oP '(?<=inet\s)\d+(\.\d+){3}' | head -1 2>/dev/null || \
+                     hostname -I 2>/dev/null | awk '{print $1}' || echo "")
+            
+            # Build comprehensive SAN list
+            local san_list="IP:$server_ip,IP:127.0.0.1,DNS:localhost"
+            [ -n "$lan_ip" ] && [ "$lan_ip" != "$server_ip" ] && san_list="$san_list,IP:$lan_ip"
+            [ -n "$cert_domain" ] && san_list="DNS:$cert_domain,$san_list"
+            
+            local cn="${cert_domain:-$server_ip}"
+            
+            print_step "Generating Enterprise certificate..."
+            print_info "SANs: $san_list"
+            
+            openssl req -x509 -nodes -days 3650 -newkey rsa:4096 \
+                -keyout "$ssl_dir/betterdesk.key" \
+                -out "$ssl_dir/betterdesk.crt" \
+                -subj "/CN=$cn/O=BetterDesk Enterprise/C=PL" \
+                -addext "subjectAltName=$san_list" 2>&1 || {
+                openssl req -x509 -nodes -days 3650 -newkey rsa:4096 \
+                    -keyout "$ssl_dir/betterdesk.key" \
+                    -out "$ssl_dir/betterdesk.crt" \
+                    -subj "/CN=$cn/O=BetterDesk Enterprise/C=PL" 2>&1
+            }
+            
+            chmod 600 "$ssl_dir/betterdesk.key"
+            chmod 644 "$ssl_dir/betterdesk.crt"
+            
+            configure_docker_ssl "$ssl_dir" enterprise
+            
+            print_success "Enterprise TLS configured successfully!"
+            echo ""
+            print_info "Certificate: $ssl_dir/betterdesk.crt"
+            print_info "Valid: 10 years (RSA 4096-bit)"
+            [ -n "$lan_ip" ] && [ "$lan_ip" != "$server_ip" ] && print_info "LAN IP: $lan_ip"
+            echo ""
+            print_warning "All connections now use TLS:"
+            print_info "  • Panel HTTPS: :5443"
+            print_info "  • Signal TLS: :21116"
+            print_info "  • Relay TLS: :21117"
+            print_info "  • API HTTPS: :21114"
+            echo ""
+            print_warning "For browsers/clients, you may need to import $ssl_dir/betterdesk.crt as trusted CA"
+            ;;
+        *)
+            print_warning "Invalid option"
+            press_enter
+            return
+            ;;
+    esac
+    
+    echo ""
+    if confirm "Restart Docker containers to apply SSL changes?"; then
+        stop_containers
+        start_containers
+        print_success "Docker containers restarted with new SSL configuration"
+    fi
+    
+    press_enter
+}
+
+# Helper function to configure SSL in docker-compose
+configure_docker_ssl() {
+    local ssl_dir="$1"
+    local mode="${2:-standard}"  # standard, enterprise, disable
+    
+    if [ "$mode" = "disable" ]; then
+        # Remove SSL configuration from docker-compose
+        if [ -f "$COMPOSE_FILE" ]; then
+            # Remove TLS flags from server service
+            sed -i 's/ -tls-cert [^ ]*//g' "$COMPOSE_FILE"
+            sed -i 's/ -tls-key [^ ]*//g' "$COMPOSE_FILE"
+            sed -i 's/ -tls-signal//g' "$COMPOSE_FILE"
+            sed -i 's/ -tls-relay//g' "$COMPOSE_FILE"
+            sed -i 's/ -tls-api//g' "$COMPOSE_FILE"
+            
+            # Update console environment
+            sed -i 's/HTTPS_ENABLED=true/HTTPS_ENABLED=false/' "$COMPOSE_FILE"
+            sed -i '/SSL_CERT_PATH/d' "$COMPOSE_FILE"
+            sed -i '/SSL_KEY_PATH/d' "$COMPOSE_FILE"
+            sed -i '/ALLOW_SELF_SIGNED_CERTS/d' "$COMPOSE_FILE"
+            sed -i '/ENTERPRISE_TLS/d' "$COMPOSE_FILE"
+        fi
+        return
+    fi
+    
+    # For standard and enterprise modes, regenerate compose file with SSL settings
+    # Store SSL configuration for compose file generation
+    export SSL_ENABLED=true
+    export SSL_DIR="$ssl_dir"
+    
+    if [ "$mode" = "enterprise" ]; then
+        export ENTERPRISE_TLS=true
+    else
+        export ENTERPRISE_TLS=false
+    fi
+    
+    # Regenerate docker-compose.yml with SSL settings
+    create_compose_file
+}
+
+#===============================================================================
 # Main Menu
 #===============================================================================
 
@@ -2418,6 +2667,7 @@ show_menu() {
     echo "  8. 📊 Diagnostics"
     echo "  9. 🗑️  UNINSTALL"
     echo ""
+    echo "  C. 🔒 Configure SSL/TLS"
     echo "  M. 🔄 Migrate from existing RustDesk"
     echo "  P. 🐘 Migrate SQLite → PostgreSQL"
     echo "  S. ⚙️  Settings (paths)"
@@ -2457,6 +2707,7 @@ main() {
             7) do_build ;;
             8) do_diagnostics ;;
             9) do_uninstall ;;
+            [Cc]) do_configure_ssl ;;
             [Mm]) do_migrate ;;
             [Pp]) do_migrate_postgresql ;;
             [Ss]) configure_docker_paths ;;
