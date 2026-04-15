@@ -256,7 +256,7 @@
       "load_avg": "Charge moyenne",
       "network": "Adaptateurs Réseaux",
       "no_data": "Aucune donnée matérielle disponible",
-      "title": "Informations sur le matériel,
+      "title": "Informations sur le matériel",
       "gpu": "Carte graphique"
     }
   },
@@ -372,7 +372,7 @@
     "action_user_update": "Utilisateur Mis à Jour",
     "action_user_delete": "Utilisateur Supprimé",
     "action_settings_update": "Paramètres Mis à Jour",
-    "action_device_ban": "Appareil Banni,
+    "action_device_ban": "Appareil Banni",
     "action_device_unban": "Appareils Débanni",
     "action_device_delete": "Appareil Supprimé"
   },
