@@ -70,6 +70,9 @@ func main() {
 	}
 	if cfg.APITLSEnabled() {
 		log.Printf("  TLS API:    ENABLED")
+		log.Printf("  ⚠ WARNING:  TLS on API port breaks Node.js console (HTTP) and RustDesk client connections!")
+		log.Printf("              Only enable --tls-api if ALL consumers use HTTPS. See issue #104.")
+		log.Printf("              To fix: remove TLS_API=Y from env or -tls-api from flags.")
 	}
 	if cfg.HasTLSCert() {
 		log.Printf("  TLS Cert:   %s", cfg.TLSCertFile)
@@ -110,6 +113,9 @@ func main() {
 	if storedMode, _ := database.GetConfig("enrollment_mode"); storedMode != "" {
 		cfg.EnrollmentMode = storedMode
 		log.Printf("Restored enrollment mode from DB: %s", storedMode)
+	}
+	if cfg.EnrollmentMode != "" && cfg.EnrollmentMode != "open" {
+		log.Printf("Enrollment restriction active: mode=%s (new devices need token/approval)", cfg.EnrollmentMode)
 	}
 
 	// Initialize security modules

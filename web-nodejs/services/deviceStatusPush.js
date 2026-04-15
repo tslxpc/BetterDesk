@@ -130,7 +130,15 @@ function initDeviceStatusPush(httpServer, sessionMiddleware, goApiUrl, apiKey) {
         });
 
         goWs.on('error', (err) => {
-            log.error('Go event bus error:', err.message);
+            const msg = err.message || '';
+            // Detect TLS mismatch (Go server has TLS_API=Y but we connect via ws://) — issue #104
+            if (msg.includes('unexpected server response: 400') || msg.includes('Parse Error') ||
+                msg.includes('ECONNRESET') || msg.includes('socket hang up')) {
+                log.error('Go event bus error: ' + msg +
+                    ' — If Go server has TLS_API=Y enabled, the API port must stay HTTP. See issue #104.');
+            } else {
+                log.error('Go event bus error:', msg);
+            }
             goWs.close();
         });
     }

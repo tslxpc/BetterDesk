@@ -27,7 +27,19 @@ const apiClient = axios.create({
 // Retry once on 401 by reloading API key from file (handles race condition
 // where Go server generated the key after Node.js cached an empty value).
 let _keyReloaded = false;
+let _tlsMismatchWarned = false;
 apiClient.interceptors.response.use(undefined, async (error) => {
+    // Detect TLS mismatch: Node.js sends HTTP but Go server expects HTTPS (issue #104)
+    if (!_tlsMismatchWarned && error.response?.status === 400) {
+        const body = typeof error.response.data === 'string' ? error.response.data : '';
+        if (body.includes('HTTP request to an HTTPS server') || body.includes('Client sent an HTTP request')) {
+            _tlsMismatchWarned = true;
+            console.error('[BetterDesk API] ⚠ TLS MISMATCH: Go server has TLS_API=Y enabled on port ' +
+                (config.betterdeskApiUrl || '21114') + ' but this console connects via HTTP.');
+            console.error('[BetterDesk API]   Fix: remove TLS_API=Y from Go server environment or add -tls-api removal.');
+            console.error('[BetterDesk API]   The API port must stay HTTP for console↔Go communication. See issue #104.');
+        }
+    }
     if (error.response?.status === 401 && !_keyReloaded) {
         _keyReloaded = true;
         try {
