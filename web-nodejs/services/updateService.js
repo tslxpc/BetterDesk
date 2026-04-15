@@ -52,7 +52,7 @@ const COMPONENTS = {
     server: {
         prefix: 'betterdesk-server/',
         label: 'Go Server',
-        localRoot: null,
+        localRoot: path.join(PROJECT_ROOT, 'betterdesk-server'),
         service: IS_WINDOWS ? 'BetterDeskServer' : 'betterdesk-server',
         autoUpdate: false
     },
@@ -205,6 +205,277 @@ function classifyFile(filepath) {
 
 function isExcluded(filepath) {
     return EXCLUDE_PATTERNS.some(rx => rx.test(filepath));
+}
+
+// ======================== Server Build Support ===========================
+
+let _updateInProgress = false;
+
+/**
+ * Run a shell command as a promise (non-blocking unlike execSync).
+ */
+function execPromise(cmd, opts = {}) {
+    return new Promise((resolve, reject) => {
+        const { exec } = require('child_process');
+        exec(cmd, { maxBuffer: 5 * 1024 * 1024, ...opts }, (err, stdout, stderr) => {
+            if (err) {
+                err.stderr = stderr;
+                err.stdout = stdout;
+                return reject(err);
+            }
+            resolve({ stdout, stderr });
+        });
+    });
+}
+
+/**
+ * Copy directory recursively.
+ */
+function copyDirRecursive(src, dest) {
+    fs.mkdirSync(dest, { recursive: true });
+    for (const entry of fs.readdirSync(src, { withFileTypes: true })) {
+        const srcPath = path.join(src, entry.name);
+        const destPath = path.join(dest, entry.name);
+        if (entry.isDirectory()) {
+            copyDirRecursive(srcPath, destPath);
+        } else {
+            fs.copyFileSync(srcPath, destPath);
+        }
+    }
+}
+
+/**
+ * Check if Go toolchain is available.
+ * @returns {{ available: boolean, version: string|null }}
+ */
+function checkGoAvailable() {
+    try {
+        const version = execSync('go version', { timeout: 10000, stdio: 'pipe' }).toString().trim();
+        return { available: true, version };
+    } catch (_e) {
+        return { available: false, version: null };
+    }
+}
+
+/**
+ * Detect the installed Go server binary path from the system service.
+ * @returns {string|null}
+ */
+function detectServerBinaryPath() {
+    // 1. Explicit environment variable
+    if (process.env.BETTERDESK_SERVER_BINARY) {
+        const p = process.env.BETTERDESK_SERVER_BINARY;
+        if (fs.existsSync(p)) return p;
+    }
+
+    // 2. Read from systemd / NSSM service definition
+    try {
+        if (IS_WINDOWS) {
+            const out = execSync('nssm get BetterDeskServer Application 2>nul', {
+                timeout: 5000, stdio: 'pipe'
+            }).toString().trim();
+            if (out && fs.existsSync(out)) return out;
+        } else {
+            const raw = execSync(
+                'systemctl show betterdesk-server --property=ExecStart --value 2>/dev/null || true',
+                { timeout: 5000, stdio: 'pipe' }
+            ).toString().trim();
+            // ExecStart value may look like: /opt/rustdesk/betterdesk-server --flag ...
+            const binPath = raw.replace(/^\{[^}]*path=/, '').replace(/\s*;.*$/, '').split(/\s+/)[0];
+            if (binPath && fs.existsSync(binPath)) return binPath;
+        }
+    } catch (_e) { /* service may not be installed */ }
+
+    // 3. Well-known installation paths
+    const candidates = IS_WINDOWS
+        ? [
+            'C:\\betterdesk\\betterdesk-server.exe',
+            'C:\\Program Files\\BetterDesk\\betterdesk-server.exe',
+            path.join(PROJECT_ROOT, 'betterdesk-server', 'betterdesk-server.exe')
+        ]
+        : [
+            '/opt/rustdesk/betterdesk-server',
+            '/opt/betterdesk/betterdesk-server',
+            '/usr/local/bin/betterdesk-server',
+            path.join(PROJECT_ROOT, 'betterdesk-server', 'betterdesk-server')
+        ];
+
+    for (const p of candidates) {
+        if (fs.existsSync(p)) return p;
+    }
+    return null;
+}
+
+/**
+ * Ensure full Go server source code is present locally.
+ * If go.mod already exists, assumes source is present (changed files applied separately).
+ * Otherwise downloads the full source tree from GitHub.
+ *
+ * @param {string} remoteSHA
+ * @returns {Promise<{ strategy: string, filesDownloaded: number }>}
+ */
+async function ensureServerSource(remoteSHA) {
+    const serverDir = COMPONENTS.server.localRoot;
+    const goModPath = path.join(serverDir, 'go.mod');
+    if (fs.existsSync(goModPath)) {
+        return { strategy: 'incremental', filesDownloaded: 0 };
+    }
+
+    fs.mkdirSync(serverDir, { recursive: true });
+
+    // --- Try git clone --depth=1 (fastest) ---
+    try {
+        const tmpDir = path.join(config.dataDir, '_tmp_server_clone');
+        if (fs.existsSync(tmpDir)) fs.rmSync(tmpDir, { recursive: true, force: true });
+
+        const repoUrl = GITHUB_TOKEN
+            ? `https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_OWNER}/${GITHUB_REPO}.git`
+            : `https://github.com/${GITHUB_OWNER}/${GITHUB_REPO}.git`;
+
+        execSync(
+            `git clone --depth=1 --single-branch --branch "${GITHUB_BRANCH}" "${repoUrl}" "${tmpDir}"`,
+            { timeout: 120000, stdio: 'pipe' }
+        );
+
+        const srcDir = path.join(tmpDir, 'betterdesk-server');
+        if (fs.existsSync(srcDir)) {
+            copyDirRecursive(srcDir, serverDir);
+        }
+        try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch (_e) { /* ok */ }
+        return { strategy: 'git-clone', filesDownloaded: -1 };
+    } catch (_e) {
+        /* git not available or clone failed — fall through to API */
+    }
+
+    // --- Fallback: GitHub tree API + raw file downloads ---
+    const tree = await ghGet(`/repos/${GITHUB_OWNER}/${GITHUB_REPO}/git/trees/${remoteSHA}?recursive=1`);
+    const serverFiles = (tree.tree || []).filter(t =>
+        t.path.startsWith('betterdesk-server/') &&
+        t.type === 'blob' &&
+        !EXCLUDE_PATTERNS.some(rx => rx.test(t.path))
+    );
+
+    let downloaded = 0;
+    for (const file of serverFiles) {
+        try {
+            const content = await ghDownloadFile(GITHUB_OWNER, GITHUB_REPO, remoteSHA, file.path);
+            const localPath = file.path.slice(COMPONENTS.server.prefix.length);
+            const dest = path.join(serverDir, localPath);
+            fs.mkdirSync(path.dirname(dest), { recursive: true });
+            fs.writeFileSync(dest, content);
+            downloaded++;
+        } catch (err) {
+            console.error(`[UPDATE] Failed to download ${file.path}: ${err.message}`);
+        }
+    }
+
+    return { strategy: 'api-download', filesDownloaded: downloaded };
+}
+
+/**
+ * Build the Go server binary from local source.
+ * Uses async exec to avoid blocking the Node.js event loop.
+ *
+ * @returns {Promise<{ success: boolean, binaryPath: string|null, error?: string, duration?: number }>}
+ */
+async function buildGoServer() {
+    const serverDir = COMPONENTS.server.localRoot;
+    if (!fs.existsSync(path.join(serverDir, 'go.mod'))) {
+        return { success: false, binaryPath: null, error: 'go.mod not found — server source incomplete' };
+    }
+
+    const goCheck = checkGoAvailable();
+    if (!goCheck.available) {
+        return { success: false, binaryPath: null, error: 'Go toolchain not installed. Install Go from https://go.dev/dl/' };
+    }
+
+    const binaryName = IS_WINDOWS ? 'betterdesk-server.exe' : 'betterdesk-server';
+    const outputPath = path.join(serverDir, binaryName);
+    const start = Date.now();
+    const buildEnv = { ...process.env, CGO_ENABLED: '0' };
+
+    try {
+        await execPromise('go mod download', {
+            cwd: serverDir,
+            timeout: 120000,
+            env: buildEnv
+        });
+
+        await execPromise(
+            `go build -trimpath -ldflags="-s -w" -o "${binaryName}" .`,
+            { cwd: serverDir, timeout: 300000, env: buildEnv }
+        );
+
+        if (!fs.existsSync(outputPath)) {
+            return { success: false, binaryPath: null, error: 'Build completed but binary not found' };
+        }
+
+        return { success: true, binaryPath: outputPath, duration: Date.now() - start };
+    } catch (err) {
+        const stderr = (err.stderr || '').toString().slice(0, 500);
+        return { success: false, binaryPath: null, error: `Build failed: ${stderr || err.message}`.trim() };
+    }
+}
+
+/**
+ * Deploy the compiled binary to the service installation path.
+ * Creates a timestamped backup of the existing binary first.
+ *
+ * @param {string} builtBinaryPath  Path to the newly compiled binary
+ * @param {string} targetPath       Service binary path
+ * @returns {{ success: boolean, backupPath?: string, error?: string }}
+ */
+function deployServerBinary(builtBinaryPath, targetPath) {
+    if (!builtBinaryPath || !fs.existsSync(builtBinaryPath)) {
+        return { success: false, error: 'Compiled binary not found' };
+    }
+    if (!targetPath) {
+        return { success: false, error: 'Target binary path not detected — set BETTERDESK_SERVER_BINARY env var' };
+    }
+
+    // Backup existing binary
+    let backupPath = null;
+    if (fs.existsSync(targetPath)) {
+        backupPath = targetPath + '.bak.' + Date.now();
+        try {
+            fs.copyFileSync(targetPath, backupPath);
+        } catch (err) {
+            return { success: false, error: `Backup failed: ${err.message}` };
+        }
+    }
+
+    // Copy new binary to service path
+    try {
+        fs.mkdirSync(path.dirname(targetPath), { recursive: true });
+        fs.copyFileSync(builtBinaryPath, targetPath);
+        if (!IS_WINDOWS) {
+            try { fs.chmodSync(targetPath, 0o755); } catch (_e) { /* ok */ }
+        }
+        return { success: true, backupPath };
+    } catch (err) {
+        // Attempt to restore backup on failure
+        if (backupPath && fs.existsSync(backupPath)) {
+            try { fs.copyFileSync(backupPath, targetPath); } catch (_e) { /* critical */ }
+        }
+        return { success: false, error: `Deploy failed: ${err.message}` };
+    }
+}
+
+/**
+ * Get server update readiness info for the UI.
+ */
+function getServerUpdateInfo() {
+    const goInfo = checkGoAvailable();
+    const binaryPath = detectServerBinaryPath();
+    const sourcePresent = fs.existsSync(path.join(COMPONENTS.server.localRoot || '', 'go.mod'));
+
+    return {
+        goAvailable: goInfo.available,
+        goVersion: goInfo.version,
+        binaryPath,
+        sourcePresent,
+        canAutoUpdate: goInfo.available
+    };
 }
 
 // ======================== Public API ====================================
@@ -389,6 +660,10 @@ async function createPreUpdateBackup(allFiles) {
  * @param {string[]} opts.components    default ['console','scripts']
  */
 async function applyUpdate(remoteSHA, changedData, opts = {}) {
+    if (_updateInProgress) throw new Error('Another update is already in progress');
+    _updateInProgress = true;
+
+    try {
     const { createBackup = true, components: selectedComponents = ['console', 'scripts'] } = opts;
 
     let backupInfo = null;
@@ -465,18 +740,68 @@ async function applyUpdate(remoteSHA, changedData, opts = {}) {
         }
     }
 
-    // ---- Server / Agent — info only for non-auto components ----
-    if (changedData.grouped.server?.length) {
-        if (selectedComponents.includes('server')) {
-            results.needsServerRestart = true;
+    // ---- Server source files + compile + deploy ----
+    if (changedData.grouped.server?.length && selectedComponents.includes('server')) {
+        // 1. Ensure full source is present (downloads if missing)
+        try {
+            const sourceResult = await ensureServerSource(remoteSHA);
+            console.log(`[UPDATE] Server source: strategy=${sourceResult.strategy}, files=${sourceResult.filesDownloaded}`);
+        } catch (err) {
+            results.failed.push({ file: 'server-source', error: `Source download failed: ${err.message}` });
         }
+
+        // 2. Download changed server source files (incremental)
+        const serverDir = COMPONENTS.server.localRoot;
+        for (const file of changedData.grouped.server) {
+            try {
+                if (file.status === 'removed') {
+                    const localPath = file.path.slice(COMPONENTS.server.prefix.length);
+                    const localFile = path.join(serverDir, localPath);
+                    if (fs.existsSync(localFile)) { fs.unlinkSync(localFile); results.removed.push(file.path); }
+                    continue;
+                }
+                const content = await ghDownloadFile(GITHUB_OWNER, GITHUB_REPO, remoteSHA, file.path);
+                const localPath = file.path.slice(COMPONENTS.server.prefix.length);
+                const dest = path.join(serverDir, localPath);
+                fs.mkdirSync(path.dirname(dest), { recursive: true });
+                fs.writeFileSync(dest, content);
+                results.applied.push(file.path);
+            } catch (err) {
+                results.failed.push({ file: file.path, error: err.message });
+            }
+        }
+
+        // 3. Build binary from source
+        const buildResult = await buildGoServer();
+        results.serverBuild = {
+            success: buildResult.success,
+            duration: buildResult.duration || 0,
+            error: buildResult.error || null
+        };
+
+        if (buildResult.success) {
+            // 4. Deploy to service path
+            const targetPath = detectServerBinaryPath();
+            const deployResult = deployServerBinary(buildResult.binaryPath, targetPath);
+            results.serverDeploy = {
+                success: deployResult.success,
+                backupPath: deployResult.backupPath || null,
+                error: deployResult.error || null
+            };
+
+            if (deployResult.success) {
+                results.needsServerRestart = true;
+            }
+        }
+    } else if (changedData.grouped.server?.length) {
         for (const f of changedData.grouped.server) {
-            results.skipped.push(f.path + ' (server source — rebuild required)');
+            results.skipped.push(f.path + ' (server — not selected)');
         }
     }
+
     if (changedData.grouped.agent?.length) {
         for (const f of changedData.grouped.agent) {
-            results.skipped.push(f.path + ' (agent source — rebuild required)');
+            results.skipped.push(f.path + ' (agent — rebuild required)');
         }
     }
 
@@ -490,6 +815,9 @@ async function applyUpdate(remoteSHA, changedData, opts = {}) {
     } catch (_e) { /* non-critical */ }
 
     return results;
+    } finally {
+        _updateInProgress = false;
+    }
 }
 
 /**
@@ -576,5 +904,6 @@ module.exports = {
     getLocalVersion,
     getLocalSHA,
     saveLocalSHA,
+    getServerUpdateInfo,
     COMPONENTS
 };

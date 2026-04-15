@@ -67,6 +67,12 @@ async function goApiProxy(req, res, method, path, body) {
     } catch (err) {
         const status = err.response?.status || 500;
         const data = err.response?.data || { error: 'Go server unreachable' };
+        // If Go server returns 404 for policy routes, return empty defaults
+        // so the page works gracefully (common when Go binary is outdated).
+        if (status === 404 && method === 'get' && path.endsWith('/policy')) {
+            console.warn('[Policies] Go server returned 404 for %s — returning empty defaults. Rebuild Go binary.', path);
+            return res.json({});
+        }
         res.status(status).json(data);
     }
 }

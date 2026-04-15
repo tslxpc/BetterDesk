@@ -2806,6 +2806,17 @@
     "component_agent": "Agent",
     "component_scripts": "Skrypty i Docker",
     "component_other": "Inne",
-    "server_rebuild_warning": "Źródła serwera Go uległy zmianie — wymagana rekompilacja. Użyj skryptu ALL-IN-ONE lub skompiluj ręcznie."
+    "server_rebuild_warning": "Źródła serwera Go uległy zmianie — wymagana rekompilacja. Użyj skryptu ALL-IN-ONE lub skompiluj ręcznie.",
+    "include_server": "Dołącz serwer Go (kompilacja i wdrożenie binarki)",
+    "checking_go": "Sprawdzanie Go…",
+    "go_not_found": "Go nie zainstalowane",
+    "go_check_failed": "Nie udało się sprawdzić dostępności Go",
+    "server_building": "Kompilacja serwera Go… To może zająć kilka minut.",
+    "server_built": "Binarka serwera skompilowana",
+    "server_build_failed": "Kompilacja serwera nie powiodła się",
+    "server_deployed": "Binarka serwera wdrożona",
+    "server_deploy_failed": "Wdrożenie serwera nie powiodło się",
+    "server_build_note": "Kompilacja serwera może zająć 1-5 minut. Strona pozostanie nieaktywna podczas kompilacji.",
+    "server_source_downloading": "Pobieranie źródeł serwera…"
   }
 }

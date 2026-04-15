@@ -531,6 +531,19 @@ router.post('/api/settings/restore', requireAuth, requirePermission('server.conf
 // ==================== Self-Update API ====================
 
 /**
+ * GET /api/settings/updates/server-info - Check Go build environment for server updates
+ */
+router.get('/api/settings/updates/server-info', requireAuth, requirePermission('server.config'), (_req, res) => {
+    try {
+        const info = updateService.getServerUpdateInfo();
+        res.json({ success: true, data: info });
+    } catch (err) {
+        console.error('Server info error:', err);
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
+/**
  * GET /api/settings/updates/check - Check for available updates
  */
 router.get('/api/settings/updates/check', requireAuth, requirePermission('server.config'), async (req, res) => {
@@ -565,6 +578,10 @@ router.get('/api/settings/updates/changes', requireAuth, requirePermission('serv
  * Body: { remoteSHA, createBackup: true/false, components: ['console','scripts'] }
  */
 router.post('/api/settings/updates/install', requireAuth, requirePermission('server.config'), async (req, res) => {
+    // Extend timeout for server compilation (up to 10 minutes)
+    req.setTimeout(600000);
+    res.setTimeout(600000);
+
     try {
         const { remoteSHA, createBackup, components } = req.body;
         if (!remoteSHA || !/^[0-9a-f]{7,40}$/i.test(remoteSHA)) {

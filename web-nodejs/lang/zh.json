@@ -2813,6 +2813,17 @@
     "component_agent": "代理程序",
     "component_scripts": "脚本和Docker",
     "component_other": "其他",
-    "server_rebuild_warning": "Go服务器源代码已更改——需要重新编译。使用ALL-IN-ONE脚本或手动编译。"
+    "server_rebuild_warning": "Go服务器源代码已更改——需要重新编译。使用ALL-IN-ONE脚本或手动编译。",
+    "include_server": "包含Go服务器（编译并部署二进制文件）",
+    "checking_go": "检查Go…",
+    "go_not_found": "未安装Go",
+    "go_check_failed": "无法检查Go可用性",
+    "server_building": "编译Go服务器… 这可能需要几分钟。",
+    "server_built": "服务器二进制文件已编译",
+    "server_build_failed": "服务器编译失败",
+    "server_deployed": "服务器二进制文件已部署",
+    "server_deploy_failed": "服务器部署失败",
+    "server_build_note": "服务器编译可能需要1-5分钟。编译期间页面将保持无响应。",
+    "server_source_downloading": "下载服务器源代码…"
   }
 }

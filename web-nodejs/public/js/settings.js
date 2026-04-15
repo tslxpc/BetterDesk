@@ -1311,10 +1311,56 @@
             html += `<p class="text-muted" style="margin-top:8px;font-size:12px;">${_('updates.total_files')}: <strong>${changesData.totalFiles || 0}</strong></p>`;
             
             if (grouped.server?.length > 0) {
-                html += `<div class="update-warning"><span class="material-icons">warning</span> ${_('updates.server_rebuild_warning')}</div>`;
+                html += `<div class="update-server-section" style="margin-top:12px;padding:12px;border:1px solid var(--border-color, #333);border-radius:8px;">
+                    <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px;">
+                        <label class="restore-option" style="margin:0;">
+                            <input type="checkbox" id="update-include-server">
+                            <span>${_('updates.include_server')}</span>
+                        </label>
+                        <span id="update-server-status" class="badge badge-warning badge-sm">${_('updates.checking_go')}</span>
+                    </div>
+                    <div id="update-server-info" class="text-muted" style="font-size:11px;"></div>
+                </div>`;
             }
             
             summaryEl.innerHTML = html;
+            
+            // Check Go availability when server section is shown
+            if (grouped.server?.length > 0) {
+                checkServerBuildInfo();
+            }
+        }
+    }
+    
+    async function checkServerBuildInfo() {
+        const statusEl = document.getElementById('update-server-status');
+        const infoEl = document.getElementById('update-server-info');
+        const toggleEl = document.getElementById('update-include-server');
+        if (!statusEl || !toggleEl) return;
+        
+        try {
+            const info = await Utils.api('/api/settings/updates/server-info');
+            if (info.goAvailable) {
+                statusEl.className = 'badge badge-success badge-sm';
+                statusEl.textContent = info.goVersion ? info.goVersion.replace('go version ', '') : 'Go available';
+                toggleEl.disabled = false;
+            } else {
+                statusEl.className = 'badge badge-danger badge-sm';
+                statusEl.textContent = _('updates.go_not_found');
+                toggleEl.disabled = true;
+                toggleEl.checked = false;
+            }
+            if (infoEl) {
+                const parts = [];
+                if (info.binaryPath) parts.push(`Binary: ${info.binaryPath}`);
+                if (info.sourcePresent) parts.push('Source: present');
+                else parts.push('Source: will be downloaded');
+                infoEl.textContent = parts.join(' · ');
+            }
+        } catch (_e) {
+            statusEl.className = 'badge badge-warning badge-sm';
+            statusEl.textContent = _('updates.go_check_failed');
+            toggleEl.disabled = true;
         }
     }
     
@@ -1329,7 +1375,12 @@
             return;
         }
         
-        if (!confirm(_('updates.install_confirm'))) return;
+        const includeServer = document.getElementById('update-include-server')?.checked || false;
+        const confirmMsg = includeServer
+            ? _('updates.install_confirm') + '\n\n' + _('updates.server_build_note')
+            : _('updates.install_confirm');
+        
+        if (!confirm(confirmMsg)) return;
         
         if (installBtn) installBtn.disabled = true;
         if (progressEl) progressEl.style.display = '';
@@ -1338,17 +1389,25 @@
         
         try {
             const createBackup = document.getElementById('update-backup-toggle')?.checked ?? true;
+            const components = ['console', 'scripts'];
+            if (includeServer) components.push('server');
             
-            if (progressFill) progressFill.style.width = '30%';
+            if (progressFill) progressFill.style.width = '20%';
             if (progressText) progressText.textContent = createBackup ? _('updates.creating_backup') : _('updates.downloading');
+            
+            if (includeServer) {
+                // Server build can take minutes — show an informative message
+                setTimeout(() => {
+                    if (progressFill && progressFill.style.width !== '100%') {
+                        progressFill.style.width = '50%';
+                        if (progressText) progressText.textContent = _('updates.server_building');
+                    }
+                }, 5000);
+            }
             
             const result = await Utils.api('/api/settings/updates/install', {
                 method: 'POST',
-                body: {
-                    remoteSHA: _updateState.remoteSHA,
-                    createBackup,
-                    components: ['console', 'scripts']
-                }
+                body: { remoteSHA: _updateState.remoteSHA, createBackup, components }
             });
             
             if (progressFill) progressFill.style.width = '100%';
@@ -1357,12 +1416,31 @@
             if (result.failed?.length) msg += `, ${_('updates.failed')}: ${result.failed.length}`;
             if (result.removed?.length) msg += `, ${_('updates.removed')}: ${result.removed.length}`;
             
+            // Server build/deploy results
+            if (result.serverBuild) {
+                if (result.serverBuild.success) {
+                    const secs = Math.round((result.serverBuild.duration || 0) / 1000);
+                    msg += `. ${_('updates.server_built')}` + (secs ? ` (${secs}s)` : '');
+                } else {
+                    msg += `. ${_('updates.server_build_failed')}`;
+                    if (result.serverBuild.error) Notifications.error(result.serverBuild.error);
+                }
+            }
+            if (result.serverDeploy) {
+                if (result.serverDeploy.success) {
+                    msg += `. ${_('updates.server_deployed')}`;
+                } else {
+                    msg += `. ${_('updates.server_deploy_failed')}`;
+                    if (result.serverDeploy.error) Notifications.error(result.serverDeploy.error);
+                }
+            }
+            
             if (result.needsConsoleRestart) {
                 if (progressText) progressText.textContent = _('updates.restarting');
                 Notifications.success(msg);
                 setTimeout(() => pollServerRestart(), 3000);
             } else {
-                Notifications.success(_('updates.install_success'));
+                Notifications.success(msg);
                 if (progressEl) setTimeout(() => { progressEl.style.display = 'none'; }, 5000);
                 if (installBtn) installBtn.disabled = false;
             }

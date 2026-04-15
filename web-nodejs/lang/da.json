@@ -1,4 +1,4 @@
-{
+﻿{
   "_meta": {
     "name": "Danish",
     "native_name": "Dansk",
@@ -2743,7 +2743,18 @@
     "component_agent": "Agent",
     "component_scripts": "Scripts & Docker",
     "component_other": "Other",
-    "server_rebuild_warning": "Go Server source changed — binary rebuild required. Use the ALL-IN-ONE script or compile manually."
+    "server_rebuild_warning": "Go Server source changed — binary rebuild required. Use the ALL-IN-ONE script or compile manually.",
+    "include_server": "Include Go Server (compile & deploy binary)",
+    "checking_go": "Checking Go…",
+    "go_not_found": "Go not installed",
+    "go_check_failed": "Could not check Go availability",
+    "server_building": "Compiling Go server… This may take a few minutes.",
+    "server_built": "Server binary compiled",
+    "server_build_failed": "Server compilation failed",
+    "server_deployed": "Server binary deployed",
+    "server_deploy_failed": "Server deploy failed",
+    "server_build_note": "Server compilation may take 1-5 minutes. The page will remain unresponsive during compilation.",
+    "server_source_downloading": "Downloading server source…"
   },
   "permissions": {
     "title": "Permissions",

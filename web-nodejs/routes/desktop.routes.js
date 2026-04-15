@@ -49,6 +49,12 @@ function isValidWallpaperPath(p) {
 router.post('/layout', requireAuth, async (req, res) => {
     try {
         const userId = req.session.userId;
+        if (!userId) {
+            return res.status(400).json({ success: false, error: 'Missing user session' });
+        }
+        if (!req.body || typeof req.body !== 'object') {
+            return res.status(400).json({ success: false, error: 'Invalid request body' });
+        }
         const { widgets, wallpaper } = req.body;
 
         if (widgets !== undefined && !isValidWidgetArray(widgets)) {
@@ -71,7 +77,11 @@ router.post('/layout', requireAuth, async (req, res) => {
 
         res.json({ success: true });
     } catch (err) {
-        console.error('[Desktop] Save layout error:', err.message);
+        console.error('[Desktop] Save layout error:', err.message, err.stack);
+        // Detect missing settings table (auth.db migration didn't run)
+        if (err.message && err.message.includes('no such table')) {
+            console.error('[Desktop] The settings table is missing from auth.db — run ensureAuthTables() or restart the server.');
+        }
         res.status(500).json({ success: false, error: 'Failed to save layout' });
     }
 });
