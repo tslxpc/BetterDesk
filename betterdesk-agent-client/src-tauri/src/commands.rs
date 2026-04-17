@@ -51,6 +51,15 @@ pub struct AgentSettings {
 
 // ─────────────────────────── Status & Lifecycle ───────────────────────────
 
+/// Returns true when the agent process runs with local OS administrator
+/// privileges. Used by the frontend + tray menu to gate sensitive actions
+/// (Settings, Quit agent, Unregister) so regular users cannot disable the
+/// agent without elevation.
+#[tauri::command]
+pub fn is_os_admin() -> bool {
+    crate::privileges::is_os_admin()
+}
+
 #[tauri::command]
 pub fn get_agent_status(state: State<'_, AgentState>) -> Result<AgentStatus, String> {
     let config = state.config.lock().map_err(|e| e.to_string())?;

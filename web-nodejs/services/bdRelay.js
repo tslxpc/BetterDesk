@@ -50,6 +50,11 @@ const onlineDevices = new Map();
 // IP → count
 const connectionsPerIp = new Map();
 
+// requestId → { resolve, reject, timeout } for request/response pattern over signal WS
+const pendingRequests = new Map();
+
+const REQUEST_TIMEOUT_MS = 15 * 1000; // 15s default
+
 // ---------------------------------------------------------------------------
 //  Helpers
 // ---------------------------------------------------------------------------
@@ -148,6 +153,42 @@ function getOnlineDeviceIds() {
         if (ws.readyState === WebSocket.OPEN) ids.push(id);
     }
     return ids;
+}
+
+/**
+ * Send a request to an online agent and await its response over the signal WS.
+ * The agent receives `{ type, request_id, payload }` and must reply with
+ * `{ type: 'command_response', request_id, ok, data?, error? }`.
+ *
+ * @param {string} deviceId
+ * @param {string} type     e.g. 'services.list', 'files.browse'
+ * @param {object} payload  optional type-specific payload
+ * @param {number} [timeoutMs=15000]
+ * @returns {Promise<any>} resolves with agent's `data`, rejects on error/timeout
+ */
+function requestFromDevice(deviceId, type, payload = null, timeoutMs = REQUEST_TIMEOUT_MS) {
+    return new Promise((resolve, reject) => {
+        const ws = onlineDevices.get(deviceId);
+        if (!ws || ws.readyState !== WebSocket.OPEN) {
+            return reject(new Error('agent_offline'));
+        }
+
+        const requestId = crypto.randomUUID();
+        const timeout = setTimeout(() => {
+            pendingRequests.delete(requestId);
+            reject(new Error('agent_timeout'));
+        }, Math.max(1000, Math.min(60000, timeoutMs)));
+
+        pendingRequests.set(requestId, { resolve, reject, timeout });
+
+        try {
+            ws.send(JSON.stringify({ type, request_id: requestId, payload }));
+        } catch (err) {
+            pendingRequests.delete(requestId);
+            clearTimeout(timeout);
+            reject(err);
+        }
+    });
 }
 
 // ---------------------------------------------------------------------------
@@ -442,6 +483,19 @@ function handleSignalMessage(deviceId, ws, msg) {
             break;
         }
 
+        case 'command_response': {
+            // Agent responding to a requestFromDevice() call.
+            // msg = { type, request_id, ok, data?, error? }
+            const pending = pendingRequests.get(msg.request_id);
+            if (pending) {
+                pendingRequests.delete(msg.request_id);
+                clearTimeout(pending.timeout);
+                if (msg.ok) pending.resolve(msg.data || null);
+                else pending.reject(new Error(msg.error || 'agent_error'));
+            }
+            break;
+        }
+
         default:
             break;
     }
@@ -479,6 +533,7 @@ module.exports = {
     notifyTarget,
     isDeviceOnline,
     getOnlineDeviceIds,
+    requestFromDevice,
     activeSessions,    // exposed for monitoring/admin API
     onlineDevices,     // exposed for status sync
 };

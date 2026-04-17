@@ -5,6 +5,11 @@
     "help": "Prośba o pomoc",
     "settings": "Ustawienia"
   },
+  "admin_required": {
+    "title": "Wymagane uprawnienia administratora",
+    "message": "Ten ekran jest dostępny tylko gdy agent jest uruchomiony z uprawnieniami administratora.",
+    "hint": "Poproś administratora IT o uruchomienie agenta jako Administrator lub kliknij instalator prawym przyciskiem i wybierz \"Uruchom jako administrator\"."
+  },
   "status": {
     "title": "Status połączenia",
     "connected": "Połączono",

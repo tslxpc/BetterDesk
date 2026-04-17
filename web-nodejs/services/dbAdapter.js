@@ -429,6 +429,13 @@ function createSqliteAdapter(config) {
             { name: 'totp_secret', sql: 'TEXT DEFAULT NULL' },
             { name: 'totp_enabled', sql: 'INTEGER DEFAULT 0' },
             { name: 'totp_recovery_codes', sql: 'TEXT DEFAULT NULL' },
+            // Phase 4: operator identity profile (shown to end-user on consent popup)
+            { name: 'first_name', sql: "TEXT DEFAULT ''" },
+            { name: 'last_name',  sql: "TEXT DEFAULT ''" },
+            { name: 'email',      sql: "TEXT DEFAULT ''" },
+            { name: 'phone',      sql: "TEXT DEFAULT ''" },
+            { name: 'role_display', sql: "TEXT DEFAULT ''" },
+            { name: 'avatar_url', sql: "TEXT DEFAULT ''" },
         ];
         try {
             const existingUserCols = new Set(db.prepare('PRAGMA table_info(users)').all().map(c => c.name));
@@ -1095,6 +1102,21 @@ function createSqliteAdapter(config) {
         },
         async updateUserRole(id, role) {
             openAuth().prepare('UPDATE users SET role = ? WHERE id = ?').run(role, id);
+        },
+        // Phase 4: update operator identity profile (first_name, last_name, email, phone, role_display, avatar_url)
+        async updateUserProfile(id, fields) {
+            const allowed = ['first_name', 'last_name', 'email', 'phone', 'role_display', 'avatar_url'];
+            const sets = [];
+            const values = [];
+            for (const k of allowed) {
+                if (fields && Object.prototype.hasOwnProperty.call(fields, k)) {
+                    sets.push(`${k} = ?`);
+                    values.push(String(fields[k] == null ? '' : fields[k]).slice(0, 200));
+                }
+            }
+            if (!sets.length) return;
+            values.push(id);
+            openAuth().prepare(`UPDATE users SET ${sets.join(', ')} WHERE id = ?`).run(...values);
         },
         async deleteUser(id) {
             openAuth().prepare('DELETE FROM users WHERE id = ?').run(id);
@@ -3099,6 +3121,21 @@ function createPostgresAdapter() {
             await q('ALTER TABLE users ADD COLUMN IF NOT EXISTS totp_recovery_codes TEXT DEFAULT NULL');
         }
 
+        // Phase 4: operator identity profile columns
+        const identityCols = [
+            ['first_name',   "TEXT DEFAULT ''"],
+            ['last_name',    "TEXT DEFAULT ''"],
+            ['email',        "TEXT DEFAULT ''"],
+            ['phone',        "TEXT DEFAULT ''"],
+            ['role_display', "TEXT DEFAULT ''"],
+            ['avatar_url',   "TEXT DEFAULT ''"],
+        ];
+        for (const [col, def] of identityCols) {
+            if (!existingCols.has(col)) {
+                await q(`ALTER TABLE users ADD COLUMN IF NOT EXISTS ${col} ${def}`);
+            }
+        }
+
         // Migration: Add updated_at to settings table if missing (for upgrades from older versions)
         try {
             const settingsColCheck = await all(`SELECT column_name FROM information_schema.columns WHERE table_name = 'settings'`);
@@ -3387,6 +3424,21 @@ function createPostgresAdapter() {
         async hasUsers() { return +(await one('SELECT COUNT(*) as c FROM users')).c > 0; },
         async getAllUsers() { return all('SELECT id, username, role, created_at, last_login, totp_enabled FROM users ORDER BY id'); },
         async updateUserRole(id, role) { await q('UPDATE users SET role = $1 WHERE id = $2', [role, id]); },
+        async updateUserProfile(id, fields) {
+            const allowed = ['first_name', 'last_name', 'email', 'phone', 'role_display', 'avatar_url'];
+            const sets = [];
+            const values = [];
+            let idx = 1;
+            for (const k of allowed) {
+                if (fields && Object.prototype.hasOwnProperty.call(fields, k)) {
+                    sets.push(`${k} = $${idx++}`);
+                    values.push(String(fields[k] == null ? '' : fields[k]).slice(0, 200));
+                }
+            }
+            if (!sets.length) return;
+            values.push(id);
+            await q(`UPDATE users SET ${sets.join(', ')} WHERE id = $${idx}`, values);
+        },
         async deleteUser(id) { await q('DELETE FROM users WHERE id = $1', [id]); },
         async countAdmins() { return +(await one("SELECT COUNT(*) as c FROM users WHERE role IN ('admin', 'super_admin')")).c; },
 

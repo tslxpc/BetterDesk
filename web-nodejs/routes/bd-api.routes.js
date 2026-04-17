@@ -696,6 +696,134 @@ router.delete('/help-requests/:id', requireDeviceAuth, requireOperatorRole, asyn
     }
 });
 
+// ===========================================================================
+//  Notification Center (panel navbar bell)
+// ===========================================================================
+//
+//  These routes are consumed by web-nodejs/public/js/notif-center.js. They use
+//  session-based auth (panel cookies) rather than Bearer tokens because the
+//  dropdown is part of the web UI, not the desktop client.
+//
+//  Storage model: notifications are a per-user read-status overlay over
+//  helpRequests. The overlay (readByUser) lives in-memory and is cleaned up
+//  opportunistically. On restart, all help-requests appear unread again — a
+//  deliberate trade-off: persistence can be added later via DB if needed.
+// ---------------------------------------------------------------------------
+
+const { requireAuth } = require('../middleware/auth');
+
+/** @type {Map<string, Set<string>>} userId → Set<helpRequestId> marked read. */
+const readByUser = new Map();
+
+function isReadBy(userId, notifId) {
+    const set = readByUser.get(String(userId));
+    return !!(set && set.has(String(notifId)));
+}
+
+function markReadBy(userId, notifId) {
+    const key = String(userId);
+    let set = readByUser.get(key);
+    if (!set) {
+        set = new Set();
+        readByUser.set(key, set);
+    }
+    set.add(String(notifId));
+    // Cap per-user set size to avoid unbounded growth.
+    if (set.size > 500) {
+        const arr = [...set];
+        readByUser.set(key, new Set(arr.slice(-400)));
+    }
+}
+
+function helpRequestToNotif(req, userId) {
+    return {
+        id: req.id,
+        title: req.hostname || req.device_id,
+        message: req.message || '',
+        icon: 'support_agent',
+        link: '/help-requests',
+        read: isReadBy(userId, req.id),
+        created_at: new Date(req.created_at).toISOString(),
+        kind: 'help_request',
+        status: req.status,
+    };
+}
+
+// ---------------------------------------------------------------------------
+//  GET /api/bd/notifications — list recent notifications for current user
+// ---------------------------------------------------------------------------
+
+router.get('/notifications', requireAuth, (req, res) => {
+    try {
+        const rawLimit = parseInt(req.query.limit, 10);
+        const limit = Number.isFinite(rawLimit) ? Math.min(Math.max(rawLimit, 1), 50) : 20;
+        const unreadOnly = String(req.query.unread_only || '').toLowerCase() === 'true';
+        const userId = req.session?.user?.id;
+
+        const items = [...helpRequests.values()]
+            .sort((a, b) => b.created_at - a.created_at)
+            .map(r => helpRequestToNotif(r, userId))
+            .filter(n => (unreadOnly ? !n.read : true))
+            .slice(0, limit);
+
+        const unreadCount = [...helpRequests.values()]
+            .filter(r => !isReadBy(userId, r.id)).length;
+
+        res.json({ success: true, items, unread_count: unreadCount });
+    } catch (err) {
+        console.error('[BD-API] List notifications error:', err.message);
+        res.status(500).json({ error: 'Failed to list notifications' });
+    }
+});
+
+// ---------------------------------------------------------------------------
+//  POST /api/bd/notifications/:id/read — mark single notification read
+// ---------------------------------------------------------------------------
+
+router.post('/notifications/:id/read', requireAuth, (req, res) => {
+    try {
+        const userId = req.session?.user?.id;
+        if (!userId) {
+            return res.status(401).json({ error: 'Not authenticated' });
+        }
+
+        const id = String(req.params.id || '').slice(0, 128);
+        if (!helpRequests.has(id)) {
+            // Idempotent: succeed even if the item was already pruned. Client
+            // only uses this to update its local badge state.
+            return res.json({ success: true, pruned: true });
+        }
+
+        markReadBy(userId, id);
+        res.json({ success: true });
+    } catch (err) {
+        console.error('[BD-API] Mark notification read error:', err.message);
+        res.status(500).json({ error: 'Failed to mark notification read' });
+    }
+});
+
+// ---------------------------------------------------------------------------
+//  POST /api/bd/notifications/read-all — mark all notifications read
+// ---------------------------------------------------------------------------
+
+router.post('/notifications/read-all', requireAuth, (req, res) => {
+    try {
+        const userId = req.session?.user?.id;
+        if (!userId) {
+            return res.status(401).json({ error: 'Not authenticated' });
+        }
+
+        for (const id of helpRequests.keys()) {
+            markReadBy(userId, id);
+        }
+
+        res.json({ success: true });
+    } catch (err) {
+        console.error('[BD-API] Mark all read error:', err.message);
+        res.status(500).json({ error: 'Failed to mark all notifications read' });
+    }
+});
+
 // ---------------------------------------------------------------------------
 //  POST /api/bd/operator/sessions — Record operator session start/end
 // ---------------------------------------------------------------------------

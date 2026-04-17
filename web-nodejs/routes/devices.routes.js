@@ -486,4 +486,125 @@ router.delete('/api/devices/:id/access-policy', requireAuth, requirePermission('
     }
 });
 
+// ===========================================================================
+//  Phase 2 — Live agent introspection (services, processes, events, files,
+//  terminal, screenshot, activity). All endpoints proxy a command request to
+//  the agent over the signal WebSocket (bdRelay.requestFromDevice) and return
+//  the agent's reply. If the agent is offline, 503 is returned.
+// ===========================================================================
+
+const bdRelay = require('../services/bdRelay');
+
+/**
+ * Wrap an agent-proxy request with consistent error handling and timeout.
+ * Distinct error codes help the UI render appropriate states.
+ */
+async function proxyAgentRequest(req, res, type, payload = null, timeoutMs = 15000) {
+    try {
+        const data = await bdRelay.requestFromDevice(req.params.id, type, payload, timeoutMs);
+        res.json({ success: true, data });
+    } catch (err) {
+        const msg = err && err.message ? err.message : 'agent_error';
+        const status = msg === 'agent_offline' ? 503
+            : msg === 'agent_timeout' ? 504
+            : 502;
+        res.status(status).json({ success: false, error: msg });
+    }
+}
+
+/** GET /api/devices/:id/services — live OS services list */
+router.get('/api/devices/:id/services', requireAuth, requirePermission('device.view'), (req, res) => {
+    proxyAgentRequest(req, res, 'services.list');
+});
+
+/** GET /api/devices/:id/processes — live process list */
+router.get('/api/devices/:id/processes', requireAuth, requirePermission('device.view'), (req, res) => {
+    proxyAgentRequest(req, res, 'processes.list');
+});
+
+/** GET /api/devices/:id/events?limit=100 — recent OS event log / journalctl */
+router.get('/api/devices/:id/events', requireAuth, requirePermission('device.view'), (req, res) => {
+    const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 100, 1), 500);
+    proxyAgentRequest(req, res, 'events.list', { limit });
+});
+
+/** GET /api/devices/:id/activity — live activity tracker (app usage) */
+router.get('/api/devices/:id/activity', requireAuth, requirePermission('device.view'), (req, res) => {
+    proxyAgentRequest(req, res, 'activity.get');
+});
+
+/**
+ * POST /api/devices/:id/files/browse
+ * Body: { path: '/some/folder', show_hidden: false }
+ */
+router.post('/api/devices/:id/files/browse', requireAuth, requirePermission('device.edit'), (req, res) => {
+    const path = String(req.body?.path || '').slice(0, 4096);
+    const showHidden = req.body?.show_hidden === true;
+    proxyAgentRequest(req, res, 'files.browse', { path, show_hidden: showHidden });
+});
+
+/**
+ * POST /api/devices/:id/files/read
+ * Body: { path, offset, length }
+ */
+router.post('/api/devices/:id/files/read', requireAuth, requirePermission('device.edit'), (req, res) => {
+    const path = String(req.body?.path || '').slice(0, 4096);
+    const offset = Math.max(0, parseInt(req.body?.offset, 10) || 0);
+    const length = Math.min(1024 * 1024, Math.max(0, parseInt(req.body?.length, 10) || 65536));
+    proxyAgentRequest(req, res, 'files.read', { path, offset, length }, 30000);
+});
+
+/**
+ * POST /api/devices/:id/screenshot
+ * Captures a JPEG snapshot from the agent. Returns base64 image.
+ */
+router.post('/api/devices/:id/screenshot', requireAuth, requirePermission('device.view'), (req, res) => {
+    proxyAgentRequest(req, res, 'screenshot.capture', null, 20000);
+});
+
+/**
+ * POST /api/devices/:id/terminal/execute
+ * Body: { command: 'ls -la /tmp' }
+ * One-shot command execution (no PTY). For interactive terminal use the WS
+ * endpoint (future Phase 4 integration).
+ */
+router.post('/api/devices/:id/terminal/execute', requireAuth, requirePermission('device.edit'), async (req, res) => {
+    const command = String(req.body?.command || '').slice(0, 4096);
+    if (!command.trim()) {
+        return res.status(400).json({ success: false, error: 'command_required' });
+    }
+    // Audit this — terminal execution is a sensitive action.
+    try {
+        await db.logAction(req.session.userId, 'terminal.execute',
+            `Terminal command on ${req.params.id}: ${command.substring(0, 200)}`,
+            req.ip || null);
+    } catch (_) { /* audit failure should not block the command */ }
+    proxyAgentRequest(req, res, 'terminal.execute', { command }, 30000);
+});
+
+/**
+ * POST /api/devices/:id/rename
+ * Body: { display_name: 'Accounting PC 3' }
+ * Convenience alias for the display_name branch of PATCH /api/devices/:id.
+ */
+router.post('/api/devices/:id/rename', requireAuth, requirePermission('device.edit'), async (req, res) => {
+    try {
+        const displayName = String(req.body?.display_name || '').trim().slice(0, 200);
+        if (!displayName) {
+            return res.status(400).json({ success: false, error: 'display_name_required' });
+        }
+        const device = await serverBackend.getDeviceById(req.params.id);
+        if (!device) {
+            return res.status(404).json({ success: false, error: req.t('devices.not_found') });
+        }
+        const result = await serverBackend.updateDevice(req.params.id, { display_name: displayName });
+        await db.logAction(req.session.userId, 'device.rename',
+            `Device ${req.params.id} renamed to "${displayName}"`, req.ip || null);
+        res.json({ success: true, data: { changes: result?.changes ?? 1, display_name: displayName } });
+    } catch (err) {
+        console.error('Rename device error:', err);
+        res.status(500).json({ success: false, error: req.t('errors.server_error') });
+    }
+});
+
 module.exports = router;

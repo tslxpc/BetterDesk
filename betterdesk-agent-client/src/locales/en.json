@@ -5,6 +5,11 @@
     "help": "Help Request",
     "settings": "Settings"
   },
+  "admin_required": {
+    "title": "Administrator rights required",
+    "message": "This section can only be accessed when the agent runs with local administrator privileges.",
+    "hint": "Ask your IT administrator to launch the agent as Administrator, or right-click the installer and choose \"Run as administrator\"."
+  },
   "status": {
     "title": "Connection Status",
     "connected": "Connected",

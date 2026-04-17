@@ -190,6 +190,11 @@ const DeviceDetail = (function () {
             { id: 'overview',  icon: 'info',            label: _('device_detail.tab_overview') },
             { id: 'hardware',  icon: 'memory',          label: _('device_detail.tab_hardware') },
             { id: 'metrics',   icon: 'monitoring',      label: _('device_detail.tab_metrics') },
+            { id: 'services',  icon: 'settings_applications', label: _('device_detail.tab_services') },
+            { id: 'processes', icon: 'memory',          label: _('device_detail.tab_processes') },
+            { id: 'events',    icon: 'event_note',      label: _('device_detail.tab_events') },
+            { id: 'activity',  icon: 'insights',        label: _('device_detail.tab_activity') },
+            { id: 'files',     icon: 'folder_open',     label: _('device_detail.tab_files') },
             { id: 'tags',      icon: 'sell',             label: _('device_detail.tab_tags') },
             { id: 'actions',   icon: 'play_arrow',       label: _('device_detail.tab_actions') }
         ];
@@ -209,8 +214,32 @@ const DeviceDetail = (function () {
             ${_overviewPane()}
             ${_hardwarePane()}
             ${_metricsPane()}
+            ${_agentPane('services', 'settings_applications', 'tab_services')}
+            ${_agentPane('processes', 'memory', 'tab_processes')}
+            ${_agentPane('events', 'event_note', 'tab_events')}
+            ${_agentPane('activity', 'insights', 'tab_activity')}
+            ${_agentPane('files', 'folder_open', 'tab_files')}
             ${_tagsPane()}
             ${_actionsPane()}
+        </div>`;
+    }
+
+    // ── Live-agent tabs (lazy loaded) ────────────────────────────────────
+    //
+    // These panes are populated on first tab activation by `_loadAgentTab()`.
+    // Keeping them in separate functions would duplicate 200+ lines of
+    // boilerplate. Instead, each pane is a placeholder that shows an empty
+    // state and a "Load" button; real data is fetched when tab is shown.
+
+    function _agentPane(paneId, icon, labelKey) {
+        return `<div class="device-panel-tab-pane" data-pane="${paneId}">
+            <div class="device-panel-agent-pane" data-agent-pane="${paneId}">
+                <div class="device-panel-agent-empty">
+                    <span class="material-icons">${icon}</span>
+                    <div>${_('device_detail.' + labelKey)}</div>
+                    <div class="device-panel-agent-hint">${_('device_detail.agent_lazy_hint')}</div>
+                </div>
+            </div>
         </div>`;
     }
 
@@ -773,6 +802,253 @@ const DeviceDetail = (function () {
         panel.querySelectorAll('.device-panel-tab-pane').forEach(function (p) {
             p.classList.toggle('active', p.dataset.pane === tabId);
         });
+
+        // Lazy-load agent-backed tabs on first activation.
+        const AGENT_TABS = ['services', 'processes', 'events', 'activity', 'files'];
+        if (AGENT_TABS.indexOf(tabId) !== -1) {
+            _loadAgentTab(tabId);
+        }
+    }
+
+    // ── Agent-backed tabs ───────────────────────────────────────────────
+
+    // Track which tabs have been loaded so we don't refetch on every click.
+    const _agentTabLoaded = {};
+
+    async function _loadAgentTab(tabId) {
+        if (_agentTabLoaded[tabId]) return;
+        _agentTabLoaded[tabId] = true;
+
+        if (!device || !device.id) return;
+        const pane = overlayEl?.querySelector(`[data-agent-pane="${tabId}"]`);
+        if (!pane) return;
+
+        pane.innerHTML = `<div class="device-panel-agent-loading">
+            <span class="material-icons spinning">autorenew</span>
+            <div>${_('common.loading')}</div>
+        </div>`;
+
+        const endpointMap = {
+            services:  { method: 'GET',  url: `/api/devices/${encodeURIComponent(device.id)}/services`  },
+            processes: { method: 'GET',  url: `/api/devices/${encodeURIComponent(device.id)}/processes` },
+            events:    { method: 'GET',  url: `/api/devices/${encodeURIComponent(device.id)}/events?limit=200` },
+            activity:  { method: 'GET',  url: `/api/devices/${encodeURIComponent(device.id)}/activity`  },
+            files:     { method: 'POST', url: `/api/devices/${encodeURIComponent(device.id)}/files/browse`, body: { path: '/', show_hidden: false } }
+        };
+
+        const ep = endpointMap[tabId];
+        if (!ep) return;
+
+        try {
+            let resp;
+            if (ep.method === 'POST') {
+                resp = await Utils.api(ep.url, { method: 'POST', body: JSON.stringify(ep.body) });
+            } else {
+                resp = await Utils.api(ep.url);
+            }
+            const data = (resp && resp.data) || resp || null;
+            _renderAgentTab(tabId, data, pane);
+        } catch (err) {
+            _agentTabLoaded[tabId] = false; // allow retry
+            pane.innerHTML = _agentErrorHTML(err, tabId);
+        }
+    }
+
+    function _agentErrorHTML(err, tabId) {
+        const msg = err && err.message ? String(err.message) : 'unknown';
+        // Differentiate offline vs generic error for clearer UX.
+        const isOffline = msg.indexOf('503') !== -1 || msg.indexOf('offline') !== -1;
+        const isTimeout = msg.indexOf('504') !== -1 || msg.indexOf('timeout') !== -1;
+        const icon = isOffline ? 'cloud_off' : isTimeout ? 'hourglass_empty' : 'error_outline';
+        const title = isOffline
+            ? _('device_detail.agent_offline') || 'Agent is offline'
+            : isTimeout
+            ? _('device_detail.agent_timeout') || 'Agent did not respond in time'
+            : _('device_detail.agent_error') || 'Failed to load data from agent';
+        return `<div class="device-panel-agent-error">
+            <span class="material-icons">${icon}</span>
+            <div class="device-panel-agent-error-title">${title}</div>
+            <div class="device-panel-agent-error-hint">${Utils.escapeHtml(msg)}</div>
+            <button class="btn btn-secondary btn-sm" data-retry-tab="${tabId}">
+                <span class="material-icons">refresh</span>${_('actions.retry') || 'Retry'}
+            </button>
+        </div>`;
+    }
+
+    function _renderAgentTab(tabId, data, pane) {
+        if (tabId === 'services') {
+            pane.innerHTML = _renderServicesList(data);
+        } else if (tabId === 'processes') {
+            pane.innerHTML = _renderProcessList(data);
+        } else if (tabId === 'events') {
+            pane.innerHTML = _renderEventList(data);
+        } else if (tabId === 'activity') {
+            pane.innerHTML = _renderActivity(data);
+        } else if (tabId === 'files') {
+            pane.innerHTML = _renderFileBrowser(data, '/');
+            _attachFileBrowserEvents(pane);
+        }
+
+        // Generic retry button handler
+        pane.querySelector('[data-retry-tab]')?.addEventListener('click', function () {
+            const tid = this.dataset.retryTab;
+            _agentTabLoaded[tid] = false;
+            _loadAgentTab(tid);
+        });
+    }
+
+    function _renderServicesList(data) {
+        const services = Array.isArray(data?.services) ? data.services : Array.isArray(data) ? data : [];
+        if (!services.length) {
+            return `<div class="device-panel-agent-empty"><span class="material-icons">inbox</span><div>${_('common.no_data')}</div></div>`;
+        }
+        const rows = services.slice(0, 500).map(s => `
+            <tr>
+                <td>${Utils.escapeHtml(s.name || '')}</td>
+                <td>${Utils.escapeHtml(s.display_name || s.name || '')}</td>
+                <td><span class="badge ${s.status === 'running' ? 'badge-success' : 'badge-neutral'}">${Utils.escapeHtml(s.status || '-')}</span></td>
+                <td>${Utils.escapeHtml(s.start_type || '-')}</td>
+            </tr>`).join('');
+        return `<table class="device-panel-agent-table">
+            <thead><tr>
+                <th>${_('device_detail.service_name') || 'Name'}</th>
+                <th>${_('device_detail.service_display') || 'Display'}</th>
+                <th>${_('device_detail.service_status') || 'Status'}</th>
+                <th>${_('device_detail.service_start') || 'Start'}</th>
+            </tr></thead>
+            <tbody>${rows}</tbody>
+        </table>`;
+    }
+
+    function _renderProcessList(data) {
+        const procs = Array.isArray(data?.processes) ? data.processes : Array.isArray(data) ? data : [];
+        if (!procs.length) {
+            return `<div class="device-panel-agent-empty"><span class="material-icons">inbox</span><div>${_('common.no_data')}</div></div>`;
+        }
+        // Sort by CPU descending, show top 200
+        procs.sort((a, b) => (b.cpu || 0) - (a.cpu || 0));
+        const rows = procs.slice(0, 200).map(p => `
+            <tr>
+                <td>${Utils.escapeHtml(String(p.pid ?? '-'))}</td>
+                <td>${Utils.escapeHtml(p.name || '-')}</td>
+                <td>${Utils.escapeHtml(p.user || '-')}</td>
+                <td>${Number(p.cpu || 0).toFixed(1)}%</td>
+                <td>${Number(p.memory_mb || 0).toFixed(0)} MB</td>
+            </tr>`).join('');
+        return `<table class="device-panel-agent-table">
+            <thead><tr>
+                <th>PID</th>
+                <th>${_('device_detail.process_name') || 'Name'}</th>
+                <th>${_('device_detail.process_user') || 'User'}</th>
+                <th>CPU</th>
+                <th>${_('device_detail.process_memory') || 'Memory'}</th>
+            </tr></thead>
+            <tbody>${rows}</tbody>
+        </table>`;
+    }
+
+    function _renderEventList(data) {
+        const events = Array.isArray(data?.events) ? data.events : Array.isArray(data) ? data : [];
+        if (!events.length) {
+            return `<div class="device-panel-agent-empty"><span class="material-icons">inbox</span><div>${_('common.no_data')}</div></div>`;
+        }
+        const rows = events.slice(0, 500).map(e => {
+            const level = String(e.level || 'info').toLowerCase();
+            const levelClass = level === 'error' || level === 'critical' ? 'error'
+                : level === 'warning' || level === 'warn' ? 'warn' : 'info';
+            return `<div class="device-panel-event-row ${levelClass}">
+                <div class="device-panel-event-time">${Utils.escapeHtml(e.time || '')}</div>
+                <div class="device-panel-event-source">${Utils.escapeHtml(e.source || e.facility || '-')}</div>
+                <div class="device-panel-event-msg">${Utils.escapeHtml(e.message || '')}</div>
+            </div>`;
+        }).join('');
+        return `<div class="device-panel-event-list">${rows}</div>`;
+    }
+
+    function _renderActivity(data) {
+        const items = Array.isArray(data?.apps) ? data.apps : Array.isArray(data) ? data : [];
+        if (!items.length) {
+            return `<div class="device-panel-agent-empty"><span class="material-icons">inbox</span><div>${_('common.no_data')}</div></div>`;
+        }
+        // Sort by total seconds
+        items.sort((a, b) => (b.seconds || 0) - (a.seconds || 0));
+        const maxSec = Math.max(1, items[0].seconds || 1);
+        const rows = items.slice(0, 50).map(a => {
+            const pct = Math.min(100, ((a.seconds || 0) / maxSec) * 100);
+            const minutes = Math.floor((a.seconds || 0) / 60);
+            return `<div class="device-panel-activity-row">
+                <div class="device-panel-activity-name">${Utils.escapeHtml(a.name || a.app || '-')}</div>
+                <div class="device-panel-activity-bar">
+                    <div class="device-panel-activity-bar-fill" style="width:${pct.toFixed(1)}%"></div>
+                </div>
+                <div class="device-panel-activity-time">${minutes} min</div>
+            </div>`;
+        }).join('');
+        return `<div class="device-panel-activity-list">${rows}</div>`;
+    }
+
+    function _renderFileBrowser(data, currentPath) {
+        const entries = Array.isArray(data?.entries) ? data.entries : Array.isArray(data) ? data : [];
+        const path = data?.path || currentPath || '/';
+        const parent = data?.parent || null;
+        const rows = entries.slice(0, 1000).map(e => {
+            const icon = e.is_dir ? 'folder' : 'description';
+            const size = e.is_dir ? '' : _formatBytes(e.size || 0);
+            return `<div class="device-panel-file-row" data-is-dir="${e.is_dir ? '1' : '0'}" data-path="${Utils.escapeHtml(e.path || '')}">
+                <span class="material-icons">${icon}</span>
+                <div class="device-panel-file-name">${Utils.escapeHtml(e.name || '')}</div>
+                <div class="device-panel-file-size">${size}</div>
+            </div>`;
+        }).join('');
+        return `<div class="device-panel-file-browser">
+            <div class="device-panel-file-path">
+                ${parent ? `<button class="btn btn-secondary btn-sm" data-fb-up="${Utils.escapeHtml(parent)}">
+                    <span class="material-icons">arrow_upward</span>
+                </button>` : ''}
+                <span>${Utils.escapeHtml(path)}</span>
+            </div>
+            <div class="device-panel-file-list">${rows}</div>
+        </div>`;
+    }
+
+    function _attachFileBrowserEvents(pane) {
+        pane.querySelectorAll('[data-fb-up]').forEach(btn => {
+            btn.addEventListener('click', () => _browseFiles(btn.dataset.fbUp));
+        });
+        pane.querySelectorAll('.device-panel-file-row').forEach(row => {
+            row.addEventListener('dblclick', () => {
+                if (row.dataset.isDir === '1') _browseFiles(row.dataset.path);
+            });
+        });
+    }
+
+    async function _browseFiles(path) {
+        if (!device || !device.id) return;
+        const pane = overlayEl?.querySelector('[data-agent-pane="files"]');
+        if (!pane) return;
+        pane.innerHTML = `<div class="device-panel-agent-loading"><span class="material-icons spinning">autorenew</span><div>${_('common.loading')}</div></div>`;
+        try {
+            const resp = await Utils.api(`/api/devices/${encodeURIComponent(device.id)}/files/browse`, {
+                method: 'POST',
+                body: JSON.stringify({ path, show_hidden: false })
+            });
+            pane.innerHTML = _renderFileBrowser(resp?.data || resp, path);
+            _attachFileBrowserEvents(pane);
+        } catch (err) {
+            pane.innerHTML = _agentErrorHTML(err, 'files');
+            pane.querySelector('[data-retry-tab]')?.addEventListener('click', function () {
+                _agentTabLoaded['files'] = false;
+                _loadAgentTab('files');
+            });
+        }
+    }
+
+    function _formatBytes(n) {
+        if (!n) return '0 B';
+        const k = 1024;
+        const units = ['B', 'KB', 'MB', 'GB', 'TB'];
+        const i = Math.min(units.length - 1, Math.floor(Math.log(n) / Math.log(k)));
+        return (n / Math.pow(k, i)).toFixed(i === 0 ? 0 : 1) + ' ' + units[i];
     }
 
     // ── Tags ──

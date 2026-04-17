@@ -93,10 +93,69 @@ a:hover { color: var(--accent-hover); }
   height: 100%;
 }
 
+/* Tray-first layout — no sidebar, main pane fills the window. */
+.app-layout-tray {
+  display: block;
+}
+
 .app-main {
   flex: 1;
   overflow-y: auto;
   padding: 24px;
+}
+
+.app-main-full {
+  width: 100%;
+  height: 100%;
+  overflow-y: auto;
+  padding: 20px;
+}
+
+/* ── Admin-required gate ── */
+.admin-required {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  height: 100%;
+  padding: 32px 24px;
+  gap: 12px;
+}
+
+.admin-required-icon {
+  width: 72px;
+  height: 72px;
+  border-radius: 50%;
+  background: var(--bg-secondary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 8px;
+}
+
+.admin-required-icon .material-symbols-rounded {
+  font-size: 40px;
+  color: var(--accent, #5b8cff);
+}
+
+.admin-required h2 {
+  margin: 0;
+  font-size: 18px;
+  color: var(--text-primary);
+}
+
+.admin-required p {
+  margin: 0;
+  color: var(--text-secondary);
+  max-width: 340px;
+  line-height: 1.5;
+}
+
+.admin-required-hint {
+  font-size: 12px;
+  opacity: 0.75;
+  margin-top: 8px !important;
 }
 
 /* ── Sidebar ── */

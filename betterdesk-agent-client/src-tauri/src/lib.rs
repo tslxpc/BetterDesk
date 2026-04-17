@@ -8,6 +8,7 @@
 
 pub mod commands;
 pub mod config;
+pub mod privileges;
 pub mod registration;
 pub mod sysinfo_collect;
 
@@ -59,6 +60,7 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             // Status & lifecycle
+            commands::is_os_admin,
             commands::get_agent_status,
             commands::reconnect_agent,
             commands::send_diagnostics,
@@ -107,41 +109,99 @@ pub fn run() {
         .expect("Failed to start BetterDesk Agent");
 }
 
-/// Minimal system tray setup.
+/// System tray setup.
+///
+/// Menu layout:
+/// - User items (always visible):    Show ID, Help request, Chat, Check connection
+/// - Admin-gated items (OS admin):   Settings, Quit agent
+///
+/// Admin detection is cached at setup time. If privilege status changes
+/// (user elevates mid-session), restart the agent.
 fn setup_tray(app: &tauri::AppHandle) -> Result<(), Box<dyn std::error::Error>> {
-    use tauri::menu::{MenuBuilder, MenuItemBuilder};
+    use tauri::menu::{MenuBuilder, MenuItemBuilder, PredefinedMenuItem};
     use tauri::tray::TrayIconBuilder;
 
-    let show = MenuItemBuilder::with_id("show", "Show").build(app)?;
-    let quit = MenuItemBuilder::with_id("quit", "Quit").build(app)?;
+    let is_admin = privileges::is_os_admin();
+    info!("Tray setup — OS admin: {}", is_admin);
 
-    let menu = MenuBuilder::new(app).item(&show).separator().item(&quit).build()?;
+    // Always-visible (user) items.
+    let show_id = MenuItemBuilder::with_id("show_id", "Show device ID").build(app)?;
+    let help = MenuItemBuilder::with_id("help_request", "Request help").build(app)?;
+    let chat = MenuItemBuilder::with_id("chat", "Chat").build(app)?;
+    let check = MenuItemBuilder::with_id("check_conn", "Check connection").build(app)?;
+
+    let mut builder = MenuBuilder::new(app)
+        .item(&show_id)
+        .item(&help)
+        .item(&chat)
+        .item(&check);
+
+    // Admin-only items.
+    if is_admin {
+        let sep = PredefinedMenuItem::separator(app)?;
+        let settings = MenuItemBuilder::with_id("settings", "Settings").build(app)?;
+        let quit = MenuItemBuilder::with_id("quit", "Quit agent").build(app)?;
+        builder = builder.item(&sep).item(&settings).item(&quit);
+    }
+
+    let menu = builder.build()?;
 
     let _tray = TrayIconBuilder::new()
         .menu(&menu)
-        .tooltip("BetterDesk Agent")
-        .on_menu_event(move |app, event| match event.id().as_ref() {
-            "show" => {
-                if let Some(window) = app.get_webview_window("main") {
-                    let _ = window.show();
-                    let _ = window.set_focus();
+        .tooltip(if is_admin {
+            "BetterDesk Agent (admin)"
+        } else {
+            "BetterDesk Agent"
+        })
+        .on_menu_event(move |app, event| {
+            let id = event.id().as_ref();
+            match id {
+                "show_id" => show_window(app, "/"),
+                "help_request" => show_window(app, "/help"),
+                "chat" => show_window(app, "/chat"),
+                "check_conn" => show_window(app, "/?action=reconnect"),
+                // Admin-gated. Re-check privilege before executing to guard
+                // against tampered menu IDs (double-safety).
+                "settings" => {
+                    if privileges::is_os_admin() {
+                        show_window(app, "/settings");
+                    } else {
+                        info!("Settings requested but not admin — ignoring");
+                    }
                 }
+                "quit" => {
+                    if privileges::is_os_admin() {
+                        info!("Quit requested from tray (admin confirmed)");
+                        app.exit(0);
+                    } else {
+                        info!("Quit requested but not admin — ignoring");
+                    }
+                }
+                _ => {}
             }
-            "quit" => {
-                info!("Quit requested from tray");
-                app.exit(0);
-            }
-            _ => {}
         })
         .on_tray_icon_event(|tray, event| {
             if let tauri::tray::TrayIconEvent::DoubleClick { .. } = event {
-                if let Some(window) = tray.app_handle().get_webview_window("main") {
-                    let _ = window.show();
-                    let _ = window.set_focus();
-                }
+                show_window(tray.app_handle(), "/");
             }
         })
         .build(app)?;
 
     Ok(())
+}
+
+/// Bring the main window to front and navigate to a given route.
+///
+/// The route is emitted as a `navigate` event; the SolidJS router listens
+/// and performs client-side navigation. Falls back to showing the window
+/// even if navigation fails (e.g. frontend not ready).
+fn show_window(app: &tauri::AppHandle, route: &str) {
+    use tauri::Emitter;
+
+    if let Some(window) = app.get_webview_window("main") {
+        let _ = window.show();
+        let _ = window.unminimize();
+        let _ = window.set_focus();
+        let _ = app.emit("navigate", route.to_string());
+    }
 }
