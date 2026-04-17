@@ -248,6 +248,8 @@ function createSqliteAdapter(config) {
                 ip_address TEXT,
                 created_at TEXT DEFAULT (datetime('now'))
             );
+            CREATE INDEX IF NOT EXISTS idx_audit_log_created ON audit_log (created_at);
+            CREATE INDEX IF NOT EXISTS idx_audit_log_action ON audit_log (action, created_at);
             CREATE TABLE IF NOT EXISTS access_tokens (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 token TEXT UNIQUE NOT NULL,
@@ -1243,6 +1245,11 @@ function createSqliteAdapter(config) {
                 LEFT JOIN users u ON a.user_id = u.id
                 ORDER BY a.created_at DESC LIMIT ? OFFSET ?
             `).all(limit, offset);
+        },
+        async cleanupOldAuditLogs(daysToKeep = 90) {
+            const cutoff = new Date(Date.now() - daysToKeep * 24 * 60 * 60 * 1000).toISOString();
+            const result = openAuth().prepare('DELETE FROM audit_log WHERE created_at < ?').run(cutoff);
+            return result.changes || 0;
         },
 
         // ---- Settings ----
@@ -2534,6 +2541,8 @@ function createPostgresAdapter() {
                 created_at TIMESTAMPTZ DEFAULT NOW()
             )
         `);
+        await q('CREATE INDEX IF NOT EXISTS idx_audit_log_created ON audit_log (created_at)');
+        await q('CREATE INDEX IF NOT EXISTS idx_audit_log_action ON audit_log (action, created_at)');
 
         await q(`
             CREATE TABLE IF NOT EXISTS access_tokens (
@@ -3478,6 +3487,11 @@ function createPostgresAdapter() {
         },
         async getAuditLogs(limit = 100, offset = 0) {
             return all(`SELECT a.*, u.username FROM audit_log a LEFT JOIN users u ON a.user_id = u.id ORDER BY a.created_at DESC LIMIT $1 OFFSET $2`, [limit, offset]);
+        },
+        async cleanupOldAuditLogs(daysToKeep = 90) {
+            const cutoff = new Date(Date.now() - daysToKeep * 24 * 60 * 60 * 1000).toISOString();
+            const result = await q('DELETE FROM audit_log WHERE created_at < $1', [cutoff]);
+            return result.rowCount || 0;
         },
 
         // ---- Settings ----

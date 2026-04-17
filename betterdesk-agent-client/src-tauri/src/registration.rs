@@ -196,7 +196,7 @@ pub async fn register(config: &mut AgentConfig) -> Result<String> {
         let mut hasher = Sha256::new();
         hasher.update(device_uid.as_bytes());
         let result = hasher.finalize();
-        format!("BD-{}", hex_encode(&result[..4]).to_uppercase())
+        format!("BD-{}", hex_encode(&result[..8]).to_uppercase())
     };
 
     let payload = serde_json::json!({

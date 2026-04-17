@@ -677,6 +677,20 @@ func (s *Server) handleCDAPVideo(w http.ResponseWriter, r *http.Request) {
 	username := getUsernameFromCtx(r)
 	role := getRoleFromCtx(r)
 
+	// RBAC: operator+ can access video streams (must check BEFORE WS upgrade)
+	effectiveRole := role
+	if s.cdapGw.Delegations() != nil {
+		if delegated := s.cdapGw.Delegations().GetEffectiveRole(username, id, "video"); delegated != "" {
+			if cdap.RoleLevel(delegated) > cdap.RoleLevel(effectiveRole) {
+				effectiveRole = delegated
+			}
+		}
+	}
+	if cdap.RoleLevel(effectiveRole) < cdap.RoleLevel("operator") {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "Video access requires operator role"})
+		return
+	}
+
 	wsConn, err := websocket.Accept(w, r, &websocket.AcceptOptions{
 		Subprotocols: []string{"cdap-video"},
 	})

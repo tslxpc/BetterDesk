@@ -391,7 +391,7 @@ func scanPeer(row pgx.Row) (*Peer, error) {
 // GetPeer returns a peer by ID, or nil if not found.
 func (pg *PostgresDB) GetPeer(id string) (*Peer, error) {
 	row := pg.pool.QueryRow(pg.ctx,
-		`SELECT `+peerColumns+` FROM peers WHERE id = $1`, id)
+		`SELECT `+peerColumns+` FROM peers WHERE id = $1 AND (soft_deleted IS NULL OR soft_deleted = false)`, id)
 	p, err := scanPeer(row)
 	if err == pgx.ErrNoRows {
 		return nil, nil

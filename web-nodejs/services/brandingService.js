@@ -175,8 +175,13 @@ async function saveBranding(updates) {
         } else if (key in DEFAULT_BRANDING) {
             // Security: Sanitize SVG content to prevent XSS
             if (key === 'logoSvg' || key === 'faviconSvg') {
-                entries.push({ key, value: sanitizeSvg(String(value)) });
-            } else {
+                entries.push({ key, value: sanitizeSvg(String(value)) });            } else if (key === 'logoUrl' || key === 'faviconUrl') {
+                // Security: Validate URL scheme to prevent javascript: / data: XSS
+                const url = String(value).trim();
+                if (url && !/^(https?:\/\/|\/)/i.test(url)) {
+                    continue; // skip dangerous URL schemes
+                }
+                entries.push({ key, value: url });            } else {
                 entries.push({ key, value: String(value) });
             }
         }

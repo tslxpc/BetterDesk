@@ -382,7 +382,7 @@ func (s *SQLiteDB) GetPeer(id string) (*Peer, error) {
 		       disabled, banned, ban_reason, banned_at,
 		       soft_deleted, deleted_at, note, tags, heartbeat_seq,
 		       device_type, linked_peer_id, display_name
-		FROM peers WHERE id = ?`, id).Scan(
+		FROM peers WHERE id = ? AND (soft_deleted IS NULL OR soft_deleted = 0)`, id).Scan(
 		&p.ID, &p.UUID, &p.PK, &p.IP, &p.User, &p.Hostname,
 		&p.OS, &p.Version, &p.Status, &p.NATType,
 		&lastOnline, &createdAt, &p.Disabled, &p.Banned,

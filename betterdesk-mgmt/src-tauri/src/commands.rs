@@ -215,6 +215,13 @@ pub async fn connect_to_peer(
     peer_id: String,
     server_url: Option<String>,
 ) -> Result<ConnectionStatus, String> {
+    // Security: validate peer_id format to prevent injection
+    if peer_id.is_empty() || peer_id.len() > 64
+        || !peer_id.chars().all(|c| c.is_alphanumeric() || c == '-' || c == '_')
+    {
+        return Err("Invalid peer_id format".to_string());
+    }
+
     let settings = {
         let s = state.settings.lock().map_err(|e| e.to_string())?;
         s.clone()

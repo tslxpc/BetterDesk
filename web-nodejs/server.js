@@ -422,6 +422,14 @@ async function startServer() {
             } catch (err) {
                 // Silent fail — don't crash the server for housekeeping
             }
+            // Clean up old audit_log entries (>90 days)
+            try {
+                if (typeof db.cleanupOldAuditLogs === 'function') {
+                    await db.cleanupOldAuditLogs(90);
+                }
+            } catch (err) {
+                // Silent fail
+            }
         }, 60 * 60 * 1000); // Every hour
         
         // ============ Periodic Online Status Sync ============
