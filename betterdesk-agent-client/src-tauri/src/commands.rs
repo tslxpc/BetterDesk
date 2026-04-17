@@ -80,11 +80,7 @@ pub async fn reconnect_agent(state: State<'_, AgentState>) -> Result<String, Str
         (config.server_address.clone(), config.device_id.clone())
     };
 
-    let client = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(10))
-        .danger_accept_invalid_certs(true)
-        .build()
-        .map_err(|e| e.to_string())?;
+    let client = crate::registration::build_http_client(10).map_err(|e| e.to_string())?;
 
     let url = format_api_url(&address, "/heartbeat");
     let payload = serde_json::json!({ "id": device_id });
@@ -123,11 +119,7 @@ pub async fn send_diagnostics(state: State<'_, AgentState>) -> Result<String, St
         "disk": format!("{} MB", sysinfo.total_disk_mb),
     });
 
-    let client = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(10))
-        .danger_accept_invalid_certs(true)
-        .build()
-        .map_err(|e| e.to_string())?;
+    let client = crate::registration::build_http_client(10).map_err(|e| e.to_string())?;
 
     let url = format_api_url(&address, "/sysinfo");
 
@@ -303,11 +295,7 @@ pub async fn request_help(
         "timestamp": chrono::Utc::now().to_rfc3339(),
     });
 
-    let client = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(10))
-        .danger_accept_invalid_certs(true)
-        .build()
-        .map_err(|e| e.to_string())?;
+    let client = crate::registration::build_http_client(10).map_err(|e| e.to_string())?;
 
     let url = format_api_url(&address, "/bd/help-request");
 
@@ -341,11 +329,7 @@ pub async fn cancel_help_request(state: State<'_, AgentState>) -> Result<(), Str
         "action": "cancel",
     });
 
-    let client = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(10))
-        .danger_accept_invalid_certs(true)
-        .build()
-        .map_err(|e| e.to_string())?;
+    let client = crate::registration::build_http_client(10).map_err(|e| e.to_string())?;
 
     let url = format_api_url(&address, "/bd/help-request");
 

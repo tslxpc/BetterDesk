@@ -31,6 +31,38 @@ pub struct ActivityEntry {
     pub details: String,
 }
 
+/// MGMT-C3: central flag for TLS hardening. Defaults to allow self-signed certs
+/// (preserves backwards compatibility with existing BetterDesk deployments).
+/// Set `BETTERDESK_STRICT_TLS=1` to enforce strict certificate validation.
+fn strict_tls_enabled() -> bool {
+    matches!(
+        std::env::var("BETTERDESK_STRICT_TLS").as_deref(),
+        Ok("1") | Ok("true") | Ok("TRUE") | Ok("yes") | Ok("YES")
+    )
+}
+
+fn warn_self_signed_once() {
+    use std::sync::atomic::{AtomicBool, Ordering};
+    static WARNED: AtomicBool = AtomicBool::new(false);
+    if !WARNED.swap(true, Ordering::SeqCst) {
+        eprintln!(
+            "[BetterDesk] WARNING: TLS certificate validation is DISABLED for \
+             server probing/login. This is insecure against MITM. Set \
+             BETTERDESK_STRICT_TLS=1 once the server has a proper certificate."
+        );
+    }
+}
+
+/// Build a reqwest client honouring the BETTERDESK_STRICT_TLS gate.
+fn build_http_client(timeout_secs: u64) -> Result<reqwest::Client, reqwest::Error> {
+    let mut b = reqwest::Client::builder().timeout(std::time::Duration::from_secs(timeout_secs));
+    if !strict_tls_enabled() {
+        warn_self_signed_once();
+        b = b.danger_accept_invalid_certs(true);
+    }
+    b.build()
+}
+
 /// Simple in-memory activity log tracker.
 pub struct ActivityTracker {
     entries: Vec<ActivityEntry>,
@@ -853,11 +885,7 @@ pub async fn auto_connect_server(
         host
     };
 
-    let client = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(6))
-        .danger_accept_invalid_certs(true)
-        .build()
-        .map_err(|e| e.to_string())?;
+    let client = build_http_client(6).map_err(|e| e.to_string())?;
 
     let mut steps: Vec<serde_json::Value> = Vec::new();
     let mut server_key = String::new();
@@ -1104,11 +1132,7 @@ pub async fn org_login(
     username: String,
     password: String,
 ) -> Result<serde_json::Value, String> {
-    let client = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(10))
-        .danger_accept_invalid_certs(true)
-        .build()
-        .map_err(|e| e.to_string())?;
+    let client = build_http_client(10).map_err(|e| e.to_string())?;
 
     let url = format!("{}/api/org/login", server_url.trim_end_matches('/'));
     let body = serde_json::json!({

@@ -321,11 +321,16 @@ async fn collector_loop(
     status_tx: watch::Sender<InventoryStatus>,
     mut cancel_rx: watch::Receiver<bool>,
 ) {
-    let client = reqwest::Client::builder()
-        .timeout(HTTP_TIMEOUT)
-        .danger_accept_invalid_certs(true)
-        .build()
-        .expect("Failed to create HTTP client");
+    // MGMT-C3: gate self-signed cert acceptance behind BETTERDESK_STRICT_TLS env var.
+    let strict_tls = matches!(
+        std::env::var("BETTERDESK_STRICT_TLS").as_deref(),
+        Ok("1") | Ok("true") | Ok("TRUE") | Ok("yes") | Ok("YES")
+    );
+    let mut cb = reqwest::Client::builder().timeout(HTTP_TIMEOUT);
+    if !strict_tls {
+        cb = cb.danger_accept_invalid_certs(true);
+    }
+    let client = cb.build().expect("Failed to create HTTP client");
 
     let _mode_str = format!("{:?}", mode);
     let mul = mode.phase_delay_multiplier();

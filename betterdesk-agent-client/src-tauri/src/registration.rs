@@ -1,12 +1,45 @@
 use anyhow::{anyhow, Result};
-use log::info;
+use log::{info, warn};
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 use url::Url;
 
 use crate::config::AgentConfig;
 use crate::sysinfo_collect::SystemSnapshot;
+
+/// AGENT-C1: central flag for TLS hardening. Defaults to allow self-signed (preserves
+/// backwards compatibility with existing deployments). Set `BETTERDESK_STRICT_TLS=1`
+/// to enforce strict certificate validation (recommended for production).
+fn strict_tls_enabled() -> bool {
+    matches!(
+        std::env::var("BETTERDESK_STRICT_TLS").as_deref(),
+        Ok("1") | Ok("true") | Ok("TRUE") | Ok("yes") | Ok("YES")
+    )
+}
+
+/// Emit a single warning per process when self-signed certs are accepted.
+fn warn_self_signed_once() {
+    static WARNED: AtomicBool = AtomicBool::new(false);
+    if !WARNED.swap(true, Ordering::SeqCst) {
+        warn!(
+            "TLS certificate validation is DISABLED for BetterDesk API calls. \
+             This is insecure against MITM. Set BETTERDESK_STRICT_TLS=1 to enforce \
+             strict validation once the server has a proper certificate."
+        );
+    }
+}
+
+/// Build a reqwest client honouring the BETTERDESK_STRICT_TLS gate.
+pub(crate) fn build_http_client(timeout_secs: u64) -> Result<Client> {
+    let mut builder = Client::builder().timeout(Duration::from_secs(timeout_secs));
+    if !strict_tls_enabled() {
+        warn_self_signed_once();
+        builder = builder.danger_accept_invalid_certs(true);
+    }
+    builder.build().map_err(Into::into)
+}
 
 /// Result of a single validation step.
 #[derive(Debug, Clone, Serialize)]
@@ -82,10 +115,7 @@ async fn check_availability(address: &str) -> Result<String> {
     let api_url = build_api_url(address)?;
     let url = format!("{}/server/stats", api_url);
 
-    let client = Client::builder()
-        .timeout(Duration::from_secs(8))
-        .danger_accept_invalid_certs(true)
-        .build()?;
+    let client = build_http_client(8)?;
 
     let resp = client.get(&url).send().await.map_err(|e| {
         anyhow!("Cannot reach server at {}: {}", address, e)
@@ -103,10 +133,7 @@ async fn check_protocol(address: &str) -> Result<String> {
     let api_url = build_api_url(address)?;
     let url = format!("{}/server/stats", api_url);
 
-    let client = Client::builder()
-        .timeout(Duration::from_secs(8))
-        .danger_accept_invalid_certs(true)
-        .build()?;
+    let client = build_http_client(8)?;
 
     let resp = client.get(&url).send().await?;
     let body: serde_json::Value = resp.json().await.map_err(|_| {
@@ -126,10 +153,7 @@ async fn check_registration_open(address: &str) -> Result<String> {
     let api_url = build_api_url(address)?;
     let url = format!("{}/login-options", api_url);
 
-    let client = Client::builder()
-        .timeout(Duration::from_secs(8))
-        .danger_accept_invalid_certs(true)
-        .build()?;
+    let client = build_http_client(8)?;
 
     let resp = client.get(&url).send().await;
 
@@ -209,10 +233,7 @@ pub async fn register(config: &mut AgentConfig) -> Result<String> {
         "device_type": "agent_client",
     });
 
-    let client = Client::builder()
-        .timeout(Duration::from_secs(15))
-        .danger_accept_invalid_certs(true)
-        .build()?;
+    let client = build_http_client(15)?;
 
     let resp = client.post(&url).json(&payload).send().await?;
 
@@ -248,10 +269,7 @@ pub async fn sync_config(config: &AgentConfig) -> Result<()> {
         "memory": format!("{} MB", sysinfo.total_memory_mb),
     });
 
-    let client = Client::builder()
-        .timeout(Duration::from_secs(10))
-        .danger_accept_invalid_certs(true)
-        .build()?;
+    let client = build_http_client(10)?;
 
     let resp = client.post(&url).json(&payload).send().await?;
 

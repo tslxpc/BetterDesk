@@ -566,12 +566,37 @@ Poniższe znaleziska zostały zweryfikowane i naprawione w kodzie. Znaleziska oz
 | ID | Powód odrzucenia |
 |----|-----------------|
 | **GO-C2** | JWT secret **jest już** persystowany w tabeli `server_config` bazy danych (`main.go:145-165`). Przetrwa restarty. |
+| **GO-C3** | `tcpPunchConns sync.Map` **jest czyszczony** przez goroutine z 2-minutowym tickerem + TTL + limit 10 000 wpisów (`signal/handler.go`). Zabezpieczenie DDoS obecne. |
 | **GO-C4** | Admin TCP console **już bind na `127.0.0.1`** (`admin/server.go:69`). Brak ekspozycji sieciowej. |
-| **GO-H1** | Bcrypt error **nie jest ujawniany** klientowi — zwracany jest generyczny `"failed to hash password"` (`api/server.go:1478`). |
+| **GO-H1** | Bcrypt error **nie jest ujawniany** klientowi — zwracany jest generyczny `"failed to hash password"` (`api/server.go:1478`). Login zwraca `"Invalid credentials"` dla zarówno nieistniejącego usera jak i błędnego hasła. |
+| **GO-H2** | Trust proxy jest **opcjonalny i gated** przez `TrustProxy` w config (`api/server.go:1095-1115`). Domyślnie false — nagłówki `X-Forwarded-For` są ignorowane. |
+| **GO-H3** | Token 2FA jako query param **został już usunięty** (patrz BD-2026-005) — obecnie wyłącznie nagłówek `X-2FA-Token`. |
 | **GO-L2** | Peer ID jest walidowany regexpem `peerIDRegexp` **przed** logowaniem. Socket addrs to `net.UDPAddr` structs — bezpieczne. |
 | **NODE-M1** | `escapeLikePattern()` **jest już zaimplementowany** i stosowany we wszystkich zapytaniach LIKE (`dbAdapter.js:71-75`). |
 | **NODE-H2** | Sanityzacja SVG **jest kompletna** — 4 regex patterns blokujące script, foreignobject, event handlers, javascript: URLs (`brandingService.js:10-38`). |
+| **NATIVE-C1** | Native agent deklaruje 5 capabilities (telemetry, commands, remote_desktop, file_transfer, clipboard) — **nie 8**, jak raport pierwotnie sugerował. Wszystkie są obsłużone w `messageLoop` / `manifest.go`. |
 | **NATIVE-H2** | Systemd hardening **jest już obecny** — `ProtectSystem=strict`, `PrivateTmp=true`, `NoNewPrivileges=true`, `ProtectHome=read-only` (`install/install.sh:150-155`). |
+| **ARCH-C3** | Relay ma rate-limiting: `connLimiter.Allow(host)` **jest wywoływany** w `relay/server.go:142-147` dla każdej nowej sesji TCP. |
+
+---
+
+## 10. Status napraw — Runda 2 (2026-04-17)
+
+Druga runda weryfikacji + napraw, uruchomiona po audycie §9. Zidentyfikowała kolejne rzeczywiste luki (nie false positives z pierwotnego raportu).
+
+### Naprawione (Runda 2)
+
+| ID | Moduł | Opis naprawy | Plik |
+|----|-------|-------------|------|
+| **GO-H6** | Go Server | `LOG_FORMAT` z env var **jest teraz walidowany** whitelistą `{"text", "json"}`. Nieprawidłowe wartości są ignorowane (silnie default `"text"`). Zapobiega log injection / config poisoning. | `config/config.go` |
+| **NATIVE-H1** | Native Agent | Native CDAP agent **ostrzega w logu**, gdy serwer używa `ws://` (plaintext) z hostem innym niż `localhost`/`127.0.0.1`/`::1`. Wymusza świadome użytkowanie plaintext w trybie prod. | `agent/config.go` |
+| **MGMT-C3** + **AGENT-C1** | MGMT / Agent Client | Refaktor 11 inline `Client::builder().danger_accept_invalid_certs(true)` do helperów `build_http_client()` z gate env var `BETTERDESK_STRICT_TLS`. Domyślnie zachowana kompatybilność (self-signed akceptowane), ale **jednorazowe ostrzeżenie w logu** + możliwość wymuszenia strict TLS przez `BETTERDESK_STRICT_TLS=1`. | `betterdesk-agent-client/src-tauri/src/{registration.rs,commands.rs}`, `betterdesk-mgmt/src-tauri/src/{commands.rs,inventory/collector.rs,network/bd_registration.rs}` |
+
+### Odłożone (runda 3)
+
+| ID | Powód odłożenia |
+|----|-----------------|
+| **GO-H5** | Kolumna `totp_recovery_codes` istnieje w schemacie ale nie jest nigdzie czytana/zapisywana. **Nie stanowi vulnerability** — TOTP działa poprawnie bez kodów awaryjnych (brak broken behaviour). Pełna implementacja wymaga: pole w `db.User`, generator w `auth/totp.go`, aktualizacji 4+ Scan/INSERT/UPDATE queries, zmiany flow login (weryfikacja + invalidacja kodu). To jest **feature addition**, nie security fix — odłożone do dedykowanego tasku. |
 
 ---
 

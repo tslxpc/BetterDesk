@@ -168,7 +168,11 @@ func (c *Config) LoadEnv() {
 		c.TLSKeyFile = v
 	}
 	if v := os.Getenv("LOG_FORMAT"); v != "" {
-		c.LogFormat = strings.ToLower(v)
+		// GO-H6: validate against whitelist to prevent silent misconfiguration
+		lv := strings.ToLower(v)
+		if lv == "text" || lv == "json" {
+			c.LogFormat = lv
+		}
 	}
 	if v := os.Getenv("ADMIN_PORT"); v != "" {
 		if n, err := strconv.Atoi(v); err == nil {

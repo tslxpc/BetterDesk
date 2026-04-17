@@ -3,6 +3,7 @@ package agent
 import (
 	"encoding/json"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -122,6 +123,18 @@ func (c *Config) Validate() error {
 	}
 	if !strings.HasPrefix(c.Server, "ws://") && !strings.HasPrefix(c.Server, "wss://") {
 		return fmt.Errorf("server URL must start with ws:// or wss://")
+	}
+	// NATIVE-H1: warn when using plaintext ws:// against non-local hosts. API key
+	// and terminal/file payloads would be transmitted unencrypted.
+	if strings.HasPrefix(c.Server, "ws://") {
+		host := strings.TrimPrefix(c.Server, "ws://")
+		if i := strings.IndexAny(host, "/:"); i >= 0 {
+			host = host[:i]
+		}
+		isLocal := host == "localhost" || host == "127.0.0.1" || host == "::1"
+		if !isLocal {
+			log.Printf("WARNING: server URL uses plaintext ws:// (%s). API key and CDAP payloads will be transmitted unencrypted. Use wss:// in production.", c.Server)
+		}
 	}
 	switch c.AuthMethod {
 	case "api_key":
