@@ -24,11 +24,17 @@ const SetupWizard: Component<SetupProps> = (props) => {
   const [syncError, setSyncError] = createSignal("");
 
   const validateAddress = (): boolean => {
-    const addr = address().trim();
+    let addr = address().trim();
     if (!addr) {
       setAddressError(t("setup.error_empty"));
       return false;
     }
+    // Strip scheme if user typed it — backend auto-detects HTTPS/HTTP.
+    addr = addr.replace(/^https?:\/\//, "");
+    // Remove trailing slash.
+    addr = addr.replace(/\/+$/, "");
+    setAddress(addr);
+
     // Basic format check: hostname, IP, or hostname:port
     const pattern = /^[a-zA-Z0-9][a-zA-Z0-9._-]*(:\d{1,5})?$/;
     if (!pattern.test(addr)) {

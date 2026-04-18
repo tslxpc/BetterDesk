@@ -541,7 +541,8 @@
                 break;
 
             case 'remote-viewer':
-                window.open(`/remote-desktop/${encodeURIComponent(deviceId)}`, '_blank');
+                // Legacy action: route through the unified web remote client.
+                _tryAddRemoteTab(deviceId, data);
                 break;
 
             case 'details':

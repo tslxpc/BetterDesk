@@ -62,8 +62,16 @@ pub fn is_os_admin() -> bool {
 
 #[tauri::command]
 pub fn get_agent_status(state: State<'_, AgentState>) -> Result<AgentStatus, String> {
+    // Fast path: only touch cached config. Avoid `SystemSnapshot::collect()`
+    // here — it enumerates processes/disks/networks and can take several
+    // seconds on Windows, which made the frontend spinner hang indefinitely.
+    // Use `get_system_info` separately for slow telemetry.
     let config = state.config.lock().map_err(|e| e.to_string())?;
-    let sysinfo = SystemSnapshot::collect();
+
+    // Cheap hostname lookup (single syscall) — still useful for the header.
+    let hostname = hostname::get()
+        .map(|h| h.to_string_lossy().to_string())
+        .unwrap_or_else(|_| "unknown".to_string());
 
     Ok(AgentStatus {
         registered: config.is_registered(),
@@ -71,12 +79,36 @@ pub fn get_agent_status(state: State<'_, AgentState>) -> Result<AgentStatus, Str
         device_id: config.device_id.clone(),
         device_name: config.device_name.clone(),
         server_address: config.server_address.clone(),
-        hostname: sysinfo.hostname,
-        platform: format!("{} {} ({})", sysinfo.os, sysinfo.os_version, sysinfo.arch),
+        hostname,
+        platform: format!(
+            "{} ({})",
+            std::env::consts::OS,
+            std::env::consts::ARCH
+        ),
         version: env!("CARGO_PKG_VERSION").to_string(),
-        uptime: format_uptime(),
+        uptime: String::new(), // filled by `get_system_info` on demand
         last_sync: chrono::Utc::now().format("%Y-%m-%d %H:%M:%S UTC").to_string(),
     })
+}
+
+/// Slow system telemetry — hostname, full OS version, CPU brand, RAM/disk totals,
+/// uptime. Split from `get_agent_status` so the startup path stays fast.
+#[tauri::command]
+pub fn get_system_info() -> Result<serde_json::Value, String> {
+    let snap = SystemSnapshot::collect();
+    Ok(serde_json::json!({
+        "hostname": snap.hostname,
+        "os": snap.os,
+        "os_version": snap.os_version,
+        "arch": snap.arch,
+        "cpu_name": snap.cpu_name,
+        "cpu_cores": snap.cpu_cores,
+        "total_memory_mb": snap.total_memory_mb,
+        "total_disk_mb": snap.total_disk_mb,
+        "username": snap.username,
+        "uptime": format_uptime(),
+        "platform": format!("{} {} ({})", snap.os, snap.os_version, snap.arch),
+    }))
 }
 
 #[tauri::command]

@@ -87,6 +87,7 @@
     "cancel": "取消請求",
     "active_title": "協助工作階段進行中",
     "active_message": "操作員目前已連線到您的裝置。",
+    "end_session": "結束工作階段",
     "error": "傳送協助請求失敗"
   },
   "settings": {

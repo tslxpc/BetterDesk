@@ -104,7 +104,11 @@
     function createTab(deviceId, deviceName) {
         const tab = document.createElement('div');
         tab.className = 'session-tab';
-        tab.dataset.sessionId = CSS.escape(deviceId);
+        // Store RAW device ID in dataset — findTab() applies CSS.escape() once
+        // when building the selector. Storing the escaped value caused a
+        // double-escape for IDs that needed escaping (digits-first, symbols)
+        // and `tab.remove()` silently failed.
+        tab.dataset.sessionId = deviceId;
 
         const dot = document.createElement('span');
         dot.className = 'session-tab-dot';
@@ -186,13 +190,15 @@
             if (isInsecure) showHttpWarningBanner();
         }
 
-        // Create RDClient
+        // Create RDClient — start conservative; AdaptiveQuality promotes when the
+        // pipeline proves it can keep up (prevents 3–7 FPS stalls on weaker CPUs/JMuxer).
         session.client = new RDClient(session.canvas, {
             deviceId: deviceId,
             serverPubKey: window.BetterDesk.serverPubKey || '',
             scaleMode: 'fit',
-            fps: 60,
-            imageQuality: 'Best',
+            fps: 30,
+            imageQuality: 'Balanced',
+            adaptiveQuality: true,
             disableAudio: false
         });
 
@@ -238,14 +244,19 @@
 
     function closeSession(deviceId) {
         const session = sessions.get(deviceId);
-        if (!session) return;
-
-        if (session.client) session.client.disconnect();
-        if (session.mediaRecorder && session.mediaRecorder.state === 'recording') {
-            session.mediaRecorder.stop();
+        if (!session) {
+            // Session already cleaned up but stale tab still around — remove it.
+            const tab = findTab(deviceId);
+            if (tab) tab.remove();
+            return;
         }
 
-        session.panel.remove();
+        try { if (session.client) session.client.disconnect(); } catch { /* ignore */ }
+        if (session.mediaRecorder && session.mediaRecorder.state === 'recording') {
+            try { session.mediaRecorder.stop(); } catch { /* ignore */ }
+        }
+
+        if (session.panel) session.panel.remove();
         const tab = findTab(deviceId);
         if (tab) tab.remove();
         sessions.delete(deviceId);
@@ -273,8 +284,9 @@
             deviceId: session.deviceId,
             serverPubKey: window.BetterDesk.serverPubKey || '',
             scaleMode: 'fit',
-            fps: 60,
-            imageQuality: 'Best',
+            fps: 30,
+            imageQuality: 'Balanced',
+            adaptiveQuality: true,
             disableAudio: false
         });
         wireSessionEvents(session);

@@ -87,6 +87,7 @@
     "cancel": "Cancel Request",
     "active_title": "Help Session Active",
     "active_message": "An operator is currently connected to your device.",
+    "end_session": "End Session",
     "error": "Failed to send help request"
   },
   "settings": {

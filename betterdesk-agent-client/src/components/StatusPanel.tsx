@@ -18,6 +18,7 @@ const StatusPanel: Component = () => {
   const [status, setStatus] = createSignal<AgentStatus | null>(null);
   const [loading, setLoading] = createSignal(true);
   const [copyFeedback, setCopyFeedback] = createSignal(false);
+  const [diagFeedback, setDiagFeedback] = createSignal<"" | "ok" | "error">("");
 
   let pollInterval: ReturnType<typeof setInterval>;
 
@@ -58,8 +59,12 @@ const StatusPanel: Component = () => {
   const sendDiagnostics = async () => {
     try {
       await invoke("send_diagnostics");
-      // Show brief success indicator
-    } catch {}
+      setDiagFeedback("ok");
+      setTimeout(() => setDiagFeedback(""), 3000);
+    } catch {
+      setDiagFeedback("error");
+      setTimeout(() => setDiagFeedback(""), 3000);
+    }
   };
 
   const formatUptime = (secs: number): string => {
@@ -102,6 +107,7 @@ const StatusPanel: Component = () => {
                     {copyFeedback() ? "check" : "content_copy"}
                   </span>
                 </button>
+                {copyFeedback() && <span class="form-success">{t("status.id_copied")}</span>}
               </div>
             </div>
 
@@ -146,8 +152,14 @@ const StatusPanel: Component = () => {
               </button>
             )}
             <button class="btn btn-secondary" onClick={sendDiagnostics}>
-              <span class="material-symbols-rounded">bug_report</span>
-              {t("status.send_diagnostics")}
+              <span class="material-symbols-rounded">
+                {diagFeedback() === "ok" ? "check" : diagFeedback() === "error" ? "error" : "bug_report"}
+              </span>
+              {diagFeedback() === "ok"
+                ? t("status.diagnostics_sent")
+                : diagFeedback() === "error"
+                ? t("status.diagnostics_error")
+                : t("status.send_diagnostics")}
             </button>
           </div>
         </>

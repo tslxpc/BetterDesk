@@ -1064,7 +1064,86 @@ class RDClient {
 
         this._lastVideoFrameTime = Date.now();
 
+        // ---- Adaptive Quality ----
+        // Measures decoded FPS and drop rate. Demotes quality under load,
+        // promotes back up when the pipeline is healthy. Avoids the 3-7 FPS
+        // pin that occurred when Best@60 overwhelmed the JMuxer fallback path.
+        if (this.opts.adaptiveQuality !== false) {
+            this._startAdaptiveQuality();
+        }
+
         this._emit('session_start');
+    }
+
+    /**
+     * Adaptive quality monitor.
+     * Tiers (low to high): Low@30 < Balanced@30 < Balanced@45 < Best@45 < Best@60
+     * Demotes after 2 consecutive bad samples, promotes after 3 good.
+     */
+    _startAdaptiveQuality() {
+        const tiers = [
+            { id: 0, quality: 'Low',      fps: 30 },
+            { id: 1, quality: 'Balanced', fps: 30 },
+            { id: 2, quality: 'Balanced', fps: 45 },
+            { id: 3, quality: 'Best',     fps: 45 },
+            { id: 4, quality: 'Best',     fps: 60 }
+        ];
+        // Start near tier 1 (Balanced@30) to match opts
+        let current = 1;
+        let badCount = 0;
+        let goodCount = 0;
+        let lastChange = Date.now();
+
+        const apply = (tier) => {
+            try {
+                this._sendPeerMessage(this.proto.buildOptionMisc({
+                    imageQuality: tier.quality,
+                    customFps: tier.fps
+                }));
+                this._emit('log', '[Adaptive] ' + tier.quality + '@' + tier.fps + 'fps');
+                this._emit('quality_changed', tier.quality + '@' + tier.fps);
+            } catch { /* ignore */ }
+        };
+
+        this._adaptiveInterval = setInterval(() => {
+            if (this._state !== 'streaming') return;
+            const stats = this.video.getStats();
+            const fps = stats.videoFps || 0;
+            const target = tiers[current].fps;
+            const now = Date.now();
+
+            // Grace period after a change
+            if (now - lastChange < 5000) return;
+
+            // Bad sample: measured FPS is less than 60% of target and above zero
+            const bad = fps > 0 && fps < target * 0.6;
+            // Good sample: measured FPS is within 85% of target
+            const good = fps >= target * 0.85;
+
+            if (bad) {
+                badCount++;
+                goodCount = 0;
+                if (badCount >= 2 && current > 0) {
+                    current--;
+                    badCount = 0;
+                    lastChange = now;
+                    apply(tiers[current]);
+                }
+            } else if (good) {
+                goodCount++;
+                badCount = 0;
+                if (goodCount >= 3 && current < tiers.length - 1) {
+                    current++;
+                    goodCount = 0;
+                    lastChange = now;
+                    apply(tiers[current]);
+                }
+            } else {
+                // Neutral sample: decay counters
+                if (badCount > 0) badCount--;
+                if (goodCount > 0) goodCount--;
+            }
+        }, 2000);
     }
 
     // ---- Send Helpers ----
@@ -1128,6 +1207,10 @@ class RDClient {
         if (this._stallCheckInterval) {
             clearInterval(this._stallCheckInterval);
             this._stallCheckInterval = null;
+        }
+        if (this._adaptiveInterval) {
+            clearInterval(this._adaptiveInterval);
+            this._adaptiveInterval = null;
         }
 
         this.input.stop();

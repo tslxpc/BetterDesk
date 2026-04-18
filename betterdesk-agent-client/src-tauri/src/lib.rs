@@ -62,6 +62,7 @@ pub fn run() {
             // Status & lifecycle
             commands::is_os_admin,
             commands::get_agent_status,
+            commands::get_system_info,
             commands::reconnect_agent,
             commands::send_diagnostics,
             commands::get_agent_version,
@@ -113,10 +114,11 @@ pub fn run() {
 ///
 /// Menu layout:
 /// - User items (always visible):    Show ID, Help request, Chat, Check connection
-/// - Admin-gated items (OS admin):   Settings, Quit agent
+/// - Admin-gated items (always visible, checked on click): Settings, Quit agent
 ///
-/// Admin detection is cached at setup time. If privilege status changes
-/// (user elevates mid-session), restart the agent.
+/// All items are always visible in the menu so that admin users who launched
+/// the app without UAC elevation can still see and use Quit / Settings.
+/// Admin membership is re-checked at click time for security.
 fn setup_tray(app: &tauri::AppHandle) -> Result<(), Box<dyn std::error::Error>> {
     use tauri::menu::{MenuBuilder, MenuItemBuilder, PredefinedMenuItem};
     use tauri::tray::TrayIconBuilder;
@@ -130,19 +132,19 @@ fn setup_tray(app: &tauri::AppHandle) -> Result<(), Box<dyn std::error::Error>> 
     let chat = MenuItemBuilder::with_id("chat", "Chat").build(app)?;
     let check = MenuItemBuilder::with_id("check_conn", "Check connection").build(app)?;
 
-    let mut builder = MenuBuilder::new(app)
+    // Admin-gated items — always visible, privilege checked on click.
+    let sep = PredefinedMenuItem::separator(app)?;
+    let settings = MenuItemBuilder::with_id("settings", "Settings").build(app)?;
+    let quit = MenuItemBuilder::with_id("quit", "Quit agent").build(app)?;
+
+    let builder = MenuBuilder::new(app)
         .item(&show_id)
         .item(&help)
         .item(&chat)
-        .item(&check);
-
-    // Admin-only items.
-    if is_admin {
-        let sep = PredefinedMenuItem::separator(app)?;
-        let settings = MenuItemBuilder::with_id("settings", "Settings").build(app)?;
-        let quit = MenuItemBuilder::with_id("quit", "Quit agent").build(app)?;
-        builder = builder.item(&sep).item(&settings).item(&quit);
-    }
+        .item(&check)
+        .item(&sep)
+        .item(&settings)
+        .item(&quit);
 
     let menu = builder.build()?;
 

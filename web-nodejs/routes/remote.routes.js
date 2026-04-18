@@ -63,27 +63,18 @@ router.get('/remote/:deviceId', requireAuth, async (req, res) => {
 });
 
 /**
- * GET /remote-desktop/:deviceId - BetterDesk native JPEG stream viewer
+ * GET /remote-desktop/:deviceId - Legacy route, redirects to unified /remote/:deviceId
+ *
+ * Previously served a separate JPEG stream viewer. The web remote client has
+ * been unified: `/remote/:deviceId` is now the only canonical entry point for
+ * browser-based remote desktop.
  */
-router.get('/remote-desktop/:deviceId', requireAuth, async (req, res) => {
+router.get('/remote-desktop/:deviceId', requireAuth, (req, res) => {
     const deviceId = req.params.deviceId;
-
-    if (!deviceId || !/^[A-Za-z0-9_-]{3,32}$/.test(deviceId)) {
-        return res.redirect('/devices');
+    if (deviceId && /^[A-Za-z0-9_-]{3,32}$/.test(deviceId)) {
+        return res.redirect(`/remote/${encodeURIComponent(deviceId)}`);
     }
-
-    let device = null;
-    try {
-        device = await db.getDevice(deviceId);
-    } catch { /* non-blocking */ }
-
-    res.render('remote-viewer', {
-        title: device?.hostname ? `Remote — ${device.hostname}` : `Remote — ${deviceId}`,
-        activePage: 'remote',
-        deviceId,
-        device: device || { id: deviceId, hostname: '', platform: '', note: '' },
-        layout: false  // remote-viewer.ejs handles its own layout via include()
-    });
+    return res.redirect('/devices');
 });
 
 /**

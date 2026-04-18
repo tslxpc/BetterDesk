@@ -755,7 +755,8 @@ const DeviceDetail = (function () {
             }
         });
         panel.querySelector('#dp-connect-btn')?.addEventListener('click', function () {
-            if (device) window.open('/remote-desktop/' + encodeURIComponent(device.id), '_blank');
+            // Unified web remote client: always /remote/:id
+            if (device) window.open('/remote/' + encodeURIComponent(device.id), '_blank');
         });
 
         // Tabs
@@ -1142,7 +1143,8 @@ const DeviceDetail = (function () {
                 break;
 
             case 'connect-web':
-                window.open('/remote-desktop/' + encodeURIComponent(device.id), '_blank');
+                // Unified web remote client: always /remote/:id
+                window.open('/remote/' + encodeURIComponent(device.id), '_blank');
                 break;
 
             case 'change-id':

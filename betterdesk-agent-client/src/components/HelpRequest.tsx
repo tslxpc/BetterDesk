@@ -1,13 +1,28 @@
-import { Component, createSignal, Show } from "solid-js";
+import { Component, createSignal, Show, onMount, onCleanup } from "solid-js";
 import { invoke } from "@tauri-apps/api/core";
+import { listen, UnlistenFn } from "@tauri-apps/api/event";
+import { useNavigate } from "@solidjs/router";
 import { t } from "../lib/i18n";
 
 type HelpState = "idle" | "sending" | "sent" | "active";
 
 const HelpRequest: Component = () => {
+  const navigate = useNavigate();
   const [state, setState] = createSignal<HelpState>("idle");
   const [message, setMessage] = createSignal("");
   const [error, setError] = createSignal("");
+
+  let unlisten: UnlistenFn | undefined;
+
+  onMount(async () => {
+    unlisten = await listen("help-session-active", () => {
+      setState("active");
+    });
+  });
+
+  onCleanup(() => {
+    unlisten?.();
+  });
 
   const sendRequest = async () => {
     setState("sending");
@@ -85,6 +100,16 @@ const HelpRequest: Component = () => {
           <span class="material-symbols-rounded">person</span>
           <h3>{t("help.active_title")}</h3>
           <p>{t("help.active_message")}</p>
+          <div class="status-actions">
+            <button class="btn btn-primary" onClick={() => navigate("/chat")}>
+              <span class="material-symbols-rounded">chat</span>
+              {t("sidebar.chat")}
+            </button>
+            <button class="btn btn-danger" onClick={() => { cancelRequest(); setState("idle"); }}>
+              <span class="material-symbols-rounded">call_end</span>
+              {t("help.end_session")}
+            </button>
+          </div>
         </div>
       </Show>
     </div>

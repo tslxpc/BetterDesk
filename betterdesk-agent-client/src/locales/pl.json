@@ -87,6 +87,7 @@
     "cancel": "Anuluj prośbę",
     "active_title": "Sesja pomocy aktywna",
     "active_message": "Operator jest aktualnie połączony z Twoim urządzeniem.",
+    "end_session": "Zakończ sesję",
     "error": "Nie udało się wysłać prośby o pomoc"
   },
   "settings": {

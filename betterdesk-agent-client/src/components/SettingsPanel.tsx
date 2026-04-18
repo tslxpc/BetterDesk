@@ -1,6 +1,6 @@
 import { Component, createSignal, onMount, Show } from "solid-js";
 import { invoke } from "@tauri-apps/api/core";
-import { t, setLocale, getLocale, getAvailableLocales } from "../lib/i18n";
+import { t, setLocale, getLocale, getAvailableLocales, getLocaleDisplayName } from "../lib/i18n";
 
 interface AgentSettings {
   server_address: string;
@@ -165,7 +165,7 @@ const SettingsPanel: Component = () => {
             onChange={(e) => updateSetting("language", e.currentTarget.value)}
           >
             {getAvailableLocales().map((loc) => (
-              <option value={loc}>{loc === "en" ? "English" : loc === "pl" ? "Polski" : loc}</option>
+              <option value={loc}>{getLocaleDisplayName(loc)}</option>
             ))}
           </select>
         </div>

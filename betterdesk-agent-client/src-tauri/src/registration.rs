@@ -51,6 +51,7 @@ pub struct ValidationResult {
 
 /// Registration response from the server.
 #[derive(Debug, Deserialize)]
+#[allow(dead_code)]
 struct RegisterResponse {
     #[serde(default)]
     device_id: String,
@@ -60,30 +61,86 @@ struct RegisterResponse {
 
 /// Sync response from the server.
 #[derive(Debug, Deserialize)]
+#[allow(dead_code)]
 struct SyncResponse {
     #[serde(default)]
     status: String,
 }
 
+/// Resolved scheme cache — once we discover the right scheme for a server,
+/// we keep it for the lifetime of the process.
+static RESOLVED_SCHEME: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+
 /// Build the base API URL from a server address string.
+/// Uses the resolved scheme if already probed, otherwise defaults to http.
 fn build_api_url(address: &str) -> Result<String> {
+    build_api_url_with_scheme(address, RESOLVED_SCHEME.get().map(|s| s.as_str()))
+}
+
+/// Build with an explicit scheme override (used during probing).
+fn build_api_url_with_scheme(address: &str, scheme_override: Option<&str>) -> Result<String> {
     let addr = address.trim();
 
-    // If no scheme, prepend http://
-    let with_scheme = if addr.starts_with("http://") || addr.starts_with("https://") {
-        addr.to_string()
-    } else {
-        format!("http://{}", addr)
-    };
+    // Strip scheme if user typed it (we manage scheme ourselves).
+    let bare = addr
+        .trim_start_matches("https://")
+        .trim_start_matches("http://");
 
+    let with_scheme = format!("http://{}", bare);
     let parsed = Url::parse(&with_scheme).map_err(|e| anyhow!("Invalid URL: {}", e))?;
 
-    // Default port is 21114 (API port)
     let host = parsed.host_str().ok_or_else(|| anyhow!("No host in URL"))?;
     let port = parsed.port().unwrap_or(21114);
-    let scheme = parsed.scheme();
+
+    let scheme = match scheme_override {
+        Some(s) => s,
+        None => "http",
+    };
 
     Ok(format!("{}://{}:{}/api", scheme, host, port))
+}
+
+/// Probe the server to find whether it speaks HTTPS or HTTP.
+/// Tries HTTPS first (self-signed accepted), falls back to HTTP.
+async fn probe_server_scheme(address: &str) -> String {
+    // If already resolved, return cached.
+    if let Some(s) = RESOLVED_SCHEME.get() {
+        return s.clone();
+    }
+
+    let probe_url = |scheme: &str| -> Result<String> {
+        let url = build_api_url_with_scheme(address, Some(scheme))?;
+        Ok(format!("{}/server/stats", url))
+    };
+
+    // Try HTTPS first.
+    if let Ok(url) = probe_url("https") {
+        if let Ok(client) = build_http_client(5) {
+            if let Ok(resp) = client.get(&url).send().await {
+                if resp.status().is_success() || resp.status().is_client_error() {
+                    info!("Server responds on HTTPS — using secure connection");
+                    let _ = RESOLVED_SCHEME.set("https".to_string());
+                    return "https".to_string();
+                }
+            }
+        }
+    }
+
+    // Fall back to HTTP.
+    if let Ok(url) = probe_url("http") {
+        if let Ok(client) = build_http_client(5) {
+            if let Ok(resp) = client.get(&url).send().await {
+                if resp.status().is_success() || resp.status().is_client_error() {
+                    info!("Server responds on HTTP — using plain connection");
+                    let _ = RESOLVED_SCHEME.set("http".to_string());
+                    return "http".to_string();
+                }
+            }
+        }
+    }
+
+    // Default to http if neither probe succeeded (will fail properly later).
+    "http".to_string()
 }
 
 /// Validate a single step of the server connection.
@@ -111,8 +168,12 @@ pub async fn validate_step(address: &str, step_key: &str) -> ValidationResult {
 }
 
 /// Step 1: Check if the server is reachable.
+/// Also probes HTTPS vs HTTP and caches the result.
 async fn check_availability(address: &str) -> Result<String> {
-    let api_url = build_api_url(address)?;
+    // Probe scheme (HTTPS first, then HTTP) and cache.
+    let scheme = probe_server_scheme(address).await;
+
+    let api_url = build_api_url_with_scheme(address, Some(&scheme))?;
     let url = format!("{}/server/stats", api_url);
 
     let client = build_http_client(8)?;
@@ -122,7 +183,8 @@ async fn check_availability(address: &str) -> Result<String> {
     })?;
 
     if resp.status().is_success() {
-        Ok("Server is reachable".to_string())
+        let proto = if scheme == "https" { " (HTTPS)" } else { "" };
+        Ok(format!("Server is reachable{}", proto))
     } else {
         Err(anyhow!("Server returned status {}", resp.status()))
     }
